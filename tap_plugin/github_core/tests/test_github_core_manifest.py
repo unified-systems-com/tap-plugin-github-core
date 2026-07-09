@@ -1,10 +1,16 @@
 """Structural + loads validation tests for the github_core plugin."""
 
-from pathlib import Path
+import pytest
 
+from tap.plugin_testing import find_plugin_source_root
 from tap_plugins.validate.service import validate_plugin
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_ROOT = find_plugin_source_root(__file__)
+
+pytestmark = pytest.mark.skipif(
+    PLUGIN_ROOT is None,
+    reason="source-layout validation needs the plugin source tree; installed as a wheel here (delegated to the plugin repo's own build).",
+)
 
 
 class TestStructure:

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import jsonschema
 import pytest
-
 from tap_plugin.github_core.collectors.github_collector.identity import (
     account_id,
     edge_id,
@@ -49,13 +48,17 @@ class TestManifests:
         edge_types = {r["edge_type"] for r in manifest["rules"]}
         # YAML-ref rules emit REFERENCES_RESOURCE; the structural OIDC rule emits
         # FEDERATES_VIA (repo -> aws_iam_oidc_provider); the issuer-convergence
-        # rule emits TRUSTS_ISSUER (aws_iam_oidc_provider -> oidc_issuer).
-        assert edge_types == {"REFERENCES_RESOURCE__github_core", "FEDERATES_VIA__github_core", "TRUSTS_ISSUER__github_core"}
+        # rule emits TRUSTS_ISSUER (aws_iam_oidc_provider -> identity_core__oidc_issuer),
+        # the generic identity_core-owned edge type this github enrichment rule emits.
+        assert edge_types == {
+            "REFERENCES_RESOURCE__github_core",
+            "FEDERATES_VIA__github_core",
+            "TRUSTS_ISSUER__identity_core",
+        }
 
     def test_link_manifest_oneof_source_enforced(self) -> None:
         """Schema must reject rules with both source_field_path and source_constant."""
         import jsonschema
-
         from tap_plugin.github_core.collectors.github_collector.manifest import (
             LINK_MANIFEST_SCHEMA_PATH,
         )
@@ -267,6 +270,7 @@ class TestSelfTest:
 
     def test_unconfigured_when_secret_missing(self, monkeypatch) -> None:
         from tap_plugin.github_core.collectors.github_collector import collector as mod
+
         from tap_cares.exceptions import SecretNotFoundError
 
         def _raise(_ref):
@@ -280,6 +284,7 @@ class TestSelfTest:
 
     def test_misconfigured_when_secret_schema_fails(self, monkeypatch) -> None:
         from tap_plugin.github_core.collectors.github_collector import collector as mod
+
         from tap_cares.exceptions import SecretValidationError
 
         def _raise(_ref):
@@ -296,6 +301,7 @@ class TestSelfTest:
         whole picture, not just the first broken thing."""
         from tap_plugin.github_core.collectors.github_collector import collector as mod
         from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+
         from tap_cares.secrets.models import Secret, SecretRef
 
         def _good_secret(_ref):
