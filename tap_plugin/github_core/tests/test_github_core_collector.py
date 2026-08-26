@@ -470,3 +470,26 @@ class TestAccountScope:
         assert codes["GITHUB_OWNER_ACCESS:o"] is False
         assert not [k for k in codes if k.startswith("GITHUB_REPO_ACCESS:")]
         assert calls == ["/rate_limit", "/orgs/o/repos"]
+
+
+class TestEnrichmentDegrade:
+    def test_rule_with_uninstalled_target_type_is_skipped_not_fatal(self, monkeypatch) -> None:
+        """req-github-core-grid-links-8: a composition without the target plugin (git-serious
+        without aws_core) still enriches what it can and records what it skipped."""
+        from tap_plugin.github_core.collectors.github_collector import enrichment as mod
+
+        monkeypatch.setattr("tap_grid.registry.list_entity_types", lambda: ["github_core__github_repository", "github_core__github_workflow"])
+        calls: list[str] = []
+        monkeypatch.setattr(mod, "_fetch_source_nodes", lambda *a, **k: calls.append("fetched") or [])
+        manifest = {"rules": [
+            {"name": "to-aws", "source_entity_type": "github_core__github_workflow", "target_entity_type": "aws_core__aws_route53_zone",
+             "target_field": "name", "edge_type": "REFERENCES_RESOURCE", "source_field": "x"},
+            {"name": "from-aws", "source_entity_type": "aws_core__aws_iam_oidc_provider", "target_entity_type": "github_core__github_repository",
+             "target_field": "name", "edge_type": "TRUSTS_ISSUER", "source_field": "x"},
+            {"name": "to-repo", "source_entity_type": "github_core__github_workflow", "target_entity_type": "github_core__github_repository",
+             "target_field": "name", "edge_type": "REFERENCES_RESOURCE", "source_field": "x"},
+        ]}
+        result = mod.resolve_links(link_manifest=manifest, repos=["o/r"], edge_default_dimensions={})
+        assert [(r.rule_name, r.missing_entity_type) for r in result.skipped_rules] == [
+            ("to-aws", "aws_core__aws_route53_zone"), ("from-aws", "aws_core__aws_iam_oidc_provider")]
+        assert calls == ["fetched"]  # only the installed-target rule was evaluated

@@ -66,10 +66,26 @@ class NearMatch:
 
 
 @dataclass
+class SkippedRule:
+    """A link rule not evaluated because its target vocabulary is not installed.
+
+    The link manifest reaches into other plugins' types on either end of a rule (aws_core's
+    zones, regions, distributions, OIDC providers). A deployment that composes github_core WITHOUT that
+    plugin — git-serious standing alone — must still enrich what it can and say what it
+    could not, rather than abort on Gryphon's "unknown entity type"
+    (req-github-core-grid-links-8).
+    """
+
+    rule_name: str
+    missing_entity_type: str
+
+
+@dataclass
 class EnrichmentResult:
     edge_envelopes: list[dict[str, Any]] = field(default_factory=list)
     resolutions: list[LinkResolution] = field(default_factory=list)
     near_matches: list[NearMatch] = field(default_factory=list)
+    skipped_rules: list[SkippedRule] = field(default_factory=list)
 
 
 def resolve_links(
@@ -80,7 +96,16 @@ def resolve_links(
 ) -> EnrichmentResult:
     """Evaluate every rule against landed github_core nodes for each repo."""
     result = EnrichmentResult()
+    from tap_grid.registry import list_entity_types
+
+    registered = set(list_entity_types())
     for rule in link_manifest.get("rules", []):
+        missing = next((t for t in (rule["source_entity_type"], rule["target_entity_type"]) if t not in registered), None)
+        if missing is not None:
+            # Degrade, never abort: a plugin on either end of the rule is simply not part
+            # of this composition. Recorded so the run says which links it could not attempt.
+            result.skipped_rules.append(SkippedRule(rule["name"], missing))
+            continue
         source_nodes = _fetch_source_nodes(rule["source_entity_type"], repos)
         near_match_pattern = rule.get("near_match_pattern")
         for source_node in source_nodes:

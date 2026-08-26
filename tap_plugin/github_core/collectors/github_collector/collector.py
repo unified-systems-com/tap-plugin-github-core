@@ -76,6 +76,7 @@ _SITE_DEPENDABOT_APP = "a7c1"
 _SITE_SCOPE_ENUMERATED = "462a"
 _SITE_ABORT_SCOPE = "8d47"
 _SITE_FILTER_UNMATCHED = "d087"
+_SITE_LINK_RULE_SKIPPED = "1cb8"
 
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
 # list under synthetic ``dynamic/<app>/...`` paths. These are not repo CI
@@ -907,13 +908,22 @@ class GithubCollector(CollectorBase):
         zero = sum(1 for r in enrichment.resolutions if r.candidate_count == 0)
         multi = sum(1 for r in enrichment.resolutions if r.candidate_count > 1)
         near = len(enrichment.near_matches)
+        skipped = len(enrichment.skipped_rules)
         self.record_info(
             _SITE_ENRICHMENT_SUMMARY,
             "ENRICHMENT_SUMMARY",
             f"Link resolution: {emitted} edge(s) emitted, "
             f"{zero} zero-candidate, {multi} multi-candidate, "
-            f"{near} near-match warning(s).",
+            f"{near} near-match warning(s), {skipped} rule(s) skipped (target vocabulary not installed).",
         )
+        for rule in enrichment.skipped_rules:
+            self.record_warn(
+                _SITE_LINK_RULE_SKIPPED,
+                "LINK_RULE_SKIPPED",
+                f"Link rule {rule.rule_name!r} skipped: type {rule.missing_entity_type!r} is not "
+                f"installed in this composition (req-github-core-grid-links-8).",
+                message_data={"rule": rule.rule_name, "missing_entity_type": rule.missing_entity_type},
+            )
         # Multi-candidate failures are warnings per req-github-core-grid-links-3.
         for res in enrichment.resolutions:
             if res.candidate_count > 1:
