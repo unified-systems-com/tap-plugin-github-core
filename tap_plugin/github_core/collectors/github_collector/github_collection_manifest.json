@@ -1,22 +1,54 @@
 {
   "manifest_version": "0",
-  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest.",
+  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed.",
   "api_base_url": "https://api.github.com",
   "sources": [
+    {
+      "name": "owner_repos",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}/repos",
+      "fallback_path": "/users/{owner}/repos",
+      "query": {
+        "type": "all",
+        "per_page": "100"
+      },
+      "item_path": "[*]",
+      "target_entity_type": "github_core__github_repository",
+      "fields": [
+        "full_name"
+      ],
+      "permission": "Metadata: read",
+      "description": "Scope enumeration (req-github-core-org-scope): every repository under the envelope's `owner` (org first, user on 404), paginated to the end of the Link chain; the run records the count and whether the walk was complete. Skipped when the envelope is repos-only."
+    },
     {
       "name": "account",
       "kind": "rest_endpoint",
       "path": "/users/{owner}",
       "fallback_path": "/orgs/{owner}",
       "target_entity_type": "github_core__github_account",
-      "fields": ["login", "github_id", "account_type", "html_url"]
+      "fields": [
+        "login",
+        "github_id",
+        "account_type",
+        "html_url"
+      ],
+      "permission": "Metadata: read"
     },
     {
       "name": "repository",
       "kind": "rest_endpoint",
       "path": "/repos/{owner}/{repo}",
       "target_entity_type": "github_core__github_repository",
-      "fields": ["full_name", "owner_login", "name", "github_id", "default_branch", "visibility", "html_url"]
+      "fields": [
+        "full_name",
+        "owner_login",
+        "name",
+        "github_id",
+        "default_branch",
+        "visibility",
+        "html_url"
+      ],
+      "permission": "Metadata: read"
     },
     {
       "name": "workflows",
@@ -24,23 +56,45 @@
       "path": "/repos/{owner}/{repo}/actions/workflows",
       "item_path": "workflows[*]",
       "target_entity_type": "github_core__github_workflow",
-      "fields": ["workflow_id", "path", "name", "state", "html_url"]
+      "fields": [
+        "workflow_id",
+        "path",
+        "name",
+        "state",
+        "html_url"
+      ],
+      "permission": "Actions: read"
     },
     {
       "name": "workflow_yaml",
       "kind": "repo_file",
       "path_pattern": ".github/workflows/{file}",
       "target_field": "github_workflow.configuration.raw_yaml",
-      "description": "Fetched via GET /repos/{owner}/{repo}/contents/{path}; base64-decoded inline; in-memory only (req-github-core-workflow-parse-5)."
+      "description": "Fetched via GET /repos/{owner}/{repo}/contents/{path}; base64-decoded inline; in-memory only (req-github-core-workflow-parse-5).",
+      "permission": "Contents: read"
     },
     {
       "name": "runs",
       "kind": "rest_endpoint",
       "path": "/repos/{owner}/{repo}/actions/runs",
-      "query": {"per_page": "{initial_run_limit}"},
+      "query": {
+        "per_page": "{initial_run_limit}"
+      },
       "item_path": "workflow_runs[*]",
       "target_entity_type": "github_core__github_actions_run",
-      "fields": ["run_id", "run_number", "event", "status", "conclusion", "head_sha", "head_branch", "run_started_at", "completed_at", "html_url"]
+      "fields": [
+        "run_id",
+        "run_number",
+        "event",
+        "status",
+        "conclusion",
+        "head_sha",
+        "head_branch",
+        "run_started_at",
+        "completed_at",
+        "html_url"
+      ],
+      "permission": "Actions: read"
     },
     {
       "name": "jobs",
@@ -48,8 +102,17 @@
       "path": "/repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
       "item_path": "jobs[*]",
       "target_entity_type": "github_core__github_actions_job",
-      "fields": ["job_id", "name", "status", "conclusion", "started_at", "completed_at", "html_url"],
-      "description": "Default endpoint returns latest-attempt jobs only (req-github-core-collector-8). /attempts/{n}/jobs is backlog (req-github-core-backlog-run-attempts)."
+      "fields": [
+        "job_id",
+        "name",
+        "status",
+        "conclusion",
+        "started_at",
+        "completed_at",
+        "html_url"
+      ],
+      "description": "Default endpoint returns latest-attempt jobs only (req-github-core-collector-8). /attempts/{n}/jobs is backlog (req-github-core-backlog-run-attempts).",
+      "permission": "Actions: read"
     },
     {
       "name": "runners",
@@ -57,16 +120,45 @@
       "path": "/repos/{owner}/{repo}/actions/runners",
       "item_path": "runners[*]",
       "target_entity_type": "github_core__github_runner",
-      "fields": ["runner_id", "name", "os", "status", "busy", "labels"],
+      "fields": [
+        "runner_id",
+        "name",
+        "os",
+        "status",
+        "busy",
+        "labels"
+      ],
       "permission_failure": "degrade_with_warning",
-      "description": "Requires repo administration scope on the PAT; degrades gracefully on 403 (req-github-core-collector-5)."
+      "description": "Requires repo administration scope on the PAT; degrades gracefully on 403 (req-github-core-collector-5).",
+      "permission": "Administration: read"
     }
   ],
   "edges": [
-    {"slug": "OWNS_REPO__github_core", "source": "github_core__github_account", "target": "github_core__github_repository"},
-    {"slug": "DEFINES_WORKFLOW__github_core", "source": "github_core__github_repository", "target": "github_core__github_workflow"},
-    {"slug": "EXECUTES_WORKFLOW__github_core", "source": "github_core__github_actions_run", "target": "github_core__github_workflow"},
-    {"slug": "HAS_ACTIONS_JOB__github_core", "source": "github_core__github_actions_run", "target": "github_core__github_actions_job"},
-    {"slug": "EXECUTED_ON__github_core", "source": "github_core__github_actions_job", "target": "github_core__github_runner", "condition": "job.runner_id matches runner.runner_id"}
+    {
+      "slug": "OWNS_REPO__github_core",
+      "source": "github_core__github_account",
+      "target": "github_core__github_repository"
+    },
+    {
+      "slug": "DEFINES_WORKFLOW__github_core",
+      "source": "github_core__github_repository",
+      "target": "github_core__github_workflow"
+    },
+    {
+      "slug": "EXECUTES_WORKFLOW__github_core",
+      "source": "github_core__github_actions_run",
+      "target": "github_core__github_workflow"
+    },
+    {
+      "slug": "HAS_ACTIONS_JOB__github_core",
+      "source": "github_core__github_actions_run",
+      "target": "github_core__github_actions_job"
+    },
+    {
+      "slug": "EXECUTED_ON__github_core",
+      "source": "github_core__github_actions_job",
+      "target": "github_core__github_runner",
+      "condition": "job.runner_id matches runner.runner_id"
+    }
   ]
 }

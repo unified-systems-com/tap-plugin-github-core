@@ -116,6 +116,31 @@ class TestPATSchema:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"repos": ["notgeorge/samsite"]}, GITHUB_PAT_SCHEMA)
 
+    def test_pat_owner_only_valid(self) -> None:
+        """req-github-core-org-scope: an account scope needs no repo list."""
+        jsonschema.validate({"token": "ghp_x", "owner": "unified-systems-com"}, GITHUB_PAT_SCHEMA)
+
+    def test_pat_owner_with_repos_filter_valid(self) -> None:
+        jsonschema.validate(
+            {"token": "ghp_x", "owner": "unified-systems-com", "repos": ["unified-systems-com/tap"]},
+            GITHUB_PAT_SCHEMA,
+        )
+
+    def test_pat_neither_owner_nor_repos_rejected(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"token": "ghp_x"}, GITHUB_PAT_SCHEMA)
+
+    def test_pat_malformed_owner_rejected(self) -> None:
+        for bad in ("", "-leading", "has/slash", "trailing-"):
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate({"token": "ghp_x", "owner": bad}, GITHUB_PAT_SCHEMA)
+
+    def test_every_schema_field_is_described(self) -> None:
+        """House rule: JSON structures carry descriptions — top level and every property."""
+        assert GITHUB_PAT_SCHEMA["description"]
+        for name, prop in GITHUB_PAT_SCHEMA["properties"].items():
+            assert prop.get("description"), f"{name} has no description"
+
     def test_pat_empty_repos_rejected(self) -> None:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"token": "ghp_x", "repos": []}, GITHUB_PAT_SCHEMA)
@@ -336,3 +361,112 @@ class TestSelfTest:
         # check message so an operator can act on it without reading code.
         bad_check = next(c for c in result.checks if c.code == "GITHUB_REPO_ACCESS:bad/repo")
         assert "bad/repo" in bad_check.message
+
+
+class TestAccountScope:
+    """req-github-core-org-scope: the account's repositories are enumerated, filtered, and
+    the enumeration recorded on the run — including whether the walk was complete."""
+
+    @staticmethod
+    def _collector():
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        c = GithubCollector.__new__(GithubCollector)  # no CollectorConfig needed for scope resolution
+        c.results = {"info": [], "warn": [], "error": []}
+        return c
+
+    class _Client:
+        def __init__(self, org_repos=None, user_repos=None, complete=True):
+            self.org_repos, self.user_repos, self.complete = org_repos, user_repos, complete
+            self.calls: list[str] = []
+            self.last_walk_complete = True
+
+        def get_paginated(self, path, *, params=None, item_path=None, max_pages=100):
+            from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+
+            self.calls.append(path)
+            if path.startswith("/orgs/"):
+                if self.org_repos is None:
+                    raise GithubAPIError(status=404, url=path, body='{"message":"Not Found"}')
+                self.last_walk_complete = self.complete
+                return [{"full_name": n} for n in self.org_repos]
+            if path.startswith("/users/"):
+                self.last_walk_complete = self.complete
+                return [{"full_name": n} for n in (self.user_repos or [])]
+            raise AssertionError(path)
+
+    def test_repos_only_is_the_degenerate_scope(self) -> None:
+        c = self._collector()
+        client = self._Client(org_repos=["x/should-not-be-touched"])
+        assert c._resolve_repos(client, None, ["notgeorge/samsite"]) == ["notgeorge/samsite"]
+        assert client.calls == [] and c.results["info"] == []
+
+    def test_org_enumerated_and_recorded(self) -> None:
+        c = self._collector()
+        client = self._Client(org_repos=["o/a", "o/b", "o/c"])
+        assert c._resolve_repos(client, "o", []) == ["o/a", "o/b", "o/c"]
+        assert client.calls == ["/orgs/o/repos"]
+        (event,) = c.results["info"]
+        assert event["message_code"] == "SCOPE_ENUMERATED"
+        assert event["message_data"] == {
+            "owner": "o", "account_kind": "org", "enumerated": 3, "collecting": 3, "filtered": False, "complete": True,
+        }
+
+    def test_user_fallback_on_org_404(self) -> None:
+        c = self._collector()
+        client = self._Client(org_repos=None, user_repos=["u/one"])
+        assert c._resolve_repos(client, "u", []) == ["u/one"]
+        assert client.calls == ["/orgs/u/repos", "/users/u/repos"]
+        assert c.results["info"][0]["message_data"]["account_kind"] == "user"
+
+    def test_repos_filter_over_enumeration_with_unmatched_warning(self) -> None:
+        c = self._collector()
+        client = self._Client(org_repos=["o/a", "o/b"])
+        assert c._resolve_repos(client, "o", ["o/b", "o/zzz"]) == ["o/b"]
+        (warn,) = c.results["warn"]
+        assert warn["message_code"] == "SCOPE_FILTER_UNMATCHED" and warn["message_data"]["unmatched"] == ["o/zzz"]
+        assert c.results["info"][0]["message_data"]["filtered"] is True
+
+    def test_incomplete_walk_is_labelled_not_hidden(self) -> None:
+        c = self._collector()
+        client = self._Client(org_repos=["o/a"], complete=False)
+        c._resolve_repos(client, "o", [])
+        event = c.results["info"][0]
+        assert event["message_data"]["complete"] is False and "INCOMPLETE" in event["message"]
+
+    def test_self_test_owner_access_bounded_to_one_walk(self, monkeypatch) -> None:
+        """Account-scoped self-test proves enumeration with ONE listing walk (no per-repo probes)."""
+        from tap_plugin.github_core.collectors.github_collector import collector as mod
+
+        from tap_cares.secrets.models import Secret, SecretRef
+
+        def _secret(_ref):
+            return Secret(
+                ref=SecretRef(scope="github_core", key="collector"), kind="github_pat", description="t",
+                data={"token": "ghp_x", "owner": "o"}, source_path="/test", metadata={},
+            )
+
+        calls: list[str] = []
+
+        class _Stub:
+            last_walk_complete = True
+
+            def __init__(self, **kwargs):
+                pass
+
+            def get(self, path, **_):
+                calls.append(path)
+                return {"rate": {"limit": 5000, "used": 1}}
+
+            def get_paginated(self, path, **_):
+                calls.append(path)
+                return [{"full_name": "o/a"}, {"full_name": "o/b"}]
+
+        monkeypatch.setattr(mod, "resolve_github_secret", _secret)
+        monkeypatch.setattr(mod, "GithubClient", _Stub)
+        result = mod.GithubCollector.self_test()
+        assert result.runnable, [c.message for c in result.checks]
+        codes = {c.code: c.is_failure for c in result.checks}
+        assert codes["GITHUB_OWNER_ACCESS:o"] is False
+        assert not [k for k in codes if k.startswith("GITHUB_REPO_ACCESS:")]
+        assert calls == ["/rate_limit", "/orgs/o/repos"]

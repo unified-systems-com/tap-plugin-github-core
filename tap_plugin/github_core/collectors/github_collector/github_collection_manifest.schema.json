@@ -3,31 +3,90 @@
   "title": "github_core Collection Manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["manifest_version", "sources", "edges"],
+  "required": [
+    "manifest_version",
+    "sources",
+    "edges"
+  ],
   "properties": {
-    "manifest_version": {"type": "string", "enum": ["0"]},
-    "description": {"type": "string"},
-    "api_base_url": {"type": "string"},
+    "manifest_version": {
+      "type": "string",
+      "enum": [
+        "0"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "api_base_url": {
+      "type": "string"
+    },
     "sources": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "kind"],
+        "required": [
+          "name",
+          "kind"
+        ],
         "properties": {
-          "name": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["rest_endpoint", "repo_file", "custom_fn"]},
-          "path": {"type": "string"},
-          "path_pattern": {"type": "string"},
-          "fallback_path": {"type": "string"},
-          "query": {"type": "object", "additionalProperties": {"type": "string"}},
-          "item_path": {"type": "string"},
-          "target_entity_type": {"type": "string"},
-          "target_field": {"type": "string"},
-          "fields": {"type": "array", "items": {"type": "string"}},
-          "permission_failure": {"enum": ["abort", "degrade_with_warning"]},
-          "description": {"type": "string"}
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": [
+              "rest_endpoint",
+              "repo_file",
+              "custom_fn"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "path_pattern": {
+            "type": "string"
+          },
+          "fallback_path": {
+            "type": "string"
+          },
+          "query": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "item_path": {
+            "type": "string"
+          },
+          "target_entity_type": {
+            "type": "string"
+          },
+          "target_field": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "permission_failure": {
+            "enum": [
+              "abort",
+              "degrade_with_warning"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "permission": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The fine-grained PAT permission this source requires, as GitHub names it (e.g. `Actions: read`). The least-privilege set for the credential is the union over sources \u2014 derived, never restated."
+          }
         }
       }
     },
@@ -36,12 +95,25 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["slug", "source", "target"],
+        "required": [
+          "slug",
+          "source",
+          "target"
+        ],
         "properties": {
-          "slug": {"type": "string", "pattern": "^[A-Z][A-Z_]+__[a-z0-9_]+$"},
-          "source": {"type": "string"},
-          "target": {"type": "string"},
-          "condition": {"type": "string"}
+          "slug": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]+__[a-z0-9_]+$"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          }
         }
       }
     }

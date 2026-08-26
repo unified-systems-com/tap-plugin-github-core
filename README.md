@@ -1,6 +1,6 @@
 # TAP GitHub Core
 
-GitHub Actions deployment-plumbing models for the samsite demo path.
+GitHub Actions deployment-plumbing models and the GitHub collector — account-scoped (an org or user's repositories, enumerated) or an explicit repo list.
 
 ## What This Plugin Owns
 
@@ -10,7 +10,8 @@ GitHub Actions deployment-plumbing models for the samsite demo path.
   `HAS_ACTIONS_JOB`, `EXECUTED_ON`, `REFERENCES_RESOURCE`
 - `github_pat` secret kind (PAT credential validation)
 - `GitHubCollector` — `CollectorBase` subclass; two-phase run (collection +
-  link enrichment) against the configured `repos` list
+  link enrichment) against the configured scope: `owner` (enumerated; `repos` as an
+  optional include-filter) or a `repos`-only list (`req-github-core-org-scope`)
 - Workflow YAML parser (`.github/workflows/*.yml|*.yaml`) using `PyYAML`
 
 ## What This Plugin Does Not Own
@@ -24,10 +25,11 @@ GitHub Actions deployment-plumbing models for the samsite demo path.
 - Multi-attempt run observation (deferred — see backlog requirement
   `req-github-core-backlog-run-attempts`)
 
-## v0 Target
+## Targets
 
-`notgeorge/samsite` — Sam's site cloned into the dev's own GitHub + AWS
-accounts, per `plan/road-rampart.md` step `step-rampart-sam-demo`.
+- **git-serious** (`unified-systems-com`, account scope) — the product that pulls this plugin
+  toward org-level collection; see `req-github-core-org-scope`.
+- `notgeorge/samsite` (repo-list scope) — the original demo target, still supported unchanged.
 
 ## Read First
 

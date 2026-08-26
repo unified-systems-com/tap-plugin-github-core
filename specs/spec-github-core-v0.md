@@ -66,7 +66,8 @@ surface and takes only the Actions plumbing path needed for samsite.
 
 | RID | Name | Status | Notes |
 | --- | --- | :---: | --- |
-| req-github-core-scope | [Plugin Scope](#plugin-scope) | Implemented | v0 is GitHub Actions deployment plumbing for `notgeorge/samsite` |
+| req-github-core-scope | [Plugin Scope](#plugin-scope) | Implemented | Actions plumbing for a configured scope: an account (org/user, enumerated — `req-github-core-org-scope`) or an explicit repo list |
+| req-github-core-org-scope | [Account Scope](#account-scope) | Implemented | 2026-08-26 (pulled by git-serious): the envelope names an `owner`; the collector enumerates its repositories (org, user fallback), `repos` becomes an optional include-filter, and the run records the enumeration incl. walk completeness. Repos-only envelopes remain valid as the degenerate run config |
 | req-github-core-models | [Model Set](#model-set) | Implemented | account/repo/workflow/run/job/runner (0001) + synthesized `github_platform` (0002) — seven tables. `oidc_issuer` was extracted to the `identity_core` substrate plugin (dropped here in 0004); github still mints the issuer node via `identity_core.issuer`. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
@@ -90,17 +91,57 @@ RID: `req-github-core-scope`
 Status: `Implemented`
 
 `github_core` models GitHub platform objects that matter to deployment and
-compliance plumbing. v0 targets `notgeorge/samsite` and does not attempt to
-inventory every repository, organization setting, issue, pull request, or
-permission surface.
+compliance plumbing. The target is a configured scope — an account whose
+repositories the collector enumerates (`req-github-core-org-scope`), or an
+explicit repo list (the original `notgeorge/samsite` shape). It does not attempt
+to inventory every organization setting, issue, pull request, or permission
+surface; those arrive as further manifest sources behind the same scope.
 
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-scope-1 | Target Repo | Implemented | The v0 collector target is configured as `notgeorge/samsite`. | Via the `github_pat` secret `repos` array. |
+| req-github-core-scope-1 | Target Scope | Implemented | The collector target is configured in the `github_pat` envelope: an `owner` (account scope, enumerated) and/or an explicit `repos` list. | Was `notgeorge/samsite` by repo list; account scope added 2026-08-26 (`req-github-core-org-scope`). |
 | req-github-core-scope-2 | Actions Plumbing Focus | Implemented | v0 focuses on repository, workflow, run, job, and runner data needed to explain deployment flow. | Variables and secret references are deferred (`req-github-core-backlog-references`). |
 | req-github-core-scope-3 | No Broad Introspection | Implemented | Full GitHub account/org/repo introspection is deferred. | Collector touches only the documented endpoints; no broad walk. |
+
+### Account Scope
+----
+RID: `req-github-core-org-scope`
+Status: `Implemented`
+
+Pulled by git-serious (git-serious-tap#17, 2026-08-26): a product that observes an
+organization's CI/CD must not hardcode the repositories it pulls. The collector's
+scope is therefore an **account** — the `owner` login of a GitHub organization or
+user — and the collector enumerates that account's repositories itself
+(`GET /orgs/{owner}/repos?type=all`, falling back to `GET /users/{owner}/repos` on
+404, paginated to the end of the Link chain). An explicit `repos` list, when present
+alongside `owner`, is an include-filter over the enumeration; without `owner` it is
+the scope itself. That second form is the **degenerate run config** — the same code
+path with a fixed list, never a parallel path (the tap#142 ruling).
+
+Two edges laid while the surface is open:
+
+- **The run records its enumeration.** Absence must be proven, not inferred
+  (tap#140): before a future reconcile can tombstone what is gone, a run has to
+  assert it completely enumerated a scope. `SCOPE_ENUMERATED` carries the owner,
+  account kind, counts, whether a filter applied, and `complete` — false when the
+  paginated walk stopped at the page cap with a next link pending.
+- **Every manifest source declares the PAT permission it needs**
+  (`permission`, e.g. `Actions: read`), so the least-privilege permission set for the
+  credential is derived as the union over sources by the provisioning skill, never
+  hand-listed.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-org-scope-1 | Account Enumeration | Implemented | With `owner` set, the collector enumerates the account's repositories (org endpoint, user fallback on 404) and collects each. | `GithubCollector._resolve_repos`; manifest source `owner_repos`. |
+| req-github-core-org-scope-2 | Repos As Filter | Implemented | With `owner` and `repos` both set, only enumerated repositories named in `repos` are collected; names not found under the owner are recorded as `SCOPE_FILTER_UNMATCHED` warnings, not errors. | |
+| req-github-core-org-scope-3 | Enumeration Recorded | Implemented | The run records `SCOPE_ENUMERATED` with owner, account kind, enumerated/collecting counts, filter flag, and walk completeness; an incomplete walk is labelled, never silently treated as complete. | `GithubClient.last_walk_complete`; batch dimensions carry `github.owner`. |
+| req-github-core-org-scope-4 | Degenerate Repo List | Implemented | A `repos`-only envelope (no `owner`) collects exactly that list through the same run path with no enumeration. | Existing samsite envelopes keep working unchanged. |
+| req-github-core-org-scope-5 | Scope Self-Test | Implemented | `self_test()` proves the PAT can enumerate the owner (`GITHUB_OWNER_ACCESS:<owner>`, one bounded listing walk) and still probes each explicit repo individually. | |
+| req-github-core-org-scope-6 | Source Permissions Declared | Implemented | Every collection-manifest source carries a `permission` naming the fine-grained PAT permission it needs; the schema admits the field and the provisioning skill derives the least-privilege set from it. | |
 
 ### Model Set
 ----
@@ -322,7 +363,8 @@ Data fields:
 | --- | :---: | --- | --- |
 | `token` | Yes |  | GitHub PAT. Secret material; never logged or stored on grid. |
 | `api_base_url` | No | `https://api.github.com` | GitHub API base URL. Rides with the credential because GitHub Enterprise Server (GHES) tenants have different base URLs and different PATs. |
-| `repos` | Yes |  | Array of `owner/repo` targets; v0 example is `["notgeorge/samsite"]`. |
+| `owner` | One of `owner`/`repos` |  | Login of the organization or user whose repositories are the scope. The collector enumerates them (`/orgs/{owner}/repos`, `/users/{owner}/repos` on 404). |
+| `repos` | One of `owner`/`repos` |  | Explicit `owner/repo` targets. With `owner`: an include-filter over the enumeration. Without: the scope itself (the legacy/degenerate form, e.g. `["notgeorge/samsite"]`). |
 | `initial_run_limit` | No | `10` | Number of latest workflow runs to seed on first collection. |
 
 GitHub App authentication is future work.
@@ -369,7 +411,7 @@ Do not pre-build it; wait for the trigger.
 | --- | --- | :---: | --- | --- |
 | req-github-core-secret-1 | PAT First | Implemented | v0 supports `github_pat` as the first and only credential kind. | `collectors/github_collector/secret.py:GITHUB_SECRET_KIND`. |
 | req-github-core-secret-2 | Plugin Owns Schema | Implemented | `github_core` ships and validates the `github_pat` JSON Schema. | `GITHUB_PAT_SCHEMA` in `secret.py`; validated via `require_secret_kind`. |
-| req-github-core-secret-3 | Repo Array Scope | Implemented | The secret carries the repo target list as `data.repos`. | Schema requires non-empty array of `owner/repo` patterns. |
+| req-github-core-secret-3 | Scope Fields | Implemented | The secret carries the collection scope: `data.owner` (account login) and/or `data.repos` (explicit `owner/repo` list — the filter when `owner` is present, the scope when it is not). At least one is required. | Schema `anyOf`; every field described (`GITHUB_PAT_SCHEMA`). Amended 2026-08-26. |
 | req-github-core-secret-4 | GitHub App Deferred | Proposed | GitHub App auth is deferred. | |
 | req-github-core-secret-5 | Minimal Knob Set | Implemented | The only behavioral knob is `initial_run_limit`; `collect_workflow_files`, `collect_runner_config`, and `collect_grid_links` are not data fields. | Schema is `additionalProperties: false`; the three pruned names trigger validation errors at load. |
 
@@ -428,7 +470,7 @@ Collection policy:
 | req-github-core-collector-8 | Single-Attempt v0 | Implemented | v0 does not model multiple run attempts; collector uses the default jobs endpoint returning the latest-attempt snapshot. | Uses `/runs/{run_id}/jobs` (no `/attempts/{n}/`). Multi-attempt tracking deferred to `req-github-core-backlog-run-attempts`. |
 | req-github-core-collector-9 | Empty-Body 404 Retry | Implemented | The HTTP client retries GitHub's intermittent empty-body 404 responses with exponential backoff (0.5s → 8s, up to 5 retries). Real 404s — carrying a JSON `{"message": "..."}` body — propagate immediately. | GitHub docs for `/actions/runs` and `/list-jobs-for-workflow-run` document only `200 - OK`. Secondary rate limits are documented to return 403/429, not 404. Empty-body 404 with valid `X-GitHub-Request-Id` is observed and undocumented; the body presence is the discriminator. See `api_client.py` module docstring for the evidence trail. |
 | req-github-core-collector-10 | Per-Run /jobs Graceful-Degrade | Implemented | When `/runs/{id}/jobs` returns a real (body-bearing) 404 for a specific run, the collector records a structured `RUN_JOBS_MISSING` warn including the response-body excerpt and continues with the next run rather than aborting the whole collection. | Mirrors `req-github-core-collector-5`'s degrade pattern for runner-config 403s. |
-| req-github-core-collector-11 | Operator-Facing Self-Test | Implemented | `GithubCollector.self_test()` runs four bounded readiness checks: GITHUB_SECRET_PRESENT (file exists), GITHUB_SECRET_VALID (schema validates), GITHUB_API_REACHABLE (`GET /rate_limit` within `SELF_TEST_LIVE_CHECK_TIMEOUT_SECONDS`), GITHUB_REPO_ACCESS (`GET /repos/{owner}/{repo}` per configured repo). | Per-repo specificity surfaces which repo(s) fail by name rather than a generic "collector run will fail." Empty-body-404 retry is intentionally disabled for self-test paths (`GithubClient(..., retry_empty_404=False)`) so real auth/access 404s surface immediately. Readiness ladder: UNCONFIGURED (secret missing) → MISCONFIGURED (schema fails) → ERROR (API unreachable or per-repo 404) → READY (all green). |
+| req-github-core-collector-11 | Operator-Facing Self-Test | Implemented | `GithubCollector.self_test()` runs four bounded readiness checks: GITHUB_SECRET_PRESENT (file exists), GITHUB_SECRET_VALID (schema validates), GITHUB_API_REACHABLE (`GET /rate_limit` within `SELF_TEST_LIVE_CHECK_TIMEOUT_SECONDS`), GITHUB_REPO_ACCESS (`GET /repos/{owner}/{repo}` per configured repo). | Per-repo specificity surfaces which repo(s) fail by name rather than a generic "collector run will fail." Empty-body-404 retry is intentionally disabled for self-test paths (`GithubClient(..., retry_empty_404=False)`) so real auth/access 404s surface immediately. Readiness ladder: UNCONFIGURED (secret missing) → MISCONFIGURED (schema fails) → ERROR (API unreachable or per-repo 404) → READY (all green). Account-scoped envelopes add `GITHUB_OWNER_ACCESS:<owner>` (req-github-core-org-scope-5). |
 
 ### Collection And Link Manifests
 ----

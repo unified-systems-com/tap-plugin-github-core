@@ -50,6 +50,8 @@ from .parser import parse_workflow_yaml
 from .secret import (
     GITHUB_SECRET_REF,
     api_base_url,
+    collection_owner,
+    explicit_repos,
     initial_run_limit,
     resolve_github_secret,
 )
@@ -71,6 +73,9 @@ _SITE_NON_TERMINAL_REFRESH = "6558"
 _SITE_RUN_NOT_FOUND = "f938"
 _SITE_LOCAL_ACTION_DEFERRED = "b148"
 _SITE_DEPENDABOT_APP = "a7c1"
+_SITE_SCOPE_ENUMERATED = "462a"
+_SITE_ABORT_SCOPE = "8d47"
+_SITE_FILTER_UNMATCHED = "d087"
 
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
 # list under synthetic ``dynamic/<app>/...`` paths. These are not repo CI
@@ -120,7 +125,7 @@ class GithubCollectorError(Exception):
 
 
 class GithubCollector(CollectorBase):
-    """GitHub Actions collector — single PAT, configured repos, two-phase run."""
+    """GitHub Actions collector — single PAT, account-scoped (or explicit repos), two-phase run."""
 
     @classmethod
     def self_test(cls) -> CollectorSelfTestResult:
@@ -131,7 +136,8 @@ class GithubCollector(CollectorBase):
           1. GITHUB_SECRET_PRESENT — `github_pat` secret file exists
           2. GITHUB_SECRET_VALID   — secret schema validates (token, repos, ...)
           3. GITHUB_API_REACHABLE  — `GET /rate_limit` succeeds within budget
-          4. GITHUB_REPO_ACCESS    — per-configured-repo `GET /repos/{owner}/{repo}`
+          4. GITHUB_OWNER_ACCESS   — the account scope enumerates (`/orgs|/users/{owner}/repos`)
+             GITHUB_REPO_ACCESS    — per-explicit-repo `GET /repos/{owner}/{repo}`
                                      succeeds; surfaces which repo(s) fail
 
         The empty-body-404 retry in `api_client` is deliberately disabled for
@@ -181,7 +187,8 @@ class GithubCollector(CollectorBase):
         )
 
         data = dict(secret.data)
-        repos: list[str] = list(data["repos"])
+        owner = collection_owner(data)
+        repos: list[str] = explicit_repos(data)
 
         # 3. API reachable + PAT authenticates — GET /rate_limit.
         # No-retry client so a real 401/403 surfaces immediately.
@@ -216,10 +223,43 @@ class GithubCollector(CollectorBase):
             )
         )
 
-        # 4. Per-repo access. Each failure is recorded but doesn't short-
+        # 4a. Account scope (req-github-core-org-scope): the PAT can see the owner and
+        # enumerate its repositories. Bounded — one listing walk, not a probe per repo, so an
+        # org of hundreds of repos self-tests in seconds. Explicit repos (filter or legacy
+        # scope) are still probed one by one below.
+        repo_access_ok = True
+        if owner is not None:
+            try:
+                try:
+                    listing = client.get_paginated(f"/orgs/{owner}/repos", params={"type": "all", "per_page": "100"})
+                except GithubAPIError as exc:
+                    if exc.status != 404:
+                        raise
+                    listing = client.get_paginated(f"/users/{owner}/repos", params={"type": "all", "per_page": "100"})
+            except GithubAPIError as exc:
+                repo_access_ok = False
+                checks.append(
+                    check_fail(
+                        f"GITHUB_OWNER_ACCESS:{owner}",
+                        f"PAT cannot enumerate repositories under {owner}: status={exc.status} "
+                        f"body={exc.body[:200] or '(empty)'}",
+                        readiness_status=CollectorReadinessStatus.ERROR,
+                        docs=_DOCS,
+                    )
+                )
+            else:
+                checks.append(
+                    check_pass(
+                        f"GITHUB_OWNER_ACCESS:{owner}",
+                        f"PAT enumerates {len(listing)} repo(s) under {owner}"
+                        f"{'' if client.last_walk_complete else ' (walk INCOMPLETE — page cap hit)'}.",
+                        context={"owner": owner, "enumerated": len(listing), "complete": client.last_walk_complete},
+                        docs=_DOCS,
+                    )
+                )
+        # 4b. Per-repo access. Each failure is recorded but doesn't short-
         # circuit the rest — operator wants to see ALL the broken repos in
         # one run, not just the first.
-        repo_access_ok = True
         for repo in repos:
             try:
                 client.get(f"/repos/{repo}")
@@ -269,10 +309,16 @@ class GithubCollector(CollectorBase):
         except SecretError as exc:
             self._abort(_SITE_ABORT_SECRET, "SECRET_UNUSABLE", f"github_pat secret unusable: {exc}")
         data = dict(secret.data)
-        repos: list[str] = list(data["repos"])
         run_limit = initial_run_limit(data)
 
         client = GithubClient(token=data["token"], api_base_url=api_base_url(data))
+
+        # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope)
+        owner = collection_owner(data)
+        try:
+            repos = self._resolve_repos(client, owner, explicit_repos(data))
+        except GithubAPIError as exc:
+            self._abort(_SITE_ABORT_SCOPE, f"GITHUB_SCOPE_{exc.status}", f"scope enumeration failed: {exc}")
 
         # --- manifests (load-time JSON Schema validation; errors abort) ---
         load_collection_manifest()  # validates; engine is procedural in v0
@@ -318,11 +364,16 @@ class GithubCollector(CollectorBase):
             self.record_info(_SITE_REPO_DONE, "REPO_DONE", f"Collected {full_name}")
 
         # --- submission phase ---
+        scope_label = owner if owner is not None else ", ".join(repos)
+        batch_dims = {"github.platform": "github.com"}
+        if owner is not None:
+            batch_dims["github.owner"] = owner
         github_batch = assemble_batch(
-            batch_name=f"github_core collection: {', '.join(repos)}",
-            description=f"GitHub Actions plumbing for {len(repos)} repo(s).",
+            batch_name=f"github_core collection: {scope_label}",
+            description=f"GitHub Actions plumbing for {len(repos)} repo(s) in scope {scope_label}.",
             nodes=nodes,
             edges=edges,
+            batch_dimensions=batch_dims,
         )
         self.submit_grift(github_batch)
         self.record_info(
@@ -340,7 +391,7 @@ class GithubCollector(CollectorBase):
         )
         if enrichment.edge_envelopes:
             enrichment_batch = assemble_batch(
-                batch_name=f"github_core enrichment: {', '.join(repos)}",
+                batch_name=f"github_core enrichment: {scope_label}",
                 description="Cross-grid link edges (REFERENCES_RESOURCE, FEDERATES_VIA) resolved from the grid-link manifest.",
                 nodes=[],
                 edges=enrichment.edge_envelopes,
@@ -353,6 +404,59 @@ class GithubCollector(CollectorBase):
             f"{len(edges)} spine edge(s), "
             f"{len(enrichment.edge_envelopes)} link edge(s)."
         )
+
+    # ---------- scope resolution ----------
+
+    def _resolve_repos(self, client: GithubClient, owner: str | None, explicit: list[str]) -> list[str]:
+        """The `owner/repo` full names this run collects (req-github-core-org-scope).
+
+        With an `owner`: enumerate the account's repositories (``/orgs/{owner}/repos`` with a
+        404 fallback to ``/users/{owner}/repos``), apply the explicit list as an include-filter
+        if given, and record the enumeration on the run — including whether the paginated walk
+        was COMPLETE, which is the assertion node-level absence (tombstoning, tap#140) will
+        need before "not seen" can mean "gone". Without an `owner`: the explicit list is the
+        scope (the degenerate run config, tap#142) and nothing is enumerated.
+        """
+        if owner is None:
+            return list(explicit)
+        params = {"type": "all", "per_page": "100"}
+        try:
+            listing = client.get_paginated(f"/orgs/{owner}/repos", params=params)
+            account_kind = "org"
+        except GithubAPIError as exc:
+            if exc.status != 404:
+                raise
+            listing = client.get_paginated(f"/users/{owner}/repos", params=params)
+            account_kind = "user"
+        complete = bool(client.last_walk_complete)
+        enumerated = [str(item["full_name"]) for item in listing if isinstance(item, dict) and item.get("full_name")]
+        repos = enumerated
+        if explicit:
+            wanted = set(explicit)
+            repos = [name for name in enumerated if name in wanted]
+            unmatched = sorted(wanted - set(enumerated))
+            if unmatched:
+                self.record_warn(
+                    _SITE_FILTER_UNMATCHED,
+                    "SCOPE_FILTER_UNMATCHED",
+                    f"{len(unmatched)} filtered repo(s) not found under {owner}: {', '.join(unmatched)}",
+                    message_data={"owner": owner, "unmatched": unmatched},
+                )
+        self.record_info(
+            _SITE_SCOPE_ENUMERATED,
+            "SCOPE_ENUMERATED",
+            f"Enumerated {len(enumerated)} repo(s) under {account_kind} {owner}"
+            f"{' (walk INCOMPLETE — page cap hit)' if not complete else ''}; collecting {len(repos)}.",
+            message_data={
+                "owner": owner,
+                "account_kind": account_kind,
+                "enumerated": len(enumerated),
+                "collecting": len(repos),
+                "filtered": bool(explicit),
+                "complete": complete,
+            },
+        )
+        return repos
 
     # ---------- per-repo collection ----------
 
