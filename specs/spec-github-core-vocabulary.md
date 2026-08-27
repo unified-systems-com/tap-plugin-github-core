@@ -224,10 +224,40 @@ readable catalogue, a collector can land it on the grid so "what changed" become
      access to the thing being audited. We do not request write. This is a limitation to publish,
      not to engineer around.
 
-   Partial signals worth testing before accepting the gap: `current_user_can_bypass` is returned on
-   the ruleset detail (answers "can *this* credential bypass", not "who else can"), and the
-   rule-suite / rule-insights endpoints may expose actual bypass *events* even where the actor list
-   is withheld — detection instead of enumeration.
+   **Both leads were run to ground 2026-08-27, and the answer splits cleanly:**
+
+   - **Enumeration has a hard ceiling.** A read-only App is refused the actor list by *every* road:
+     current state (field absent, HTTP 200), org-level ruleset endpoints (403), and ruleset version
+     history (403). GitHub is consistent rather than leaky, so there is no back door and no
+     disclosure inconsistency to report. Note the App *was* granted `organization_administration:
+     read` and still received 403, so the cause is **unexplained** — the live candidates are that
+     the whole ruleset family is write-to-read, or that `enabledForGitHubApps` does not encode the
+     required level. Do not record either as fact; settling it needs a write-capable credential,
+     which is a posture decision rather than an experiment.
+   - **Detection has no ceiling.** `/repos/{o}/{r}/rulesets/rule-suites` works on the read-only App
+     (HTTP 200), returning per-push evaluations with `actor_id`, `actor_name`, `result`
+     (`pass|fail|bypass`) and `rule_evaluations` on the detail. **`time_period` silently defaults to
+     `day`** — omit it and an empty list reads as "nobody has ever bypassed"; max is `month`.
+
+   **So the operating model is: a privileged baseline once, read-only drift thereafter.** History is
+   part of the baseline, not the drift — and the baseline needs `admin:org`, because the repo-path
+   history road serves only `source_type: Repository` rulesets (57 of 60 attachments on our own org
+   are org-sourced).
+
+   **Why the baseline must be stored, not inferred from events:** the `repository_ruleset` webhook's
+   `changes` covers `name`, `enforcement`, `conditions` and `rules` — **not `bypass_actors`**. GitHub
+   will not tell a subscriber the actor list changed; a subscriber must diff against stored state.
+
+   **What this bought, and it is the case for the whole product.** Ruleset version history on
+   `main-required-checks` shows `RepositoryRole 5` (admin) with `bypass_mode: always` from
+   2026-08-09 13:11 until 2026-08-21 09:13, and 28 pushes went through it. The ruleset reads
+   `bypass_actors: []` today. **Current-state enumeration erases twelve days during which the gate
+   was not a gate**; only history recovers it. No snapshot tool at any price finds that.
+
+   Field corrections for the model: `bypass_mode` is `always | pull_request | exempt`;
+   `current_user_can_bypass` is `always | pull_requests_only | never | exempt` and is returned only
+   from the repository-level endpoint; `actor_type` is
+   `Integration | OrganizationAdmin | RepositoryRole | Team | DeployKey | User`.
 4. **When the neutral substrate is extracted.** 11 concepts are marked neutral and the kernel test
    confirms they populate from a non-forge project. Extraction while a slug change is still a
    re-collect is cheaper than a migration later.
