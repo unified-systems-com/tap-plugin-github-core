@@ -190,14 +190,22 @@ readable catalogue, a collector can land it on the grid so "what changed" become
 
 ---
 
+## Decisions taken (2026-08-27)
+
+| # | Question | Ruling |
+| ---: | --- | --- |
+| 1 | `workflow_job` (the declared job) in the *self* tier? | **Yes.** Cheaper now than after `USES_ACTION` / `REFERENCES_SECRET` ship pointing at the wrong source |
+| 2 | `git_ref` replacing `git_branch`? | *Awaiting confirmation* — recommended yes; free before the migration, a rename after |
+| 3 | Where `credential_grant` lives | **`identity_core`** — neutral, sits beside `principal`, and both a non-forge and a registry collector populate it |
+| 4 | Where `package` / `package_version` live | **A new `supply_chain_core`.** Supply chain is the next domain after this one, so the substrate is created there rather than borrowed. Identity remains a purl |
+
 ## Open questions
 
 1. **`actions_variable`: field or node?** The passes disagree. No incident turns on a variable, and
    nothing points at one — the node test says field. But six platform sources model it, and a
    variable can be *half a credential* (an app ID beside a private key held as a secret). **Default
    to a field at `self`; revisit at `friends`** if anything needs to point at one.
-2. **Where `package_version` lives.** Its identity is settled (purl). Its home follows whichever
-   collector populates it first, so the decision waits for that collector.
+2. ~~Where `package_version` lives.~~ **Settled:** `supply_chain_core` (see decisions above).
 3. **`BYPASSES` observability.** Bypass actors may be unreadable to a genuinely read-only credential.
    Confirm empirically against our own organization before shipping a view whose blank cells would
    otherwise be ambiguous — hence the `observable` property.
