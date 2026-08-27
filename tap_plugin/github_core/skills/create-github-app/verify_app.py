@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import api_url
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
@@ -65,7 +66,13 @@ def main() -> int:
         print(f"  credential kind is {envelope.get('kind')!r}, not github_app — nothing to verify")
         return 1
     d = envelope["data"]
-    api = d.get("api_base_url", "https://api.github.com").rstrip("/")
+    # Same control as create_app.py: the envelope is operator-written, but a mistyped or
+    # tampered base URL here would carry a live installation token to it.
+    try:
+        api = api_url.validate_api_base_url(d.get("api_base_url") or "https://api.github.com")
+    except ValueError as exc:
+        print(f"  envelope api_base_url rejected: {exc}")
+        return 1
     owner = d["owner"]
 
     print("  chain")

@@ -40,6 +40,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+import api_url
 import manifest as manifest_lib
 
 _TIMEOUT_SECONDS = 600
@@ -197,6 +198,13 @@ def main() -> int:
     ap.add_argument("--secrets-root", type=Path,
                     default=Path(os.environ.get("TAP_SECRETS_ROOT", Path.home() / "tap-secrets")))
     args = ap.parse_args()
+    # Refuse a non-https base URL before the browser opens or a socket binds. The manifest
+    # code exchanged over this URL converts into the App private key exactly once; an http://
+    # or file:// base would leak or divert it (SonarCloud SSRF finding, PR #3).
+    try:
+        args.api_base_url = api_url.validate_api_base_url(args.api_base_url)
+    except ValueError as exc:
+        ap.error(str(exc))
     observe = args.observe or args.org
 
     flow = _Flow()

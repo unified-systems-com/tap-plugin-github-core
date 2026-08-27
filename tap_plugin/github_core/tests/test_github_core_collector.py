@@ -680,9 +680,43 @@ class TestCreateAppSkillIsHostRunnable:
         from pathlib import Path as P
 
         skill = P(__file__).resolve().parents[1] / "skills" / "create-github-app"
-        for name in ("create_app.py", "manifest.py"):
-            extra = self._imports(skill / name) - {"manifest"}
+        # Sibling modules in the skill directory are part of the host flow, not dependencies.
+        siblings = {"manifest", "api_url"}
+        for name in ("create_app.py", "manifest.py", "api_url.py"):
+            extra = self._imports(skill / name) - siblings
             assert not extra, f"{name} imports non-stdlib modules: {sorted(extra)}"
+
+    def test_api_base_url_must_be_https_and_bare(self) -> None:
+        """req-github-core-app-auth-4 / the SonarCloud SSRF finding on PR #3: the API base URL
+        reaches `urlopen` from outside the program — a CLI flag in create_app, an envelope field
+        in verify_app. `urlopen` honours whatever scheme it is handed, so an `http://` base sends
+        the one-time manifest code (which converts into the App's private key) in cleartext to a
+        host of the caller's choosing, and a `file://` base turns the exchange into a local read."""
+        import importlib.util
+        from pathlib import Path as P
+
+        mod_path = P(__file__).resolve().parents[1] / "skills" / "create-github-app" / "api_url.py"
+        spec = importlib.util.spec_from_file_location("gs_api_url", mod_path)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        assert mod.validate_api_base_url("https://api.github.com") == "https://api.github.com"
+        assert mod.validate_api_base_url("https://api.github.com/") == "https://api.github.com"
+        # GitHub Enterprise Server keeps its path.
+        assert mod.validate_api_base_url("https://ghe.example.com/api/v3") == "https://ghe.example.com/api/v3"
+
+        for bad in (
+            "http://api.github.com",          # credential-bearing exchange in cleartext
+            "file:///etc/passwd",             # urlopen reads local files
+            "ftp://example.com/x",
+            "api.github.com",                 # no scheme
+            "https://",                       # no host
+            "https://u:p@evil.example",       # credentials in the URL
+            "https://api.github.com?x=1",     # query smuggling
+        ):
+            with pytest.raises(ValueError):
+                mod.validate_api_base_url(bad)
 
     def test_permission_keys_cannot_collide_across_surfaces(self) -> None:
         """The bug this assertion exists for: repository:administration and
