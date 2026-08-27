@@ -206,9 +206,28 @@ readable catalogue, a collector can land it on the grid so "what changed" become
    variable can be *half a credential* (an app ID beside a private key held as a secret). **Default
    to a field at `self`; revisit at `friends`** if anything needs to point at one.
 2. ~~Where `package_version` lives.~~ **Settled:** `supply_chain_core` (see decisions above).
-3. **`BYPASSES` observability.** Bypass actors may be unreadable to a genuinely read-only credential.
-   Confirm empirically against our own organization before shipping a view whose blank cells would
-   otherwise be ambiguous — hence the `observable` property.
+3. ~~**`BYPASSES` observability.**~~ **SETTLED EMPIRICALLY 2026-08-27, and the answer is worse than
+   expected.** GitHub returns `bypass_actors` only to a caller with **write access to the ruleset**.
+   Measured against our own org: an owner-minted fine-grained PAT sees it; a **GitHub App with
+   `administration: read` does not** (`bypass_actors` absent from the ruleset detail, HTTP 200).
+
+   Three consequences that are now facts rather than precautions:
+
+   - **Neither credential dominates.** The App uniquely sees PAT grants, installations and org
+     membership; the owner-PAT uniquely sees bypass actors. A complete gate picture needs both, or
+     accepts a gap. Do not tell an adopter the App is strictly better.
+   - **`observable` on the `BYPASSES` edge is mandatory, not defensive.** A blank "who can bypass"
+     cell reads as *nobody can bypass* — the most reassuring possible message — when it may mean
+     *we could not look*. Rendering those identically would make an organization feel safer while
+     being no safer. The view needs three states: **none / some / not-observable**.
+   - **The read-only posture has a hard ceiling here.** Seeing the exemption list requires write
+     access to the thing being audited. We do not request write. This is a limitation to publish,
+     not to engineer around.
+
+   Partial signals worth testing before accepting the gap: `current_user_can_bypass` is returned on
+   the ruleset detail (answers "can *this* credential bypass", not "who else can"), and the
+   rule-suite / rule-insights endpoints may expose actual bypass *events* even where the actor list
+   is withheld — detection instead of enumeration.
 4. **When the neutral substrate is extracted.** 11 concepts are marked neutral and the kernel test
    confirms they populate from a non-forge project. Extraction while a slug change is still a
    re-collect is cheaper than a migration later.
