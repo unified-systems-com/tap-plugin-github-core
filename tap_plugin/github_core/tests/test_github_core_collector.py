@@ -135,6 +135,25 @@ class TestPATSchema:
             with pytest.raises(jsonschema.ValidationError):
                 jsonschema.validate({"token": "ghp_x", "owner": bad}, GITHUB_PAT_SCHEMA)
 
+    def test_pat_api_base_url_must_be_https_and_bare(self) -> None:
+        """The value is interpolated into every request URL and handed to `urlopen`, which
+        honours whatever scheme it is given. Constrained at the schema — where the value enters
+        the system — rather than at each of the two clients that consume it."""
+        for good in ("https://api.github.com", "https://ghe.example.com/api/v3"):
+            jsonschema.validate({"token": "ghp_x", "owner": "acme", "api_base_url": good}, GITHUB_PAT_SCHEMA)
+        for bad in (
+            "http://api.github.com",       # PAT would travel in cleartext
+            "file:///etc/passwd",          # urlopen reads local files
+            "https://u:p@evil.example",    # credentials in the URL
+            "https://api.github.com?x=1",  # query smuggling
+            "api.github.com",              # no scheme
+            "https://",                    # no host
+        ):
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(
+                    {"token": "ghp_x", "owner": "acme", "api_base_url": bad}, GITHUB_PAT_SCHEMA
+                )
+
     def test_every_schema_field_is_described(self) -> None:
         """House rule: JSON structures carry descriptions — top level and every property."""
         assert GITHUB_PAT_SCHEMA["description"]

@@ -56,9 +56,16 @@ GITHUB_PAT_SCHEMA: dict[str, Any] = {
             "type": "string",
             "minLength": 1,
             "default": "https://api.github.com",
+            # https only, and no userinfo/query/fragment. Both clients build request URLs from
+            # this value and hand them to urlopen, which honours whatever scheme it is given: an
+            # http:// base would carry the PAT in cleartext to a host named by the envelope, and
+            # a file:// base would turn an API call into a local read. Refusing it here, once, at
+            # the point the value enters the system, beats a check at each consumer.
+            "pattern": r"^https://[^\s/@?#]+(/[^\s?#]*)?$",
             "description": (
                 "GitHub REST API base URL. Rides with the credential because a GitHub Enterprise "
-                "Server tenant has its own base URL and its own PAT."
+                "Server tenant has its own base URL and its own PAT. Must be https with no "
+                "userinfo, query or fragment — it is interpolated into every request URL."
             ),
         },
         "owner": {

@@ -49,7 +49,8 @@ def call(url: str, token: str, *, scheme: str = "Bearer", method: str = "GET") -
                  "User-Agent": "tap-github-core"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        # nosec B310 — every caller builds `url` from the validate_api_base_url()'d base.
+        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
             return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()[:160].decode("utf-8", "replace")
@@ -95,7 +96,8 @@ def main() -> int:
         f"{api}/app/installations/{inst_id}/access_tokens", method="POST",
         headers={"Authorization": f"Bearer {jwt}", "Accept": "application/vnd.github+json",
                  "User-Agent": "tap-github-core"})
-    with urllib.request.urlopen(request, timeout=30) as response:
+    # nosec B310 — `api` came from validate_api_base_url() above.
+    with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
         token_payload = json.loads(response.read().decode("utf-8"))
     token = token_payload["token"]
     print(f"    installation token                  expires {token_payload['expires_at']}")

@@ -149,7 +149,8 @@ def convert(code: str, api_base_url: str) -> dict:
         method="POST",
         headers={"Accept": "application/vnd.github+json", "User-Agent": "tap-github-core"},
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    # nosec B310 — api_base_url passed validate_api_base_url() at argparse time.
+    with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
         return json.loads(response.read().decode("utf-8"))
 
 

@@ -108,7 +108,9 @@ class GithubGraphQLClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
+            # nosec B310 — the endpoint derives from the credential envelope's `api_base_url`,
+            # which GITHUB_PAT_SCHEMA constrains to https at resolve time (see secret.py).
+            with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # nosec B310
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise GithubGraphQLError(f"GraphQL HTTP {exc.code}: {exc.read()[:300]!r}", status=exc.code) from exc
