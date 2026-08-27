@@ -12,7 +12,9 @@
   - `github.platform = "github.com"` on all plugin-owned nodes and edges
   - `github.owner` + `github.repo` on repo-scoped objects (set by the collector per envelope)
   - `github.surface = "actions"` on Actions-related objects
-  - `github.observation = "execution"` on runs and jobs
+  - `github.observation` on every plugin-owned node and edge: `"execution"` on runs and
+    jobs, `"declaration"` on everything else. Both layers are stated positively — the
+    config layer is never encoded as the absence of the dimension
 
 ## Philosophy
 
@@ -70,9 +72,10 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-app-auth | [GitHub App Authentication](#github-app-authentication) | In Development | 2026-08-27: the App is the product credential — its permissions are DERIVED from the collection manifest, it is created per-instance from a manifest so the operator holds their own key, and two surfaces git-serious needs are App-only (organization PAT grants, installed Apps) |
 | req-github-core-org-scope | [Account Scope](#account-scope) | Implemented | 2026-08-26 (pulled by git-serious): the envelope names an `owner`; the collector enumerates its repositories (org, user fallback), `repos` becomes an optional include-filter, and the run records the enumeration incl. walk completeness. Repos-only envelopes remain valid as the degenerate run config |
 | req-github-core-models | [Model Set](#model-set) | Implemented | account/repo/workflow/run/job/runner (0001) + synthesized `github_platform` (0002) — seven tables. `oidc_issuer` was extracted to the `identity_core` substrate plugin (dropped here in 0004); github still mints the issuer node via `identity_core.issuer`. |
+| req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
-| req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
+| req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation (`execution` \| `declaration`) on every node/edge |
 | req-github-core-secret | [PAT Secret Kind](#pat-secret-kind) | Implemented | `github_pat` data shape, additionalProperties: false; GitHub App auth still deferred |
 | req-github-core-collector | [Collector Runtime](#collector-runtime) | Implemented | Two-phase run + degraded-runner + no-delete + single-attempt + incremental + non-terminal refresh + empty-body-404 retry + per-run-/jobs degrade |
 | req-github-core-manifests | [Collection And Link Manifests](#collection-and-link-manifests) | Implemented | Two manifests + JSON Schemas, validated at load; link manifest is data-driven |
@@ -207,6 +210,7 @@ Models:
 - `github_actions_run` — one workflow run (latest observed state; multi-attempt tracking deferred to `req-github-core-backlog-run-attempts`).
 - `github_actions_job` — one job within a workflow run. Step details live in `configuration` in v0.
 - `github_runner` — durable registered self-hosted runner configuration when visible through the API.
+- `github_ruleset` — a repository ruleset: the enforcement gate on a set of refs. Keyed by GitHub's ruleset `databaseId` so one node is shared across every repository the ruleset governs, mirroring `github_app`'s slug keying. See [Ruleset Collection](#ruleset-collection).
 - `github_app` — a GitHub App or first-party platform app (e.g. Dependabot) enabled on a repository. Generic across GitHub's app surface (managed apps, third-party apps, OIDC token-issuing apps); keyed by app slug so one node is shared across every repo that enables it, with `ENABLED_ON` edges fanning in. See [GitHub Apps](#github-apps).
 
 The OIDC issuer (`oidc_issuer`) is **no longer a github_core model** — it was
@@ -236,6 +240,7 @@ Natural-key inputs:
 | `github_actions_run` | `owner/repo` + run id |
 | `github_actions_job` | `owner/repo` + job id |
 | `github_runner` | `owner/repo` + runner id for durable registered runners |
+| `github_ruleset` | ruleset `databaseId` **alone** — deliberately not scoped by repo or org |
 | `github_app` | app slug (`dependabot`) — singleton across repos |
 
 Entity IDs are deterministic UUIDv5 values over the model type and natural key.
@@ -287,6 +292,83 @@ must not conflate the two.
 | req-github-core-models-3 | Job Steps Blobbed | Implemented | Workflow job steps remain structured data in `github_actions_job.configuration` in v0. | Future visualization target. |
 | req-github-core-models-4 | Deterministic Identity | Implemented | Every model uses deterministic UUIDv5 identity based on the natural keys above. | `collectors/github_collector/identity.py` mints UUIDv5 from `(entity_type, natural_key)` under a fixed namespace. |
 | req-github-core-models-7 | Raw Workflow YAML Retained | Implemented | `github_workflow.configuration.raw_yaml` stores the full workflow YAML body fetched at collection time. | Parser stores raw bytes; collector base64-decodes the Contents-API `content` field and writes it. |
+
+### Ruleset Collection
+----
+RID: `req-github-core-ruleset`
+Status: `In Development`
+
+A **ruleset** is GitHub's enforcement gate on a set of refs — required status checks,
+required pull requests, non-fast-forward and deletion protection. It is the object that
+answers "is this branch actually protected," so a CI/CD projection that omits it is
+describing a pipeline while silently ignoring its gate.
+
+**One node per ruleset, not per attachment.** An organization-sourced ruleset is a single
+rule set that GitHub projects onto every repository in scope, and it is returned by each of
+those repositories' ruleset lists. Measured on `unified-systems-com`: **6 rulesets, 60
+attachments, 19 repositories** — three org rulesets accounting for 57 of the attachments.
+Modelling one node per attachment would derive the same ruleset's facts nineteen times and
+let the copies drift, so the collector dedupes on the ruleset id for the whole run, the way
+`github_app` dedupes on slug.
+
+**The id is the point.** The config-layer GraphQL query has always requested rulesets, but
+selected only `name`, `enforcement` and `target` — no id — and the result was discarded
+without being emitted. Every *other* ruleset surface is keyed by that id: the bypass-actor
+list (`/rulesets/{id}`), rule suites (`/rulesets/rule-suites`, the bypass *events*), and
+version history (`/rulesets/{id}/history`). Collecting the id is therefore the prerequisite
+for all of them, and is the whole of this requirement's scope; those surfaces are separate
+work.
+
+#### Identity
+
+The natural key is GitHub's ruleset `databaseId` **alone**, deliberately not scoped by
+repository or organization. This is unfixable once ids are minted, so it was verified rather
+than assumed (2026-08-27):
+
+- **Organization- and repository-sourced rulesets share one sequence.** Sorted, the six
+  observed ids interleave by source — an org ruleset, then three repo rulesets, then two more
+  org rulesets — so there are not two sequences that could collide.
+- **The sequence is global to GitHub, not per-organization.** Id order matches `created_at`
+  order exactly, two rulesets created 0.44s apart hold consecutive integers, and an
+  organization owning six rulesets holds ids near **20.6 million**; a per-org sequence would
+  have numbered them 1–6.
+
+Should GitHub ever change this, the fallback that preserves the 60→6 collapse while
+disambiguating is `<source_type>:<source_name>#<ruleset_id>`.
+
+#### Source type is a node property
+
+`source_type` (`Organization` | `Repository`) is a fact about the ruleset, not about any one
+attachment — putting it on the attachment would derive the same fact 57 times. It is also
+operationally load-bearing rather than descriptive: **version history for an
+organization-sourced ruleset is not reachable by the repository path** (it 404s) and requires
+organization scope. On the fixture org that is 57 of 60 attachments, so for any organization
+doing protection at the org level, history is an org-scope operation.
+
+#### Observability
+
+`bypass_actors` — *who may skip this gate* — is **not collected by this requirement**, and
+cannot be by a read-only credential. GitHub returns the field only to a caller with write
+access to the ruleset, documented as: *"To prevent leaking sensitive information, the
+`bypass_actors` property is only returned if the user making the API request has write access
+to the ruleset."* A read-only caller receives HTTP 200 with the field simply absent. The
+consequence for any consumer is that **a blank "who can bypass" must never render as "nobody
+can bypass"** — three states are required (none / some / not-observable). Bypass *detection*
+has no such ceiling: rule suites are readable by a read-only credential.
+
+The attachment edge (`repository` → `github_ruleset`) is deferred pending its slug in the
+vocabulary corpus; the node stands alone until then.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-ruleset-1 | Ruleset Model Declared | In Development | The plugin declares a `github_ruleset` model carrying `ruleset_id`, `name`, `enforcement`, `target`, `source_type`, `source_name`, `configuration` and `tags`. | `models/github_ruleset.py`. |
+| req-github-core-ruleset-2 | Identity Is The Bare Database Id | In Development | `ruleset_id()` mints identity from GitHub's ruleset `databaseId` alone, unscoped by repository, so every repository reporting one organization ruleset resolves to a single node. | Verified globally unique before minting — see Identity above. |
+| req-github-core-ruleset-3 | Deduped Across The Run | In Development | The collector emits at most one node per ruleset id per run, regardless of how many repositories report it. | `_emitted_ruleset_ids`, mirroring `_emitted_app_ids`. |
+| req-github-core-ruleset-4 | Sourced From The Config Layer | In Development | Rulesets are read from the GraphQL config-layer response, which now selects `databaseId` and `source`. No additional REST call is made, and a scope with no GraphQL enumeration emits no rulesets rather than falling back to REST. | Measured: 1 rate-limit point for 19 repositories / 60 attachments. |
+| req-github-core-ruleset-5 | Idless Rulesets Are Skipped | In Development | A ruleset returned without a `databaseId` is not emitted, because no bypass-actor, rule-suite or history surface can be reached from it. | Landing an unfollowable node would assert coverage the collector does not have. |
+| req-github-core-ruleset-6 | Closed Sets Validated, Empty Permitted | In Development | `enforcement`, `target` and `source_type` validate against GitHub's closed sets, with `""` permitted so a partially-read ruleset still lands. | A degraded field must not discard the whole ruleset. |
 
 ### Edge Vocabulary
 ----
@@ -374,11 +456,27 @@ GitHub-specific dimensions:
 | `github.owner` | `notgeorge` | Repo-scoped nodes and edges |
 | `github.repo` | `samsite` | Repo-scoped nodes and edges |
 | `github.surface` | `actions` | Actions workflows, runs, jobs, runners |
-| `github.observation` | `execution` | Runs and jobs |
+| `github.observation` | `execution` \| `declaration` | **Every** GitHub node and edge — `execution` for runs and jobs, `declaration` for everything else |
 
 Static model defaults should include only dimensions that are true for all
 instances, such as `github.platform = "github.com"`. The collector supplies
 repo-specific dimensions in GRIFT envelopes.
+
+**`github.observation` is the DCOM layer axis, and both of its values are stated
+positively.** An observation is either a record of what the pipeline *is configured
+to be* (`declaration` — workflows, repositories, apps, runners, and the edges among
+them) or a record of what it *did* (`execution` — runs, jobs, and the edges among
+them). The distinction is the join that makes config-versus-operation comparison
+possible at all, so it is carried on every node and edge rather than on the
+execution side alone.
+
+The rule that forces this: **a missing fact and a negative fact must never render
+the same way.** If only executions declared the dimension, "the config layer" would
+be expressible only as `NOT observation = "execution"` — which silently swallows
+every object whose dimension was never set, including objects landed by a future
+collector that forgot to set it. Both values present makes the layer a fact the
+grid asserts, and makes an object with no observation a detectable defect rather
+than an invisible member of the config layer.
 
 #### Acceptance Criteria
 
@@ -388,6 +486,8 @@ repo-specific dimensions in GRIFT envelopes.
 | req-github-core-dimensions-2 | Repo Scope Dimensions | Implemented | Collector-created repo-scoped objects carry `github.owner` and `github.repo`. | Set on every node/edge envelope in `GithubCollector._collect_repo`. |
 | req-github-core-dimensions-3 | Actions Surface Dimension | Implemented | Actions-related objects carry `github.surface = "actions"`. | Set on workflow/run/job/runner model defaults and Actions edge defaults. |
 | req-github-core-dimensions-4 | Execution Observation Dimension | Implemented | Run and job observations carry `github.observation = "execution"`. | Set on run/job model defaults. |
+| req-github-core-dimensions-5 | Declaration Observation Dimension | Implemented | Every plugin-owned node and edge that is NOT a run or job observation carries `github.observation = "declaration"`. | Set on the remaining model defaults and edge `default_dimensions`. The config layer must be a positive fact, not the absence of a dimension: a query for it reads `observation = "declaration"`, never `NOT observation = "execution"`. |
+| req-github-core-dimensions-6 | Layer-Spanning Link Edges | Implemented | An edge type whose sources span both observation layers declares no default `github.observation`; the collector sets it per emitted edge from the source model's own default. | `REFERENCES_RESOURCE` only. Derived in `enrichment._dimensions_for_rule` by reading the source model's `DEFAULT_DIMENSIONS` through the registry — one derivation, no second map. |
 
 ### PAT Secret Kind
 ----

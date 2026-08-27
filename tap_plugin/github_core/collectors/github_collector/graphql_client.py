@@ -67,7 +67,15 @@ query($login: String!, $cursor: String) {
           visibility
           url
           defaultBranchRef { name target { oid } }
-          rulesets(first: 20) { nodes { name enforcement target } }
+          rulesets(first: 20) {
+            nodes {
+              databaseId
+              name
+              enforcement
+              target
+              source { __typename ... on Organization { login } ... on Repository { nameWithOwner } }
+            }
+          }
           environments(first: 20) { nodes { name } }
           object(expression: "HEAD:.github/workflows") {
             ... on Tree {

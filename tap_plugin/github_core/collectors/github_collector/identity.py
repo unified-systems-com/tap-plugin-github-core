@@ -42,6 +42,14 @@ def github_app_id(slug: str) -> UUID:
     return _id("github_core__github_app", slug)
 
 
+def ruleset_id(ruleset_db_id: int | str) -> UUID:
+    # Natural key is GitHub's ruleset databaseId alone — NOT scoped by repository.
+    # An organization-sourced ruleset is one rule set projected onto many repos, so
+    # every repo that reports it must resolve to the same node (measured: 3 org
+    # rulesets x 19 repos = 57 attachments over 3 nodes).
+    return _id("github_core__github_ruleset", str(ruleset_db_id))
+
+
 def run_id(full_name: str, run_id_int: int | str) -> UUID:
     # v0 natural key is owner/repo + run_id (run_attempt deferred — see
     # req-github-core-backlog-run-attempts).
