@@ -16,6 +16,13 @@ class GithubApp(BaseModel):
     ``ENABLED_ON`` edge. Identity is the app ``slug`` (e.g. ``dependabot``), so
     one app node is shared across every repo that enables it.
 
+    **This type is the registered APPLICATION only.** The grant — one account's
+    installation of it, with the permissions that account approved and the
+    repositories it reaches — is ``app_installation``, reached by
+    ``HAS_INSTALLATION``. They were one type until the vocabulary corpus split
+    them (seven sources); merged, an account's granted permissions would hang
+    off a node shared by every account that installed the same App.
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-app)
     """
 
@@ -43,6 +50,7 @@ class GithubApp(BaseModel):
         "slug": {"type": "string", "minLength": 1},
         "name": {"type": "string"},
         "app_id": {"type": ["integer", "null"]},
+        "client_id": {"type": "string"},
         "html_url": {"type": "string"},
         "description": {"type": "string"},
         "configuration": {"type": "object"},
@@ -53,6 +61,7 @@ class GithubApp(BaseModel):
         "slug": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "app_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "client_id": {"validation": "jsonschema", "schema": {"type": "string"}},
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "description": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
@@ -63,6 +72,8 @@ class GithubApp(BaseModel):
     slug = models.CharField(max_length=255, blank=True, default="", db_index=True)
     name = models.CharField(max_length=255, blank=True, default="")
     app_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    #: The App's public client id — the identifier its installations report back.
+    client_id = models.CharField(max_length=128, blank=True, default="")
     html_url = models.URLField(max_length=512, blank=True, default="")
     description = models.TextField(blank=True, default="")
     configuration = models.JSONField(default=dict, blank=True)

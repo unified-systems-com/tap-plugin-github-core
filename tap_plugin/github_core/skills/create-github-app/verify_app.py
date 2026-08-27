@@ -13,33 +13,28 @@ Usage:  python verify_app.py [--secrets-root DIR]
 from __future__ import annotations
 
 import argparse
-import base64
+import importlib.util
 import json
 import os
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 import api_url
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 
+# The JWT derivation is NOT duplicated here. It lives in the plugin package beside the collector's
+# auth seam (`collectors/github_collector/app_jwt.py`) and is loaded from its path, because this
+# script runs on the operator's machine from a checkout where nothing is installed. One
+# implementation means the credential this script PROVES works is minted exactly the way the
+# collector will mint it — a second copy is how "verified" and "works" drift apart.
+_APP_JWT_PATH = Path(__file__).resolve().parents[2] / "collectors" / "github_collector" / "app_jwt.py"
+_spec = importlib.util.spec_from_file_location("github_core_app_jwt", _APP_JWT_PATH)
+if _spec is None or _spec.loader is None:  # pragma: no cover - a broken checkout, not a code path
+    raise SystemExit(f"cannot load the App JWT helper from {_APP_JWT_PATH}")
+_app_jwt = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_app_jwt)
 
-def _b64(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
-
-
-def mint_jwt(app_id: int | str, private_key_pem: str) -> str:
-    """RS256 JWT, ~20 lines, no JWT library. Backdated 60s for clock skew; GitHub caps life at 10m."""
-    now = int(time.time())
-    header = _b64(json.dumps({"alg": "RS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    claims = _b64(json.dumps({"iat": now - 60, "exp": now + 540, "iss": str(app_id)},
-                             separators=(",", ":")).encode())
-    signing_input = f"{header}.{claims}".encode()
-    key = serialization.load_pem_private_key(private_key_pem.encode(), password=None)
-    signature = key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
-    return f"{header}.{claims}.{_b64(signature)}"
+mint_jwt = _app_jwt.mint_jwt
 
 
 def call(url: str, token: str, *, scheme: str = "Bearer", method: str = "GET") -> tuple[int, object]:

@@ -1,0 +1,15 @@
+{
+  "slug": "HAS_CACHE__github_core",
+  "name": "Has Cache",
+  "description": "A repository holds a stored Actions cache entry.",
+  "sources": [
+    "github_core__github_repository"
+  ],
+  "targets": [
+    "github_core__actions_cache"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions"
+  }
+}

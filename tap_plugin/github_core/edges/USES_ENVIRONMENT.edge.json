@@ -1,0 +1,15 @@
+{
+  "slug": "USES_ENVIRONMENT__github_core",
+  "name": "Uses Environment",
+  "description": "A declared job deploys to an environment, and therefore passes through whatever protection rules that environment carries. Its ABSENCE beside a job that deploys is the finding: a deployment with no environment has no gate in front of it.",
+  "sources": [
+    "github_core__workflow_job"
+  ],
+  "targets": [
+    "github_core__github_environment"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "deployments"
+  }
+}

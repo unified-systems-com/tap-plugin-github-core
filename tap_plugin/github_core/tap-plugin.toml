@@ -2,7 +2,7 @@ manifest_version = "0"
 plugin_version = "0.1.0"
 slug = "github_core"
 name = "TAP GitHub Core"
-description = "GitHub Actions deployment plumbing models for samsite — workflows, runs, jobs, runners."
+description = "GitHub Actions models — the pipeline as declared (workflows, jobs, rulesets, environments) and as run (runs, jobs, runners, caches)."
 
 depends_on = [
     { slug = "identity_core", note = "ENABLED_ON sources the identity_core__oidc_issuer type; the collector mints the issuer node via identity_core.issuer (the OIDC vocabulary lives there, not here)." },
@@ -17,6 +17,12 @@ github_core__github_actions_run = "tap_plugin.github_core.models.github_actions_
 github_core__github_actions_job = "tap_plugin.github_core.models.github_actions_job.GithubActionsJob"
 github_core__github_runner = "tap_plugin.github_core.models.github_runner.GithubRunner"
 github_core__github_app = "tap_plugin.github_core.models.github_app.GithubApp"
+github_core__app_installation = "tap_plugin.github_core.models.app_installation.AppInstallation"
+github_core__workflow_job = "tap_plugin.github_core.models.workflow_job.WorkflowJob"
+github_core__git_ref = "tap_plugin.github_core.models.git_ref.GitRef"
+github_core__github_ruleset = "tap_plugin.github_core.models.github_ruleset.GithubRuleset"
+github_core__github_environment = "tap_plugin.github_core.models.github_environment.GithubEnvironment"
+github_core__actions_cache = "tap_plugin.github_core.models.actions_cache.ActionsCache"
 
 [edges]
 HOSTS_ACCOUNT__github_core = "edges/HOSTS_ACCOUNT.edge.json"
@@ -28,6 +34,17 @@ HAS_ACTIONS_JOB__github_core = "edges/HAS_ACTIONS_JOB.edge.json"
 EXECUTED_ON__github_core = "edges/EXECUTED_ON.edge.json"
 REFERENCES_RESOURCE__github_core = "edges/REFERENCES_RESOURCE.edge.json"
 FEDERATES_VIA__github_core = "edges/FEDERATES_VIA.edge.json"
+DEFINES_JOB__github_core = "edges/DEFINES_JOB.edge.json"
+DEPENDS_ON_JOB__github_core = "edges/DEPENDS_ON_JOB.edge.json"
+HAS_REF__github_core = "edges/HAS_REF.edge.json"
+PROTECTS__github_core = "edges/PROTECTS.edge.json"
+BYPASSES__github_core = "edges/BYPASSES.edge.json"
+HAS_ENVIRONMENT__github_core = "edges/HAS_ENVIRONMENT.edge.json"
+USES_ENVIRONMENT__github_core = "edges/USES_ENVIRONMENT.edge.json"
+HAS_CACHE__github_core = "edges/HAS_CACHE.edge.json"
+SCOPED_TO__github_core = "edges/SCOPED_TO.edge.json"
+HAS_INSTALLATION__github_core = "edges/HAS_INSTALLATION.edge.json"
+INSTALLED_ON__github_core = "edges/INSTALLED_ON.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"

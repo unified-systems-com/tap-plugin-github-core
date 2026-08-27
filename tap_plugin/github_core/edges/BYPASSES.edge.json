@@ -1,0 +1,39 @@
+{
+  "slug": "BYPASSES__github_core",
+  "name": "Bypasses",
+  "description": "An actor may bypass a ruleset. Present only for an actor GitHub actually disclosed: the bypass list is returned only to a caller with write access to the ruleset, so ABSENCE OF THIS EDGE IS NOT ABSENCE OF BYPASS. The ruleset node's bypass_observability field carries that distinction, because when nobody bypasses \u2014 or nobody could be seen \u2014 there is no edge here to carry anything.",
+  "sources": [
+    "github_core__github_account",
+    "github_core__github_app",
+    "github_core__app_installation"
+  ],
+  "targets": [
+    "github_core__github_ruleset"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "rules"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "actor_type": {
+        "type": "string",
+        "description": "What kind of actor holds the exemption (`Integration`, `OrganizationAdmin`, `RepositoryRole`, `Team`, `DeployKey`) \u2014 the same exemption means different things depending on how many people hold it."
+      },
+      "bypass_mode": {
+        "type": "string",
+        "description": "`always`, or `pull_request` (the actor may bypass only through a PR). A mode-limited bypass is a narrower claim than an unconditional one."
+      },
+      "observable": {
+        "type": "boolean",
+        "description": "Whether the credential that produced this edge could actually read the bypass list. Always true on an emitted edge \u2014 it is carried per-actor so a merged view assembled from several credentials keeps each actor's provenance."
+      },
+      "source": {
+        "type": "string",
+        "description": "Which transport disclosed it (`rest_ruleset_detail`, `graphql_bypass_actors`), because the two do not agree for the same credential."
+      }
+    }
+  }
+}

@@ -42,6 +42,48 @@ def github_app_id(slug: str) -> UUID:
     return _id("github_core__github_app", slug)
 
 
+def workflow_job_id(full_name: str, workflow_id_int: int | str, job_key: str) -> UUID:
+    """A DECLARED job: the workflow it is written in, plus its YAML key.
+
+    Keyed on the workflow id rather than the file path so a renamed file keeps the same job
+    nodes, and on the job key rather than the display name because `name:` is free text an
+    author changes without changing what the job is.
+    """
+    return _id("github_core__workflow_job", f"{full_name}#{workflow_id_int}#{job_key}")
+
+
+def git_ref_id(full_name: str, ref: str) -> UUID:
+    """A ref, keyed on its FULL path (`refs/heads/main`).
+
+    The full path rather than the short name, because a branch and a tag may share one
+    (`refs/heads/release` and `refs/tags/release` are different objects with the same name).
+    """
+    return _id("github_core__git_ref", f"{full_name}#{ref}")
+
+
+def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
+    """A ruleset, keyed on owner + GitHub's ruleset id.
+
+    Not repo-scoped: one organization ruleset applies to many repositories and must be ONE node
+    that many repositories point at, or the question "what does this ruleset protect" becomes a
+    string comparison across duplicates.
+    """
+    return _id("github_core__github_ruleset", f"{owner}#{ruleset_id_int}")
+
+
+def environment_id(full_name: str, name: str) -> UUID:
+    return _id("github_core__github_environment", f"{full_name}#{name}")
+
+
+def actions_cache_id(full_name: str, cache_id_int: int | str) -> UUID:
+    return _id("github_core__actions_cache", f"{full_name}#{cache_id_int}")
+
+
+def app_installation_id(installation_id_int: int | str) -> UUID:
+    """An installation, keyed on GitHub's installation id — unique across the platform."""
+    return _id("github_core__app_installation", str(installation_id_int))
+
+
 def run_id(full_name: str, run_id_int: int | str) -> UUID:
     # v0 natural key is owner/repo + run_id (run_attempt deferred — see
     # req-github-core-backlog-run-attempts).
