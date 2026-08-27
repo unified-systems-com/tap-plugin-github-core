@@ -69,6 +69,13 @@ GitHub documents the strip, verbatim from "Get a repository ruleset": *"To preve
 
 **A trap worth knowing:** the rule-suite endpoints default `time_period` to `day`. A query that omits it silently returns one day of evaluations and reads as a quiet repository.
 
+**One question is open and worth closing before anyone trusts a bypass view.** GraphQL exposes `bypassActors` on `RepositoryRuleset` — the field REST gates — as `bypassActors(first:) { nodes { bypassMode repositoryRoleDatabaseId actor } }`. Against an owner PAT it returns `[]`, matching REST's genuinely-empty. **What it returns to an unprivileged credential has not been tested.** The two possibilities are not equivalent:
+
+- a `FORBIDDEN` entry in the `errors` array — detectable, so the view can honestly render *not-observable*;
+- a silent `[]` — indistinguishable from "nobody can bypass", which would make GraphQL **worse** than REST here, because REST omits the field entirely and an omission is detectable.
+
+Until someone runs it against a read-only App, do not populate a bypass view from GraphQL, and do not read an empty GraphQL `bypassActors` as evidence of no exemptions.
+
 **Not observable:** who may bypass, without write access; anything at all through an unauthenticated path. And an empty ruleset set is ambiguous in the reassuring direction — it means "no gates" or "we could not look" — so any view built on this type owes its reader three states: none, some, and not-observable.
 
 ## Authoritative Source
