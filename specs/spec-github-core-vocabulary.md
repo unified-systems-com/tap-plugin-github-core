@@ -195,7 +195,7 @@ readable catalogue, a collector can land it on the grid so "what changed" become
 | # | Question | Ruling |
 | ---: | --- | --- |
 | 1 | `workflow_job` (the declared job) in the *self* tier? | **Yes.** Cheaper now than after `USES_ACTION` / `REFERENCES_SECRET` ship pointing at the wrong source |
-| 2 | `git_ref` replacing `git_branch`? | *Awaiting confirmation* — recommended yes; free before the migration, a rename after |
+| 2 | `git_ref` replacing `git_branch`? | **Yes** (2026-08-27). One type, `ref_type` ∈ `branch` \| `tag`. Tag movement is the detection for three incidents, and a ruleset's target is one enum spanning `branch\|tag\|push`, so a split type would fan the ruleset join out across two types and two edges. The slug is a modelling name: views render "Branches" and "Tags", and the word *ref* need never reach a reader |
 | 3 | Where `credential_grant` lives | **`identity_core`** — neutral, sits beside `principal`, and both a non-forge and a registry collector populate it |
 | 4 | Where `package` / `package_version` live | **A new `supply_chain_core`.** Supply chain is the next domain after this one, so the substrate is created there rather than borrowed. Identity remains a purl |
 
@@ -228,6 +228,33 @@ readable catalogue, a collector can land it on the grid so "what changed" become
    the ruleset detail (answers "can *this* credential bypass", not "who else can"), and the
    rule-suite / rule-insights endpoints may expose actual bypass *events* even where the actor list
    is withheld — detection instead of enumeration.
+
+   **Re-measured 2026-08-27 (afternoon), and the transport changes the answer.** The same App
+   credential that REST refuses gets an *answer* from GraphQL: `RepositoryRuleset.bypassActors`
+   returns `totalCount: 0` with **no `errors` entry at all**, where the REST ruleset detail simply
+   omits the `bypass_actors` key. Checked against an owner credential, every ruleset in our
+   organization genuinely has an empty bypass list — so **the distinguishing case is untested**: we
+   cannot tell a truthful `0` from a silently filtered connection, and our own org cannot tell us
+   (proving it would mean adding a bypass actor to a live ruleset, which is a change to our security
+   posture, not a measurement).
+
+   The derivation that follows from that, and which the collector implements:
+
+   ```
+   observable = rest_detail_carries_bypass_actors  OR  graphql_bypass_actors_is_non_empty
+   ```
+
+   A **non-empty** GraphQL answer proves itself — a filtered connection cannot invent actors. An
+   **empty** one proves nothing, so it is recorded as *not observable* rather than as *none*. This
+   is the asymmetry that matters: false *presence* is impossible, false *absence* is the whole risk.
+
+   **Correction to the edge design — the absence signal cannot live on the edge.** `BYPASSES` keeps
+   its `observable` property for per-actor provenance, but when the answer is *none* or *unknown*
+   **there are no edges to carry it**, and a view that reads only edges renders both as an empty
+   list. The three states therefore live on the **`github_ruleset` node** (`bypass_observability` ∈
+   `observed` \| `unobservable`, with `bypass_actor_count` meaningful only when `observed`), which
+   exists in every case. Generalized: *a property that qualifies an absence belongs on the node the
+   absence is about, never on the edges that failed to appear.*
 4. **When the neutral substrate is extracted.** 11 concepts are marked neutral and the kernel test
    confirms they populate from a non-forge project. Extraction while a slug change is still a
    re-collect is cheaper than a migration later.
