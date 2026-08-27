@@ -63,7 +63,10 @@ def build(*, org: str, redirect_url: str, name: str, public: bool, exploratory: 
     permissions = {_manifest_key("repository", k): v for k, v in repo_perms.items()}
     for k, v in org_perms.items():
         manifest_key = _manifest_key("organization", k)
-        assert manifest_key not in permissions, f"permission key collision on {manifest_key!r}"
+        if manifest_key in permissions:
+            # Not an assert: `python -O` strips asserts, and a stripped guard here means one
+            # permission surface silently overwrites the other (req-github-core-app-auth-3).
+            raise ValueError(f"permission key collision on {manifest_key!r}")
         permissions[manifest_key] = v
     return {
         "name": name,

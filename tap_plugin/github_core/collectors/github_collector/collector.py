@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
 

@@ -247,7 +247,7 @@ def main() -> int:
     target = place_envelope(data, owner=observe, api_base_url=args.api_base_url,
                             secrets_root=args.secrets_root)
     print(f"  App id      {data['id']}  ({data['slug']})")
-    print(f"  private key written to the envelope, never printed")
+    print("  private key written to the envelope, never printed")
     print(f"  envelope    {target}  (0600)")
     print(f"\n  NEXT: install it -> https://github.com/apps/{data['slug']}/installations/new")
     print("        then verify   -> verify_app.py (in the container)")
