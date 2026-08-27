@@ -25,20 +25,57 @@ GITHUB_SECRET_REF = SecretRef(scope="github_core", key="collector")
 GITHUB_SECRET_KIND = "github_pat"
 
 # github_core owns this schema for the kind's `data` (req-github-core-secret-2).
-# Strict: only the four v0 fields. Behavioral knobs beyond `initial_run_limit`
+# Strict: additionalProperties false. Behavioral knobs beyond `initial_run_limit`
 # were pruned in the spec's Pruned Knobs section; the schema enforces that
 # pruning at load time.
+#
+# Scope (req-github-core-org-scope): the collector's target is an ACCOUNT — `owner`, the
+# login of a GitHub organization or user — and the collector enumerates that account's
+# repositories itself. `repos` is then an optional include-filter. A `repos`-only envelope
+# (no `owner`) remains valid: the explicit list IS the scope — the degenerate run config,
+# never a parallel code path (tap#142). At least one of the two must be present.
 GITHUB_PAT_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
+    "description": (
+        "Data block of the github_core collector's github_pat credential: a fine-grained, "
+        "READ-ONLY personal access token whose resource owner is the observed account, plus the "
+        "collection scope. Least privilege: Metadata + Contents + Actions read on the scoped "
+        "repositories; Administration read only if runner nodes are wanted. Never write scopes."
+    ),
     "additionalProperties": False,
-    "required": ["token", "repos"],
+    "required": ["token"],
+    "anyOf": [{"required": ["owner"]}, {"required": ["repos"]}],
     "properties": {
-        "token": {"type": "string", "minLength": 1},
+        "token": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The PAT value. Secret material — never logged, never stored on the grid.",
+        },
         "api_base_url": {
             "type": "string",
             "minLength": 1,
             "default": "https://api.github.com",
+            # https only, and no userinfo/query/fragment. Both clients build request URLs from
+            # this value and hand them to urlopen, which honours whatever scheme it is given: an
+            # http:// base would carry the PAT in cleartext to a host named by the envelope, and
+            # a file:// base would turn an API call into a local read. Refusing it here, once, at
+            # the point the value enters the system, beats a check at each consumer.
+            "pattern": r"^https://[^\s/@?#]+(/[^\s?#]*)?$",
+            "description": (
+                "GitHub REST API base URL. Rides with the credential because a GitHub Enterprise "
+                "Server tenant has its own base URL and its own PAT. Must be https with no "
+                "userinfo, query or fragment — it is interpolated into every request URL."
+            ),
+        },
+        "owner": {
+            "type": "string",
+            "pattern": r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$",
+            "description": (
+                "Login of the GitHub organization or user whose repositories are the collection "
+                "scope. The collector enumerates the account's repositories (org first, user "
+                "fallback) and records the enumeration on the run."
+            ),
         },
         "repos": {
             "type": "array",
@@ -48,11 +85,17 @@ GITHUB_PAT_SCHEMA: dict[str, Any] = {
                 "pattern": r"^[^/]+/[^/]+$",
                 "minLength": 3,
             },
+            "description": (
+                "Explicit `owner/repo` targets. With `owner` present: an include-filter over the "
+                "enumerated repositories. Without `owner`: the scope itself (the legacy, "
+                "degenerate form)."
+            ),
         },
         "initial_run_limit": {
             "type": "integer",
             "minimum": 1,
             "default": 10,
+            "description": "Number of latest workflow runs to seed per repository on first collection.",
         },
     },
 }
@@ -71,6 +114,17 @@ def resolve_github_secret(ref: SecretRef = GITHUB_SECRET_REF) -> Secret:
     secret = resolve_secret(ref)
     require_secret_kind(secret, GITHUB_SECRET_KIND, data_schema=GITHUB_PAT_SCHEMA)
     return secret
+
+
+def collection_owner(data: dict[str, Any]) -> str | None:
+    """The account scope (`owner`) if the envelope declares one, else None (repos-only form)."""
+    owner = data.get("owner")
+    return str(owner) if owner else None
+
+
+def explicit_repos(data: dict[str, Any]) -> list[str]:
+    """The envelope's explicit `owner/repo` list — the scope, or the filter, depending on `owner`."""
+    return [str(r) for r in (data.get("repos") or [])]
 
 
 def api_base_url(data: dict[str, Any]) -> str:

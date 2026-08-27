@@ -71,6 +71,9 @@ class GithubClient:
         self._api_base_url = api_base_url.rstrip("/")
         self._retry_empty_404 = retry_empty_404
 
+    # Set by every `get_paginated` walk: did it reach the end of the Link chain?
+    last_walk_complete: bool = True
+
     def get(self, path: str, *, params: dict[str, str] | None = None) -> Any:
         """Single GET; returns decoded JSON. Raises GithubAPIError on non-2xx."""
         url = self._build_url(path, params)
@@ -99,6 +102,10 @@ class GithubClient:
                 items.extend(page_items)
             url = self._next_link
             pages += 1
+        # True only when the walk ran off the end of the Link chain — a `max_pages` stop with
+        # a next link still pending is an INCOMPLETE enumeration, and a caller asserting
+        # scope completeness (req-github-core-org-scope-3) must not claim it.
+        self.last_walk_complete = not url
         return items
 
     def _build_url(self, path: str, params: dict[str, str] | None) -> str:
