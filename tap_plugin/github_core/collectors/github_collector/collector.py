@@ -164,7 +164,7 @@ class GithubCollectorError(Exception):
 
 
 class GithubCollector(CollectorBase):
-    """GitHub Actions collector — single PAT, account-scoped (or explicit repos), two-phase run.
+    """GitHub Actions collector — one credential, account-scoped (or explicit repos), two-phase run.
 
     Transport is a deliberate hybrid (req-github-core-graphql-config): the CONFIG layer arrives via
     GraphQL in one request per 100 repositories, the OPERATION layer (runs, jobs, runners) via REST
@@ -179,11 +179,15 @@ class GithubCollector(CollectorBase):
     def self_test(cls) -> CollectorSelfTestResult:
         """Operator-facing readiness check for the github_core collector.
 
-        Four checks in order; each short-circuits the rest on failure with an
-        actionable readiness status:
-          1. GITHUB_SECRET_PRESENT — `github_pat` secret file exists
-          2. GITHUB_SECRET_VALID   — secret schema validates (token, repos, ...)
-          3. GITHUB_API_REACHABLE  — `GET /rate_limit` succeeds within budget
+        Checks in order; each short-circuits the rest on failure with an actionable readiness
+        status:
+          1. GITHUB_SECRET_PRESENT — a collector credential is placed
+          2. GITHUB_SECRET_VALID   — it is a kind this collector accepts and its schema validates
+          3. GITHUB_CREDENTIAL_USABLE — the credential yields a bearer token. For a PAT that is
+             the token itself; for an App it means the key signs a JWT, the App is installed on
+             the named account, and the installation mints a token — the whole chain, before
+             anything relies on it (req-github-core-app-auth-9)
+          4. GITHUB_API_REACHABLE  — `GET /rate_limit` succeeds within budget
           4. GITHUB_OWNER_ACCESS   — the account scope enumerates (`/orgs|/users/{owner}/repos`)
              GITHUB_REPO_ACCESS    — per-explicit-repo `GET /repos/{owner}/{repo}`
                                      succeeds; surfaces which repo(s) fail
@@ -201,14 +205,14 @@ class GithubCollector(CollectorBase):
             checks.append(
                 check_fail(
                     "GITHUB_SECRET_PRESENT",
-                    f"github_pat secret is not configured: {exc}",
+                    f"No collector credential is configured: {exc}",
                     readiness_status=CollectorReadinessStatus.UNCONFIGURED,
                     docs=_DOCS,
                 )
             )
             return CollectorSelfTestResult.from_checks(
                 checks,
-                summary="github_pat secret is not configured.",
+                summary="No collector credential is configured.",
                 docs=_DOCS,
             )
         except (SecretValidationError, SecretError) as exc:
@@ -216,20 +220,21 @@ class GithubCollector(CollectorBase):
             checks.append(
                 check_fail(
                     "GITHUB_SECRET_VALID",
-                    f"github_pat secret is malformed: {exc}",
+                    f"Collector credential is unusable: {exc}",
                     readiness_status=CollectorReadinessStatus.MISCONFIGURED,
                     docs=_DOCS,
                 )
             )
             return CollectorSelfTestResult.from_checks(
                 checks,
-                summary="github_pat secret is malformed.",
+                summary="Collector credential is unusable.",
                 docs=_DOCS,
             )
         checks.append(
             check_pass(
                 "GITHUB_SECRET_VALID",
-                "github_pat secret resolves and is the expected kind.",
+                f"Collector credential resolves; kind {secret.kind!r}.",
+                context={"kind": secret.kind},
                 docs=_DOCS,
             )
         )
@@ -238,10 +243,46 @@ class GithubCollector(CollectorBase):
         owner = collection_owner(data)
         repos: list[str] = explicit_repos(data)
 
-        # 3. API reachable + PAT authenticates — GET /rate_limit.
+        # 3. The credential yields a bearer token. For an App this exercises the entire chain —
+        # key signs a JWT, the App is installed on the named account, the installation mints a
+        # token — which is exactly the part an operator cannot check by reading the envelope.
+        auth = GithubAuth(kind=secret.kind, data=data, api_base_url=api_base_url(data))
+        try:
+            token = auth.token()
+        except GithubAppAuthError as exc:
+            checks.append(
+                check_fail(
+                    "GITHUB_CREDENTIAL_USABLE",
+                    f"App credential could not produce an installation token: {exc}",
+                    readiness_status=CollectorReadinessStatus.MISCONFIGURED,
+                    docs=_DOCS,
+                )
+            )
+            return CollectorSelfTestResult.from_checks(
+                checks,
+                summary="App credential could not produce an installation token.",
+                docs=_DOCS,
+            )
+        installation = auth.installation or {}
+        checks.append(
+            check_pass(
+                "GITHUB_CREDENTIAL_USABLE",
+                f"Authenticated as {auth.mode}"
+                + (
+                    f"; installation {installation.get('id')} on "
+                    f"{(installation.get('account') or {}).get('login', '?')}"
+                    if auth.mode == MODE_APP
+                    else ""
+                ),
+                context={"mode": auth.mode, "installation_id": installation.get("id")},
+                docs=_DOCS,
+            )
+        )
+
+        # 4. API reachable + the credential authenticates — GET /rate_limit.
         # No-retry client so a real 401/403 surfaces immediately.
         client = GithubClient(
-            token=data["token"],
+            token=token,
             api_base_url=api_base_url(data),
             retry_empty_404=False,
         )
@@ -258,20 +299,20 @@ class GithubCollector(CollectorBase):
             )
             return CollectorSelfTestResult.from_checks(
                 checks,
-                summary="GitHub API unreachable or PAT auth failed.",
+                summary="GitHub API unreachable or credential auth failed.",
                 docs=_DOCS,
             )
         core = rate.get("rate") or rate.get("resources", {}).get("core", {})
         checks.append(
             check_pass(
                 "GITHUB_API_REACHABLE",
-                f"GitHub API reachable; PAT rate-limit " f"{core.get('used', '?')}/{core.get('limit', '?')} used.",
+                f"GitHub API reachable; rate limit " f"{core.get('used', '?')}/{core.get('limit', '?')} used.",
                 context={"rate": core},
                 docs=_DOCS,
             )
         )
 
-        # 4a. Account scope (req-github-core-org-scope): the PAT can see the owner and
+        # 4a. Account scope (req-github-core-org-scope): the credential can see the owner and
         # enumerate its repositories. Bounded — one listing walk, not a probe per repo, so an
         # org of hundreds of repos self-tests in seconds. Explicit repos (filter or legacy
         # scope) are still probed one by one below.
@@ -289,7 +330,7 @@ class GithubCollector(CollectorBase):
                 checks.append(
                     check_fail(
                         f"GITHUB_OWNER_ACCESS:{owner}",
-                        f"PAT cannot enumerate repositories under {owner}: status={exc.status} "
+                        f"Credential cannot enumerate repositories under {owner}: status={exc.status} "
                         f"body={exc.body[:200] or '(empty)'}",
                         readiness_status=CollectorReadinessStatus.ERROR,
                         docs=_DOCS,
@@ -299,7 +340,7 @@ class GithubCollector(CollectorBase):
                 checks.append(
                     check_pass(
                         f"GITHUB_OWNER_ACCESS:{owner}",
-                        f"PAT enumerates {len(listing)} repo(s) under {owner}"
+                        f"Credential enumerates {len(listing)} repo(s) under {owner}"
                         f"{'' if client.last_walk_complete else ' (walk INCOMPLETE — page cap hit)'}.",
                         context={"owner": owner, "enumerated": len(listing), "complete": client.last_walk_complete},
                         docs=_DOCS,
@@ -316,7 +357,7 @@ class GithubCollector(CollectorBase):
                 checks.append(
                     check_fail(
                         f"GITHUB_REPO_ACCESS:{repo}",
-                        f"PAT cannot access {repo}: status={exc.status} " f"body={exc.body[:200] or '(empty)'}",
+                        f"Credential cannot access {repo}: status={exc.status} " f"body={exc.body[:200] or '(empty)'}",
                         readiness_status=CollectorReadinessStatus.ERROR,
                         docs=_DOCS,
                     )
@@ -325,7 +366,7 @@ class GithubCollector(CollectorBase):
                 checks.append(
                     check_pass(
                         f"GITHUB_REPO_ACCESS:{repo}",
-                        f"PAT has access to {repo}.",
+                        f"Credential has access to {repo}.",
                         context={"repo": repo},
                         docs=_DOCS,
                     )
@@ -336,7 +377,7 @@ class GithubCollector(CollectorBase):
             summary=(
                 f"GitHub Core collector is ready; {len(repos)} repo(s) accessible."
                 if repo_access_ok
-                else "GitHub Core collector PAT cannot access one or more configured repos."
+                else "GitHub Core collector credential cannot access one or more configured repos."
             ),
             docs=_DOCS,
         )
