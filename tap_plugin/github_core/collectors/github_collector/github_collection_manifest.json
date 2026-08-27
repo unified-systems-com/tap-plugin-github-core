@@ -217,8 +217,8 @@
     {
       "name": "app_installations",
       "kind": "rest_endpoint",
-      "path": "/app/installations",
-      "item_path": "[*]",
+      "path": "/orgs/{owner}/installations",
+      "item_path": "installations[*]",
       "target_entity_type": "github_core__app_installation",
       "fields": [
         "installation_id",
@@ -231,8 +231,23 @@
         "suspended"
       ],
       "permission_failure": "degrade_with_warning",
-      "description": "The App's own installation inventory (req-github-core-app-installations). Declares NO permission triple on purpose: this is an App-JWT-level endpoint about the App itself, not a grant over anybody's repositories, so it contributes nothing to the derived least-privilege set. A personal access token gets 404 here, and the run records that the surface was unreachable rather than emitting an empty inventory.",
-      "permission_not_applicable": "App-JWT-level endpoint describing the App itself, not a grant over any account's resources. No fine-grained permission triple exists for it, and inventing one would corrupt the derived least-privilege set. A personal access token gets 404."
+      "description": "Which Apps can reach this account's repositories, and with which granted permissions (req-github-core-app-installations). App-ONLY: a personal access token gets 404, which is one of the two surfaces that make the App the product credential rather than a convenience. Falls back to `/app/installations` \u2014 THIS App's own installation, an inventory of one \u2014 when the account-wide list is refused, and says which it got, because an inventory of one is not an inventory.",
+      "permission": "organization:administration:read"
+    },
+    {
+      "name": "app_installation_self",
+      "kind": "rest_endpoint",
+      "path": "/app/installations",
+      "item_path": "[*]",
+      "target_entity_type": "github_core__app_installation",
+      "fields": [
+        "installation_id",
+        "app_id",
+        "app_slug",
+        "account_login"
+      ],
+      "permission_not_applicable": "App-JWT-level endpoint describing THIS App's own installations, not a grant over any account's resources. No fine-grained permission triple exists for it, and inventing one would corrupt the derived least-privilege set. Also the fallback when the account-wide inventory is refused, and how the collector learns which installation it is authenticating as.",
+      "description": "Self-identification and fallback. A personal access token gets 404 here too."
     }
   ],
   "edges": [

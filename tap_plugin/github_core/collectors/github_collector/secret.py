@@ -1,15 +1,20 @@
-"""github_pat and github_app secret kinds: data schemas + resolution helper.
+"""The github_core collector credential: one envelope, an App and/or a token.
 
 `github_core` owns both data shapes and validates them consumer-side via tap_cares
 `require_secret_kind`. The bare kind names follow the `aws_static_access_key` precedent — a kind
 name describes the credential type, not the owning plugin.
 
-**Two kinds, one seam.** The collector accepts either and dispatches on the resolved envelope's
-`kind`; `auth.py` turns whichever arrived into a bearer token. A PAT points an instance at a
-repository in ten minutes and is a person's power in token form. An App is its own principal, and
-the account's installed-App inventory and fine-grained PAT grants answer `404` to any token — so
-the App is the product credential and the PAT is the first-look one. Neither is privileged in the
-code above the seam.
+**One envelope, both credentials, chosen per source.** Neither credential dominates, and that is
+measured rather than assumed: only an App sees the account's installed-App inventory and its
+fine-grained PAT grants; only an owner-minted PAT sees a ruleset's bypass actors. So the envelope
+carries an `app` block, a `pat` block, or both, and each collection source asks for the credential
+that yields the fuller answer. Where the better one is absent the collector records WHICH
+credential would have shown more, which is what turns "we could not see it" into something an
+operator can act on.
+
+The older single-credential kinds (`github_pat`, `github_app`) still validate and are folded into
+this shape on read — samsite's shipped record declares `github_pat`, and breaking its boot to tidy
+a kind name would be a poor trade.
 
 Spec: plugins/github_core/specs/spec-github-core-v0.md
 (req-github-core-secret, req-github-core-app-auth).
@@ -29,6 +34,11 @@ from tap_cares.secrets.models import Secret
 # `scope` names the consuming plugin's slug, not the credential provider
 # (req-tap-cares-secrets-consumer-scoping).
 GITHUB_SECRET_REF = SecretRef(scope="github_core", key="collector")
+#: The current kind: ONE envelope that may carry an App, a token, or both.
+GITHUB_KIND = "github"
+#: Legacy single-credential kinds, still accepted on read through the transition
+#: (`req-github-core-secret-3`). samsite's shipped record still declares `github_pat`, and
+#: breaking its boot to tidy a kind name would be a poor trade.
 GITHUB_SECRET_KIND = "github_pat"
 GITHUB_APP_SECRET_KIND = "github_app"
 
@@ -170,11 +180,131 @@ GITHUB_APP_SCHEMA: dict[str, Any] = {
     },
 }
 
-#: The data schema for each credential kind this collector accepts.
+# github_core owns the schema for the current `github` kind: ONE envelope carrying an App, a
+# personal access token, or BOTH (req-github-core-secret-3).
+#
+# Both, because **neither credential dominates** — measured, not assumed. Only a GitHub App can
+# read the account's installed-App inventory and its fine-grained PAT grants; only an owner-minted
+# PAT can read a ruleset's bypass actors, because GitHub returns that list solely to a caller with
+# write access to the ruleset. An either/or envelope therefore condemns every deployment to one
+# permanent blind spot, and which one it gets is decided by a field name.
+#
+# It also keeps the boot layer out of it: `tap_boot` compares an envelope's kind to exactly one
+# declared kind (req-boot-required-secrets-5), so a record could never declare "App or PAT". One
+# kind with two optional blocks needs no core change, and the shape stays owned here, which is
+# where req-github-core-secret-2 already puts it.
+GITHUB_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "description": (
+        "Data block of the github_core collector credential. Carries a GitHub App, a read-only "
+        "personal access token, or both — the collector uses whichever yields the fuller answer "
+        "for each source, and records which credential a missing answer would have needed."
+    ),
+    "additionalProperties": False,
+    "anyOf": [{"required": ["app"]}, {"required": ["pat"]}],
+    "required": ["owner"],
+    "properties": {
+        "owner": {
+            "type": "string",
+            "pattern": r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$",
+            "description": (
+                "Login of the organization or user whose repositories are the collection scope. "
+                "Also SELECTS the App installation to authenticate as: an App installed into "
+                "several accounts must be told which one, or it would collect one account's "
+                "repositories under another's name."
+            ),
+        },
+        "api_base_url": {
+            "type": "string",
+            "minLength": 1,
+            "default": "https://api.github.com",
+            "description": "GitHub REST API base URL; a GitHub Enterprise Server tenant has its own.",
+        },
+        "app": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["app_id", "private_key"],
+            "description": (
+                "The GitHub App. Sees what a token cannot: the installed-App inventory and the "
+                "organization's fine-grained PAT grants."
+            ),
+            "properties": {
+                "app_id": {
+                    "type": ["integer", "string"],
+                    "description": "The App's numeric id, the JWT's `iss`.",
+                },
+                "app_slug": {
+                    "type": "string",
+                    "description": "The App's URL slug. Not used for auth — carried so a run can name what it ran as.",
+                },
+                "private_key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "PEM private key. Secret material — never logged, never stored on the grid.",
+                },
+            },
+        },
+        "pat": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["token"],
+            "description": (
+                "A fine-grained, READ-ONLY personal access token whose resource owner is the "
+                "observed account. Sees what an App cannot: a ruleset's bypass actors, which "
+                "GitHub discloses only to a caller with write access to the ruleset."
+            ),
+            "properties": {
+                "token": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The token value. Secret material — never logged, never stored on the grid.",
+                },
+            },
+        },
+        "repos": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "pattern": r"^[^/]+/[^/]+$", "minLength": 3},
+            "description": "Explicit `owner/repo` targets — an include-filter over the enumerated repositories.",
+        },
+        "initial_run_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 10,
+            "description": "Number of latest workflow runs to seed per repository on first collection.",
+        },
+    },
+}
+
+#: The data schema for each credential kind this collector accepts. The legacy kinds are read-only
+#: compatibility: they still validate, and `normalize_credentials` folds them into the current
+#: shape so nothing above the seam knows which arrived.
 SCHEMA_BY_KIND: dict[str, dict[str, Any]] = {
+    GITHUB_KIND: GITHUB_SCHEMA,
     GITHUB_SECRET_KIND: GITHUB_PAT_SCHEMA,
     GITHUB_APP_SECRET_KIND: GITHUB_APP_SCHEMA,
 }
+
+
+def normalize_credentials(kind: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Fold any accepted envelope kind into the current `{owner, api_base_url, app?, pat?, ...}` shape.
+
+    One place converts, so every caller above the auth seam reasons about one shape and the
+    transition off the single-credential kinds is a detail rather than a branch in every consumer.
+    """
+    if kind == GITHUB_KIND:
+        return dict(data)
+    folded: dict[str, Any] = {
+        key: data[key] for key in ("owner", "api_base_url", "repos", "initial_run_limit") if key in data
+    }
+    if kind == GITHUB_APP_SECRET_KIND:
+        folded["app"] = {
+            key: data[key] for key in ("app_id", "app_slug", "private_key") if key in data
+        }
+    elif kind == GITHUB_SECRET_KIND:
+        folded["pat"] = {"token": data["token"]}
+    return folded
 
 
 class GithubCredentialError(Exception):

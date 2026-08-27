@@ -16,7 +16,11 @@ import json
 
 import pytest
 import tap_plugin.github_core.models as github  # noqa: F401 — trigger model registration
-from tap_plugin.github_core.collectors.github_collector.auth import MODE_APP, MODE_PAT, GithubAuth
+from tap_plugin.github_core.collectors.github_collector.auth import (
+    PREFER_APP,
+    PREFER_PAT,
+    GithubAuth,
+)
 from tap_plugin.github_core.collectors.github_collector.app_jwt import GithubAppAuthError
 from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
 from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
@@ -31,8 +35,9 @@ from tap_plugin.github_core.collectors.github_collector.identity import (
 from tap_plugin.github_core.collectors.github_collector.manifest import load_collection_manifest
 from tap_plugin.github_core.collectors.github_collector.parser import parse_workflow_yaml
 from tap_plugin.github_core.collectors.github_collector.secret import (
-    GITHUB_APP_SCHEMA,
+    GITHUB_SCHEMA,
     SCHEMA_BY_KIND,
+    normalize_credentials,
 )
 
 from tap_grid.models import Entity
@@ -487,53 +492,102 @@ class TestRefPatternMatching:
 # --------------------------------------------------------------------------------------------
 
 
-class TestCredentialKinds:
-    def test_both_kinds_are_accepted(self) -> None:
-        assert set(SCHEMA_BY_KIND) == {"github_pat", "github_app"}
+class TestCredentialEnvelope:
+    """One envelope carries an App, a token, or both — because neither sees everything."""
 
-    def test_an_app_envelope_needs_a_key_and_a_scope(self) -> None:
+    def test_the_current_kind_and_the_legacy_ones_are_all_accepted(self) -> None:
+        """samsite's shipped record still declares `github_pat`; breaking its boot to tidy a kind
+        name would be a poor trade."""
+        assert set(SCHEMA_BY_KIND) == {"github", "github_pat", "github_app"}
+
+    def test_an_envelope_must_carry_at_least_one_credential(self) -> None:
         import jsonschema
 
-        jsonschema.validate({"app_id": 1, "private_key": "pem", "owner": "acme"}, GITHUB_APP_SCHEMA)
+        jsonschema.validate({"owner": "acme", "app": {"app_id": 1, "private_key": "pem"}}, GITHUB_SCHEMA)
+        jsonschema.validate({"owner": "acme", "pat": {"token": "ghp_x"}}, GITHUB_SCHEMA)
+        jsonschema.validate(
+            {"owner": "acme", "app": {"app_id": 1, "private_key": "pem"}, "pat": {"token": "ghp_x"}},
+            GITHUB_SCHEMA,
+        )
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate({"app_id": 1, "owner": "acme"}, GITHUB_APP_SCHEMA)
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate({"app_id": 1, "private_key": "pem"}, GITHUB_APP_SCHEMA)
+            jsonschema.validate({"owner": "acme"}, GITHUB_SCHEMA)
 
-    def test_the_app_envelope_holds_no_token(self) -> None:
-        """A github_app envelope carrying a `token` would mean somebody pasted a PAT into the
-        wrong kind; strict schemas are how that is caught at load rather than at 401."""
+    def test_credential_material_cannot_sit_at_the_top_level(self) -> None:
+        """A token pasted beside `owner` instead of inside `pat` is caught at load rather than at
+        401 — strict schemas are the cheap half of credential hygiene."""
         import jsonschema
 
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(
-                {"app_id": 1, "private_key": "pem", "owner": "acme", "token": "ghp_x"},
-                GITHUB_APP_SCHEMA,
-            )
+            jsonschema.validate({"owner": "acme", "token": "ghp_x"}, GITHUB_SCHEMA)
+
+    def test_legacy_envelopes_fold_into_the_current_shape(self) -> None:
+        """One place converts, so nothing above the auth seam branches on which kind arrived."""
+        folded_pat = normalize_credentials("github_pat", {"token": "ghp_x", "owner": "acme"})
+        assert folded_pat == {"owner": "acme", "pat": {"token": "ghp_x"}}
+        folded_app = normalize_credentials(
+            "github_app", {"app_id": 1, "app_slug": "s", "private_key": "pem", "owner": "acme"}
+        )
+        assert folded_app == {
+            "owner": "acme",
+            "app": {"app_id": 1, "app_slug": "s", "private_key": "pem"},
+        }
 
 
 class TestAuthSeam:
     @staticmethod
-    def _app_auth(installations: list[dict], owner: str = "acme") -> GithubAuth:
-        auth = GithubAuth(
-            kind="github_app",
-            data={"app_id": 1, "private_key": "pem", "owner": owner},
-            api_base_url="https://api.github.com",
-        )
+    def _app_auth(installations: list[dict], owner: str = "acme", *, pat: bool = False) -> GithubAuth:
+        data: dict = {"owner": owner, "app": {"app_id": 1, "private_key": "pem"}}
+        if pat:
+            data["pat"] = {"token": "ghp_x"}
+        auth = GithubAuth(kind="github", data=data, api_base_url="https://api.github.com")
         auth._installations = installations
         return auth
 
-    def test_a_pat_reports_pat_mode_and_no_installations(self) -> None:
-        auth = GithubAuth(kind="github_pat", data={"token": "t", "owner": "acme"}, api_base_url="x")
-        assert auth.mode == MODE_PAT
+    def test_a_token_only_envelope_reaches_no_app_surface(self) -> None:
+        auth = GithubAuth(kind="github", data={"owner": "acme", "pat": {"token": "t"}}, api_base_url="x")
+        assert auth.has_pat and not auth.has_app
         assert auth.token() == "t"
         assert auth.installations() == []
 
-    def test_an_app_reports_app_mode(self) -> None:
-        assert self._app_auth([]).mode == MODE_APP
+    def test_there_is_no_mode_to_branch_on(self) -> None:
+        """Under a combined envelope "which mode am I" has no correct answer, and any default it
+        were given would leave every call site compiling while quietly changing meaning. Capability
+        predicates force each caller to say what it needs."""
+        assert not hasattr(GithubAuth, "mode")
 
-    def test_a_pat_cannot_mint_an_app_jwt(self) -> None:
-        auth = GithubAuth(kind="github_pat", data={"token": "t"}, api_base_url="x")
+    def test_the_app_wins_the_bare_token_when_both_are_present(self) -> None:
+        """Short-lived, least-privilege and org-owned beats a person's long-lived token for every
+        call that does not specifically need the token. If a present PAT won by default, the
+        product credential would stop being used and nothing would say so."""
+        both = self._app_auth([{"id": 2, "account": {"login": "acme"}}], pat=True)
+        assert both.held == [PREFER_APP, PREFER_PAT]
+
+    def test_a_caller_that_needs_the_token_gets_the_token(self) -> None:
+        """The ruleset detail asks for the PAT specifically: GitHub returns bypass actors only to
+        a caller with write access to the ruleset, which a read-only App never has. A global
+        "prefer the App" order would lose that on exactly the deployments that placed both."""
+        auth = self._app_auth([], pat=True)
+        assert auth.token(prefer=PREFER_PAT) == "ghp_x"
+
+    def test_a_missing_credential_says_which_one_would_have_shown_more(self) -> None:
+        """This is what turns an unobservable cell into something an operator can act on."""
+        app_only = self._app_auth([])
+        assert "personal access token" in app_only.absent_note(PREFER_PAT)
+        assert app_only.absent_note(PREFER_APP) == ""
+
+        token_only = GithubAuth(
+            kind="github", data={"owner": "acme", "pat": {"token": "t"}}, api_base_url="x"
+        )
+        assert "GitHub App" in token_only.absent_note(PREFER_APP)
+        assert token_only.absent_note(PREFER_PAT) == ""
+
+    def test_holding_both_leaves_nothing_to_explain(self) -> None:
+        both = self._app_auth([], pat=True)
+        assert both.absent_note(PREFER_APP) == ""
+        assert both.absent_note(PREFER_PAT) == ""
+
+    def test_a_token_only_envelope_cannot_mint_an_app_jwt(self) -> None:
+        auth = GithubAuth(kind="github", data={"owner": "a", "pat": {"token": "t"}}, api_base_url="x")
         with pytest.raises(GithubAppAuthError):
             auth.app_jwt()
 
@@ -564,7 +618,6 @@ class TestAuthSeam:
         auth = self._app_auth(
             [{"id": 1, "account": {"login": "a"}}, {"id": 2, "account": {"login": "b"}}], owner=""
         )
-        auth._data = {"app_id": 1, "private_key": "pem"}
         with pytest.raises(GithubAppAuthError, match="several installations"):
             auth.token()
 
@@ -583,6 +636,84 @@ class TestAuthSeam:
 # --------------------------------------------------------------------------------------------
 # Vocabulary registration
 # --------------------------------------------------------------------------------------------
+
+
+class TestAppInventoryScope:
+    """`/app/installations` and `/orgs/{owner}/installations` answer different questions, and the
+    difference is the whole reason the App is the product credential."""
+
+    @staticmethod
+    def _collector(auth_mode: str = PREFER_APP) -> GithubCollector:
+        collector = GithubCollector.__new__(GithubCollector)
+        collector._emitted_app_ids = set()
+        collector._emitted_installation_ids = set()
+        # (level, site, code, message) — the message matters here: the fallback's whole job is to
+        # SAY that the answer is about ourselves rather than about the account.
+        collector.records: list[tuple] = []
+        collector.record_warn = lambda *a, **k: collector.records.append(("warn", *a[:3]))
+        collector.record_info = lambda *a, **k: collector.records.append(("info", *a[:3]))
+
+        class _Auth:
+            mode = auth_mode
+            has_app = auth_mode == PREFER_APP
+            has_pat = auth_mode == PREFER_PAT
+
+            def absent_note(self, prefer):
+                return "" if (prefer == PREFER_APP and self.has_app) else "a GitHub App would show more here"
+
+            def installations(self):
+                return [{"id": 1, "app_slug": "ours", "app_id": 10, "account": {"login": "acme"}}]
+
+        collector._auth = _Auth()
+        return collector
+
+    def test_the_account_wide_inventory_is_preferred(self) -> None:
+        collector = self._collector()
+
+        class _Client:
+            def get_paginated(self, path, **_):
+                assert path == "/orgs/acme/installations"
+                return [
+                    {"id": 1, "app_slug": "renovate", "app_id": 11, "account": {"login": "acme"},
+                     "repository_selection": "all", "permissions": {"contents": "write"}},
+                    {"id": 2, "app_slug": "sonar", "app_id": 12, "account": {"login": "acme"},
+                     "repository_selection": "selected", "permissions": {"contents": "read"}},
+                ]
+
+        nodes: list[dict] = []
+        edges: list[dict] = []
+        collector._collect_app_installations(_Client(), "acme", nodes, edges)
+        installs = [n for n in nodes if n["entity"]["entity_type"] == "github_core__app_installation"]
+        assert {n["node"]["app_slug"] for n in installs} == {"renovate", "sonar"}
+        assert any(e["edge"]["edge_type"] == "HAS_INSTALLATION__github_core" for e in edges)
+        assert any(e["edge"]["edge_type"] == "INSTALLED_ON__github_core" for e in edges)
+
+    def test_a_refused_account_inventory_falls_back_and_says_so(self) -> None:
+        """The fallback answer is about ourselves. Reporting it as the account's inventory would
+        say "one App reaches your repositories" when the truth is "we could not look"."""
+        from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+
+        collector = self._collector()
+
+        class _Client:
+            def get_paginated(self, path, **_):
+                raise GithubAPIError(status=403, url=path, body="{}")
+
+        nodes: list[dict] = []
+        collector._collect_app_installations(_Client(), "acme", nodes, [])
+        assert [n["node"]["app_slug"] for n in nodes
+                if n["entity"]["entity_type"] == "github_core__app_installation"] == ["ours"]
+        assert any(r[0] == "warn" and "APP_INVENTORY_PARTIAL_403" in r[2] for r in collector.records)
+        assert any(r[0] == "info" and "own only" in r[3] for r in collector.records), (
+            "the run must say the inventory is about this App, not about the account"
+        )
+
+    def test_pat_mode_emits_nothing_and_claims_nothing(self) -> None:
+        collector = self._collector(auth_mode=PREFER_PAT)
+        nodes: list[dict] = []
+        collector._collect_app_installations(object(), "acme", nodes, [])
+        assert nodes == []
+        assert any("APP_INVENTORY_UNREACHABLE" in str(r) for r in collector.records)
 
 
 class TestVocabularyIsDeclared:
@@ -651,8 +782,16 @@ class TestVocabularyIsDeclared:
                 f"{source['name']} declares neither a permission nor a reason it needs none"
             )
 
-    def test_an_exempt_source_contributes_nothing_to_the_derived_permissions(self) -> None:
-        """The exemption must not become a back door into the least-privilege set."""
+    def test_the_derived_permission_set_is_exactly_what_the_sources_ask_for(self) -> None:
+        """The exemption must not become a back door into the least-privilege set, and the one
+        organization-surface permission must be there BECAUSE a source declares it.
+
+        `organization:administration:read` is the only entry that is not repository-scoped. It
+        buys the account-wide installed-App inventory (`/orgs/{owner}/installations`), which is
+        the question the product exists to ask about Apps; without it the answer is one row about
+        ourselves. Read-only, declared, and asserted here so it cannot drift into an unexplained
+        extra on the App.
+        """
         import importlib.util
         from pathlib import Path
 
@@ -667,4 +806,239 @@ class TestVocabularyIsDeclared:
             "contents": "read",
             "administration": "read",
         }
-        assert org_perms == {}
+        assert org_perms == {"administration": "read"}
+        assert all(level == "read" for level in {**repo_perms, **org_perms}.values()), (
+            "the collector never asks for write"
+        )
+
+
+# --------------------------------------------------------------------------------------------
+# The per-repo walk, end to end against stub transports
+# --------------------------------------------------------------------------------------------
+
+
+_WORKFLOW_YAML = """
+name: Gate
+on: [pull_request_target]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/cache@v4
+        with:
+          key: ${{ runner.os }}-deps
+  deploy:
+    needs: build
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./ship.sh
+"""
+
+#: A GraphQL config-layer node shaped exactly as the live API returns it (verified 2026-08-27
+#: against a real organization), so the emitters are exercised against the real shape rather than
+#: against a shape invented to make them pass.
+_CONFIG_NODE = {
+    "nameWithOwner": "acme/widget",
+    "name": "widget",
+    "databaseId": 42,
+    "isArchived": False,
+    "isFork": False,
+    "visibility": "PRIVATE",
+    "url": "https://github.com/acme/widget",
+    "defaultBranchRef": {"name": "main", "target": {"oid": "a" * 40}},
+    "rulesets": {
+        "nodes": [
+            {
+                "databaseId": 555,
+                "name": "main-required-checks",
+                "enforcement": "ACTIVE",
+                "target": "BRANCH",
+                "conditions": {"refName": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                "rules": {"nodes": [{"type": "REQUIRED_STATUS_CHECKS"}]},
+                "bypassActors": {"totalCount": 0, "nodes": []},
+            }
+        ]
+    },
+    "environments": {"nodes": [{"databaseId": 9, "name": "production", "protectionRules": {"nodes": []}}]},
+    "branchRefs": {
+        "totalCount": 2,
+        "nodes": [
+            {"name": "main", "target": {"oid": "a" * 40}},
+            {"name": "topic", "target": {"oid": "b" * 40}},
+        ],
+    },
+    "tagRefs": {"totalCount": 1, "nodes": [{"name": "v1", "target": {"oid": "c" * 40, "__typename": "Commit"}}]},
+    "object": {"entries": [{"name": "gate.yml", "path": ".github/workflows/gate.yml",
+                            "object": {"byteSize": 1, "isTruncated": False, "text": _WORKFLOW_YAML}}]},
+}
+
+
+class _StubClient:
+    """A REST client that answers the endpoints the per-repo walk actually calls, and counts them."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def get(self, path, **_):
+        self.calls.append(path)
+        if path == "/users/acme" or path == "/orgs/acme":
+            return {"login": "acme", "id": 1, "type": "Organization", "html_url": "https://github.com/acme"}
+        if path == "/repos/acme/widget/rulesets/555":
+            # REST detail WITHOUT `bypass_actors` — the read-only case: GitHub withholds the key.
+            return {
+                "id": 555,
+                "source": "acme",
+                "source_type": "Repository",
+                "current_user_can_bypass": "never",
+                "_links": {"html": {"href": "https://github.com/acme/widget/rules/555"}},
+                "rules": [
+                    {
+                        "type": "required_status_checks",
+                        "parameters": {"required_status_checks": [{"context": "gate", "integration_id": 15368}]},
+                    }
+                ],
+            }
+        if path == "/repos/acme/widget/actions/caches":
+            return {
+                "total_count": 2,
+                "actions_caches": [
+                    {"id": 1, "ref": "refs/heads/main", "key": "k1", "version": "v", "size_in_bytes": 10,
+                     "created_at": "2026-08-01T00:00:00Z", "last_accessed_at": "2026-08-02T00:00:00Z"},
+                    {"id": 2, "ref": "refs/pull/7/merge", "key": "k2", "version": "v", "size_in_bytes": 10,
+                     "created_at": "2026-08-01T00:00:00Z", "last_accessed_at": "2026-08-02T00:00:00Z"},
+                ],
+            }
+        return {}
+
+    def get_paginated(self, path, **_):
+        self.calls.append(path)
+        if path.endswith("/actions/workflows"):
+            return [{"id": 7, "path": ".github/workflows/gate.yml", "name": "Gate", "state": "active",
+                     "html_url": "https://github.com/acme/widget/actions/workflows/gate.yml"}]
+        if path.endswith("/actions/runners"):
+            return []
+        return []
+
+
+def _walk_one_repo(monkeypatch, runs: list[dict] | None = None) -> tuple[list[dict], list[dict], _StubClient, list[tuple]]:
+    """Run `_collect_repo` against the stubs and return (nodes, edges, client, warnings)."""
+    collector = GithubCollector.__new__(GithubCollector)
+    collector._config = {"acme/widget": _CONFIG_NODE}
+    collector._emitted_app_ids = set()
+    collector._emitted_installation_ids = set()
+    collector._ruleset_details = {}
+    collector._default_refs = set()
+    # No token in this envelope: the ruleset detail goes through the App client, and the bypass
+    # list comes back withheld — which is the case worth exercising by default, because it is the
+    # one whose blank cell must not read as "nobody can bypass".
+    collector._pat_client = None
+    collector._pat_ruleset_status = "untried"
+
+    class _AppOnlyAuth:
+        has_app = True
+        has_pat = False
+
+        def absent_note(self, prefer):
+            return "an owner-minted fine-grained token would show them" if prefer == "pat" else ""
+
+    collector._auth = _AppOnlyAuth()
+    warnings: list[tuple] = []
+    collector.record_warn = lambda *a, **k: warnings.append(a)
+    collector.record_info = lambda *a, **k: None
+    monkeypatch.setattr(GithubCollector, "_fetch_run_window", lambda self, c, f, limit: list(runs or []))
+    monkeypatch.setattr(GithubCollector, "_fetch_non_terminal_refresh", lambda self, c, f, **kw: [])
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    client = _StubClient()
+    collector._collect_repo(client, "acme/widget", 10, nodes, edges, "00000000-0000-0000-0000-000000000001")
+    return nodes, edges, client, warnings
+
+
+class TestPerRepoWalk:
+    """The whole self-tier emission, exercised against payloads shaped like the live API."""
+
+    @staticmethod
+    def _by_type(nodes: list[dict]) -> dict[str, list[dict]]:
+        out: dict[str, list[dict]] = {}
+        for n in nodes:
+            out.setdefault(n["entity"]["entity_type"], []).append(n)
+        return out
+
+    def test_every_self_tier_type_is_emitted(self, monkeypatch) -> None:
+        nodes, _edges, _client, _warns = _walk_one_repo(monkeypatch)
+        by_type = self._by_type(nodes)
+        assert len(by_type["github_core__git_ref"]) == 3          # 2 branches + 1 tag
+        assert len(by_type["github_core__github_ruleset"]) == 1
+        assert len(by_type["github_core__github_environment"]) == 1
+        assert len(by_type["github_core__workflow_job"]) == 2     # build + deploy
+        assert len(by_type["github_core__actions_cache"]) == 2
+
+    def test_the_ruleset_resolves_to_the_default_branch_only(self, monkeypatch) -> None:
+        """`~DEFAULT_BRANCH` is a token, not a pattern: it must select `main` and nothing else."""
+        _nodes, edges, _client, _warns = _walk_one_repo(monkeypatch)
+        resolved = [
+            e for e in edges
+            if e["edge"]["edge_type"] == "PROTECTS__github_core"
+            and e["edge"]["properties"].get("match_kind") == "resolved"
+        ]
+        assert len(resolved) == 1
+        assert resolved[0]["edge"]["properties"]["ref_pattern"] == "~DEFAULT_BRANCH"
+
+    def test_rest_rule_parameters_win_over_the_type_only_graphql_list(self, monkeypatch) -> None:
+        """The gate view needs the required check CONTEXTS, which only the REST detail carries."""
+        nodes, _edges, _client, _warns = _walk_one_repo(monkeypatch)
+        ruleset = self._by_type(nodes)["github_core__github_ruleset"][0]["node"]
+        contexts = ruleset["rules"][0]["parameters"]["required_status_checks"]
+        assert contexts == [{"context": "gate", "integration_id": 15368}]
+
+    def test_a_withheld_bypass_list_is_unobservable_and_warns(self, monkeypatch) -> None:
+        """Both transports silent: the node says `unobservable` with a null count, and the run
+        says so out loud rather than leaving a blank cell to be read as safety."""
+        nodes, _edges, _client, warnings = _walk_one_repo(monkeypatch)
+        ruleset = self._by_type(nodes)["github_core__github_ruleset"][0]["node"]
+        assert ruleset["bypass_observability"] == "unobservable"
+        assert ruleset["bypass_actor_count"] is None
+        assert any("RULESET_BYPASS_UNOBSERVABLE" in w for w in warnings)
+
+    def test_a_cache_from_a_pull_request_ref_gets_no_ref_edge(self, monkeypatch) -> None:
+        """The absence IS the signal: an entry scoped to a PR ref was written from outside the
+        branch a privileged job restores it on."""
+        _nodes, edges, _client, _warns = _walk_one_repo(monkeypatch)
+        scoped = [e for e in edges if e["edge"]["edge_type"] == "SCOPED_TO__github_core"]
+        assert len(scoped) == 1  # refs/heads/main resolves; refs/pull/7/merge does not
+
+    def test_the_declared_jobs_carry_the_pull_request_target_shape(self, monkeypatch) -> None:
+        nodes, _edges, _client, _warns = _walk_one_repo(monkeypatch)
+        jobs = {n["node"]["job_key"]: n["node"] for n in self._by_type(nodes)["github_core__workflow_job"]}
+        assert jobs["build"]["checkout_ref"] == "${{ github.event.pull_request.head.sha }}"
+        assert jobs["build"]["configuration"]["workflow_triggers"] == ["pull_request_target"]
+        assert jobs["build"]["permissions"] == {}       # declared empty
+        assert jobs["deploy"]["permissions"] is None    # inherits
+
+    def test_the_needs_graph_and_the_environment_link_are_emitted(self, monkeypatch) -> None:
+        _nodes, edges, _client, _warns = _walk_one_repo(monkeypatch)
+        types = [e["edge"]["edge_type"] for e in edges]
+        assert types.count("DEPENDS_ON_JOB__github_core") == 1
+        assert types.count("USES_ENVIRONMENT__github_core") == 1
+        assert types.count("DEFINES_JOB__github_core") == 2
+
+    def test_each_run_is_fetched_for_jobs_once(self, monkeypatch) -> None:
+        """The EXECUTED_ON pass reuses the job payloads instead of walking every run a second
+        time — at account scope that second walk was one extra API call per RUN, and runs are the
+        largest thing collected. It cost a 10-minute collection its boot timeout before it was
+        found."""
+        seen: list[int] = []
+        monkeypatch.setattr(
+            GithubCollector, "_fetch_run_jobs",
+            lambda self, c, f, run_id: (seen.append(run_id) or [{"id": 1, "name": "build"}]),
+        )
+        _walk_one_repo(monkeypatch, runs=[{"id": 100, "run_number": 1, "workflow_id": 7}])
+        assert seen == [100], f"each run's jobs should be fetched once, got {seen}"

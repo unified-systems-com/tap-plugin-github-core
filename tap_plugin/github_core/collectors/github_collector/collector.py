@@ -30,7 +30,7 @@ from tap_cares.exceptions import (
 
 from .api_client import GithubAPIError, GithubClient
 from .app_jwt import GithubAppAuthError
-from .auth import MODE_APP, GithubAuth
+from .auth import PREFER_APP, PREFER_PAT, GithubAuth
 from .batch import (
     assemble_batch,
     edge_envelope,
@@ -266,18 +266,54 @@ class GithubCollector(CollectorBase):
         installation = auth.installation or {}
         checks.append(
             check_pass(
-                "GITHUB_CREDENTIAL_USABLE",
-                f"Authenticated as {auth.mode}"
-                + (
-                    f"; installation {installation.get('id')} on "
-                    f"{(installation.get('account') or {}).get('login', '?')}"
-                    if auth.mode == MODE_APP
-                    else ""
-                ),
-                context={"mode": auth.mode, "installation_id": installation.get("id")},
+                "GITHUB_CREDENTIAL_USABLE:app",
+                f"App chain proven — key signs, installation {installation.get('id')} on "
+                f"{(installation.get('account') or {}).get('login', '?')}, token minted.",
+                context={"installation_id": installation.get("id")},
+                docs=_DOCS,
+            )
+            if auth.has_app
+            else check_pass(
+                "GITHUB_CREDENTIAL_ABSENT:app",
+                f"No App credential — {auth.absent_note(PREFER_APP)}.",
+                context={"missing": PREFER_APP},
                 docs=_DOCS,
             )
         )
+        # The token gets its OWN liveness probe. A dead token beside a live App would otherwise
+        # pass this check and degrade at collection time — the failure arriving through the check
+        # built to catch it. A missing credential and a dead one must not read the same.
+        if auth.has_pat:
+            try:
+                auth.probe_pat()
+            except (GithubAppAuthError, GithubAPIError) as exc:
+                checks.append(
+                    check_fail(
+                        "GITHUB_CREDENTIAL_USABLE:pat",
+                        f"A personal access token is placed but does not authenticate: {exc}. "
+                        f"Surfaces only it can read — a ruleset's bypass actors — will report as "
+                        f"unobservable until it is replaced.",
+                        readiness_status=CollectorReadinessStatus.MISCONFIGURED,
+                        docs=_DOCS,
+                    )
+                )
+            else:
+                checks.append(
+                    check_pass(
+                        "GITHUB_CREDENTIAL_USABLE:pat",
+                        "Personal access token authenticates.",
+                        docs=_DOCS,
+                    )
+                )
+        else:
+            checks.append(
+                check_pass(
+                    "GITHUB_CREDENTIAL_ABSENT:pat",
+                    f"No personal access token — {auth.absent_note(PREFER_PAT)}.",
+                    context={"missing": PREFER_PAT},
+                    docs=_DOCS,
+                )
+            )
 
         # 4. API reachable + the credential authenticates — GET /rate_limit.
         # No-retry client so a real 401/403 surfaces immediately.
@@ -410,20 +446,45 @@ class GithubCollector(CollectorBase):
         self.record_info(
             _SITE_AUTH_MODE,
             "AUTH_MODE",
-            f"Authenticated as {self._auth.mode}"
+            "Credentials: "
+            + ", ".join(
+                filter(
+                    None,
+                    [
+                        f"App (installation {(self._auth.installation or {}).get('id')})"
+                        if self._auth.has_app
+                        else "",
+                        "personal access token" if self._auth.has_pat else "",
+                    ],
+                )
+            )
             + (
-                f" (app installation {(self._auth.installation or {}).get('id')})"
-                if self._auth.mode == MODE_APP
-                else ""
+                ""
+                if self._auth.has_app and self._auth.has_pat
+                else " — one credential only; some surfaces will read as unobservable."
             ),
-            message_data={"mode": self._auth.mode},
+            message_data={"held": self._auth.held},
         )
 
         client = GithubClient(token=token, api_base_url=api_base_url(data))
+        # A second client bound to the personal access token, when one is in the envelope. It
+        # exists for exactly one reason: GitHub returns a ruleset's bypass actors only to a caller
+        # with write access to the ruleset, and an owner's PAT has it where a read-only App never
+        # will. Per-source rather than a global preference order, because "prefer the App" would
+        # silently lose bypass actors on precisely the deployments that placed both credentials.
+        self._pat_client = (
+            GithubClient(token=self._auth.token(prefer=PREFER_PAT), api_base_url=api_base_url(data))
+            if self._auth.has_pat
+            else None
+        )
         # Per-run caches for objects shared across repositories: one organization ruleset applies
         # to every repository it matches, and re-fetching its detail per repo would be 19 identical
         # calls for one answer.
         self._ruleset_details: dict[tuple[str, int], dict[str, Any] | None] = {}
+        # Whether the token, when present, actually answered the ruleset endpoint. "Present" and
+        # "answered" are different facts, and an unreadable bypass list means something different
+        # under each.
+        self._pat_ruleset_status: str = "untried"
         self._emitted_installation_ids: set[str] = set()
         # What `~DEFAULT_BRANCH` resolves to, keyed `owner/repo#refs/heads/x`. Repo-scoped on
         # purpose: one repository's default is `main` and another's is `master`, and a bare ref
@@ -485,7 +546,7 @@ class GithubCollector(CollectorBase):
         nodes.append(oidc_issuer_node_envelope(_OIDC_ISSUER_URL))
 
         # --- installed Apps: an App-only surface (req-github-core-app-installations).
-        self._collect_app_installations(nodes, edges)
+        self._collect_app_installations(client, owner, nodes, edges)
 
         # --- collection phase: per-repo walk ---
         failed: list[str] = []
@@ -917,6 +978,7 @@ class GithubCollector(CollectorBase):
             client, full_name, already_fetched_run_ids={r["id"] for r in run_payloads}
         )
         run_payloads.extend(refreshed)
+        jobs_by_run: dict[int, list[dict[str, Any]]] = {}
         for r in run_payloads:
             run_uuid = run_id(full_name, r["id"])
             wf_ref_uuid = workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
@@ -949,8 +1011,12 @@ class GithubCollector(CollectorBase):
             if wf_ref_uuid is not None:
                 edges.append(self._edge("EXECUTES_WORKFLOW__github_core", run_uuid, wf_ref_uuid, observation_dims))
 
-            # jobs for this run (latest-attempt endpoint per req-github-core-collector-8)
+            # jobs for this run (latest-attempt endpoint per req-github-core-collector-8).
+            # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
+            # the same payloads, and at account scope a second walk is one extra API call per RUN
+            # — the single largest cost in the whole collection.
             jobs = self._fetch_run_jobs(client, full_name, r["id"])
+            jobs_by_run[r["id"]] = jobs
             for j in jobs:
                 j_uuid = job_id(full_name, j["id"])
                 j_display_name = j.get("name") or str(j["id"])
@@ -1024,10 +1090,12 @@ class GithubCollector(CollectorBase):
         # a cache entry is something that HAPPENED, not something declared.
         self._collect_caches(client, full_name, repo_uuid, observation_dims, ref_uuid_by_ref, nodes, edges)
 
-        # EXECUTED_ON edges (only when an observed job runner_id matches a durable runner node)
+        # EXECUTED_ON edges (only when an observed job runner_id matches a durable runner node).
+        # Reuses the job payloads collected above — the runner nodes simply were not known yet
+        # when the jobs were first walked, which is an ordering constraint, not a reason to fetch
+        # them again.
         for r in run_payloads:
-            run_jobs = self._fetch_run_jobs(client, full_name, r["id"])
-            for j in run_jobs:
+            for j in jobs_by_run.get(r["id"], []):
                 if j.get("runner_id") and j["runner_id"] in runner_uuid_by_id:
                     j_uuid = job_id(full_name, j["id"])
                     rn_uuid = runner_uuid_by_id[j["runner_id"]]
@@ -1119,6 +1187,15 @@ class GithubCollector(CollectorBase):
         if not gql:
             return
         owner = full_name.partition("/")[0]
+        # Deliberately NOT repo-scoped. One organization ruleset is a single node protecting many
+        # repositories, and a `github.repo` dimension on it would name whichever repo happened to
+        # emit it last — an assertion the node has no business making. The repository association
+        # is the PROTECTS edge, which IS repo-scoped.
+        ruleset_dims = {
+            "github.platform": repo_dims["github.platform"],
+            "github.owner": owner,
+            "github.surface": "rules",
+        }
         rules_dims = {**repo_dims, "github.surface": "rules"}
         for ruleset in GithubGraphQLClient.rulesets(gql):
             rid = ruleset["ruleset_id"]
@@ -1127,12 +1204,19 @@ class GithubCollector(CollectorBase):
             rs_uuid = ruleset_id(owner, rid)
             detail = self._ruleset_detail(client, full_name, rid)
             observability = self._bypass_observability(ruleset, detail)
+            # When the answer is unreadable, say WHY in the operator's terms. "No token placed",
+            # "a token is placed but was refused", and "the token answered but GitHub still
+            # withheld the list" are three different situations with three different fixes, and
+            # collapsing them into one blank is how a gap stops being actionable.
+            absent_note = (
+                self._bypass_absent_note() if observability["state"] == "unobservable" else ""
+            )
             nodes.append(
                 node_envelope(
                     entity_id=rs_uuid,
                     entity_type="github_core__github_ruleset",
                     name=ruleset["name"],
-                    dimensions=rules_dims,
+                    dimensions=ruleset_dims,
                     fields={
                         "owner_login": owner,
                         "ruleset_id": rid,
@@ -1154,6 +1238,7 @@ class GithubCollector(CollectorBase):
                             "current_user_can_bypass": (detail or {}).get("current_user_can_bypass"),
                             "bypass_source": observability["source"],
                             "bypass_actors_unmodelled": observability["unmodelled"],
+                            "bypass_absent_note": absent_note,
                         },
                         "tags": {},
                     },
@@ -1175,9 +1260,15 @@ class GithubCollector(CollectorBase):
                 self.record_warn(
                     _SITE_RULESET_BYPASS_UNOBSERVABLE,
                     "RULESET_BYPASS_UNOBSERVABLE",
-                    f"{full_name}: ruleset {ruleset['name']!r} — this credential cannot read the "
-                    f"bypass list. An empty 'who can bypass' cell for it means UNKNOWN, not none.",
-                    message_data={"repo": full_name, "ruleset": ruleset["name"], "ruleset_id": rid},
+                    f"{full_name}: ruleset {ruleset['name']!r} — the bypass list is unreadable. An "
+                    f"empty 'who can bypass' cell for it means UNKNOWN, not none."
+                    + (f" Note: {absent_note}." if absent_note else ""),
+                    message_data={
+                        "repo": full_name,
+                        "ruleset": ruleset["name"],
+                        "ruleset_id": rid,
+                        "absent_note": absent_note,
+                    },
                 )
 
     def _emit_protected_refs(
@@ -1242,6 +1333,20 @@ class GithubCollector(CollectorBase):
             if fnmatch.fnmatch(ref_path, pattern):
                 return pattern
         return None
+
+    def _bypass_absent_note(self) -> str:
+        """Why the bypass list could not be read, phrased as something an operator can act on."""
+        if not self._auth.has_pat:
+            return self._auth.absent_note(PREFER_PAT)
+        if self._pat_ruleset_status.startswith("refused"):
+            return (
+                f"a personal access token is placed but the ruleset endpoint {self._pat_ruleset_status} "
+                f"it — it has expired, or its resource owner is not this account"
+            )
+        return (
+            "the personal access token placed does not have write access to this ruleset, which is "
+            "what GitHub requires before it will disclose bypass actors at all"
+        )
 
     @staticmethod
     def _bypass_observability(ruleset: dict[str, Any], detail: dict[str, Any] | None) -> dict[str, Any]:
@@ -1377,9 +1482,14 @@ class GithubCollector(CollectorBase):
         cache_key = (owner, rid)
         if cache_key in self._ruleset_details:
             return self._ruleset_details[cache_key]
+        # The PAT-bound client when the envelope carries one: this single call is the only place
+        # a token sees more than the App does.
+        detail_client = self._pat_client or client
         try:
-            detail = client.get(f"/repos/{full_name}/rulesets/{rid}")
+            detail = detail_client.get(f"/repos/{full_name}/rulesets/{rid}")
         except GithubAPIError as exc:
+            if self._pat_client is not None:
+                self._pat_ruleset_status = f"refused ({exc.status})"
             self.record_warn(
                 _SITE_RULESET_DETAIL_DEGRADED,
                 f"RULESET_DETAIL_{exc.status}",
@@ -1388,6 +1498,9 @@ class GithubCollector(CollectorBase):
                 message_data={"repo": full_name, "ruleset_id": rid, "status": exc.status},
             )
             detail = None
+        else:
+            if self._pat_client is not None:
+                self._pat_ruleset_status = "answered"
         self._ruleset_details[cache_key] = detail
         return detail
 
@@ -1617,33 +1730,63 @@ class GithubCollector(CollectorBase):
             )
 
     def _collect_app_installations(
-        self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+        self,
+        client: GithubClient,
+        owner: str | None,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
     ) -> None:
         """Emit the App inventory — application, installation, and the account it was granted on.
 
-        App-only surface. In PAT mode there is nothing to emit and, crucially, nothing to CLAIM:
-        an empty inventory from a token means the surface was unreachable, not that no Apps are
-        installed, and that difference is recorded rather than left to a reader's optimism.
+        **Which endpoint answers this matters more than it looks.** `/app/installations` answers
+        "where is THIS App installed" — one row, about ourselves. `/orgs/{owner}/installations`
+        answers "which Apps can reach this account's repositories", which is the question the
+        product exists to ask, and it is App-only: a personal access token gets `404`. We ask the
+        account first and fall back to our own installation, saying which we got, because an
+        inventory of one is not an inventory.
+
+        In PAT mode nothing is emitted and, crucially, nothing is CLAIMED: an empty inventory from
+        a token means the surface was unreachable, not that no Apps are installed.
         """
-        if self._auth.mode != MODE_APP:
+        if not self._auth.has_app:
             self.record_info(
                 _SITE_INSTALLATIONS_UNREACHABLE,
                 "APP_INVENTORY_UNREACHABLE",
-                "Running as a personal access token: the installed-App inventory is an App-only "
+                "No App credential in the envelope: the installed-App inventory is an App-only "
                 "surface and was not collected. This is not an observation that no Apps are "
-                "installed.",
-                message_data={"mode": self._auth.mode},
+                "installed — "
+                + (self._auth.absent_note(PREFER_APP) or "add an App to see it") + ".",
+                message_data={"held": self._auth.held},
             )
             return
-        try:
-            installations = self._auth.installations()
-        except GithubAppAuthError as exc:
-            self.record_warn(
-                _SITE_INSTALLATIONS_UNREACHABLE,
-                "APP_INVENTORY_FAILED",
-                f"Installed-App inventory unreadable: {exc}",
-            )
-            return
+        scope = "account"
+        installations: list[dict[str, Any]] = []
+        if owner is not None:
+            try:
+                installations = client.get_paginated(
+                    f"/orgs/{owner}/installations", item_path="installations"
+                )
+            except GithubAPIError as exc:
+                self.record_warn(
+                    _SITE_INSTALLATIONS_UNREACHABLE,
+                    f"APP_INVENTORY_PARTIAL_{exc.status}",
+                    f"Cannot list the Apps installed on {owner} ({exc.status}) — this credential "
+                    f"lacks organization administration read, so only THIS App's own installation "
+                    f"is recorded. The absence of other Apps below is not evidence there are none.",
+                    message_data={"owner": owner, "status": exc.status},
+                )
+                scope = "self_only"
+        if not installations:
+            try:
+                installations = self._auth.installations()
+                scope = "account" if scope == "account" and owner is None else "self_only"
+            except GithubAppAuthError as exc:
+                self.record_warn(
+                    _SITE_INSTALLATIONS_UNREACHABLE,
+                    "APP_INVENTORY_FAILED",
+                    f"Installed-App inventory unreadable: {exc}",
+                )
+                return
         apps_dims = {**_PLATFORM_DIMENSIONS, "github.surface": "apps"}
         for installation in installations:
             inst_id = installation.get("id")
@@ -1709,8 +1852,13 @@ class GithubCollector(CollectorBase):
         self.record_info(
             _SITE_INSTALLATIONS_COLLECTED,
             "APP_INVENTORY_COLLECTED",
-            f"Collected {len(installations)} App installation(s) on this account.",
-            message_data={"installations": len(installations)},
+            f"Collected {len(installations)} App installation(s)"
+            + (
+                " on this account."
+                if scope == "account"
+                else " — THIS App's own only; the account-wide inventory was unreadable."
+            ),
+            message_data={"installations": len(installations), "scope": scope},
         )
 
     def _emit_github_app(

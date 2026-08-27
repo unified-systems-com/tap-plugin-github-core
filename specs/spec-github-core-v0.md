@@ -140,7 +140,8 @@ OpenSSL the FIPS posture validates (`spec-fips.md`); no JWT library is introduce
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-app-auth-1 | Both Kinds Supported | Implemented | The collector authenticates from either a `github_pat` or a `github_app` envelope, dispatched on the resolved secret's `kind`; neither path is privileged in the code above the auth seam. | `collectors/github_collector/auth.py`. The PAT path stays for first-look and for repos-only scopes. Callers may read `auth.mode` only to decide whether an App-only surface is worth attempting. |
+| req-github-core-app-auth-1 | Both Credentials Held, Chosen Per Source | Implemented | `GithubAuth` holds whichever credentials the envelope carries. A caller names the one that answers ITS question — `token(prefer=PREFER_PAT)` for the ruleset detail (bypass actors), `app_jwt()` for the App-only inventory — and a caller that does not care asks for `token()`. No global preference order. | `collectors/github_collector/auth.py`. The one PAT-preferring call is the ruleset detail, and the reason is recorded at the call site so it is not "simplified" back into a preference order. |
+| req-github-core-app-auth-11 | A Gap Names Its Missing Credential | Implemented | When the credential that would answer better is absent, `absent_note(prefer)` supplies the operator-facing reason, carried onto the ruleset node, the run warning, and a self-test row. It is empty when that credential IS present, so it never becomes noise. | This is what turns `bypass_observability = unobservable` from a dead end into "an owner PAT would show these". |
 | req-github-core-app-auth-2 | Permissions Derived | Implemented | The App manifest's permissions are the union of the collection manifest's per-source permission triples. Extras require an explicit flag and render as `EXPLORATORY`. | `skills/create-github-app/manifest.py`. |
 | req-github-core-app-auth-3 | Surfaces Namespaced | Implemented | Repository and organization permissions are namespaced before emission, and a key collision raises rather than silently overwriting. | Found in review: `repository:administration` and `organization:administration` collapsed onto one key and one was dropped. |
 | req-github-core-app-auth-4 | Operator Holds The Key | In Development | Creation happens on the operator's machine; the private key is written to their secret store at `0600` and never printed, logged, or transmitted. The instance never writes a credential. | Enforced by the read-only secrets mount, not only by convention. |
@@ -542,12 +543,26 @@ token. In PAT mode nothing is emitted and nothing is *claimed* — the run recor
 was unreachable, because an empty inventory from a token means "could not look", not "no Apps are
 installed".
 
+**Which endpoint answers this matters more than it looks.** `/app/installations` answers "where is
+THIS App installed" — one row, about ourselves. `/orgs/{owner}/installations` answers "which Apps
+can reach this account's repositories", which is the question the product exists to ask. The
+collector asks the account first and falls back to its own installation, recording which it got:
+an inventory of one is not an inventory, and the two must not be reported as if they were the same
+answer.
+
+**This widens the derived permission set, deliberately and once.** The account-wide list requires
+`organization:administration:read`, the first organization-surface permission the collection
+manifest declares. It is named here rather than left as an "exploratory" extra on the App because
+it is now *used*: the alternative is a product that promises to show you which Apps reach your
+repositories and then shows you one row about itself. Read-only, like everything else in the set.
+
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-app-installations-1 | Split From The Application | Implemented | `app_installation` holds installation id, granted permissions, repository selection, events and suspension; `github_app` keeps the application. Joined by `HAS_INSTALLATION`, and to the account by `INSTALLED_ON`. | |
 | req-github-core-app-installations-2 | PAT Mode Claims Nothing | Implemented | Running as a token records that the inventory is unreachable rather than emitting an empty one. | An empty inventory is otherwise indistinguishable from a clean account. |
+| req-github-core-app-installations-4 | Account Inventory Preferred, Fallback Named | Implemented | The collector reads `/orgs/{owner}/installations` (which Apps reach this account) and falls back to `/app/installations` (its own installation) only when refused — warning that the absence of other Apps is then not evidence there are none, and recording which scope the answer came from. | Requires `organization:administration:read`; declared in the collection manifest so the App's permission set derives it rather than carrying it as an unexplained extra. |
 | req-github-core-app-installations-3 | Repository Selection Retained | Implemented | `repository_selection: all` is stored as-is: such an installation follows the account into new repositories without anyone granting it again. | |
 
 ### GitHub Apps
@@ -686,7 +701,9 @@ Do not pre-build it; wait for the trigger.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-secret-1 | Two Kinds Accepted | Implemented | The collector accepts `github_pat` and `github_app`, dispatching on the resolved envelope's own `kind`; an unrecognized kind is refused BY NAME rather than by schema failure, because "kind 'x' is not one this collector accepts" is fixable where a wall of schema errors is not. | `SCHEMA_BY_KIND` in `collectors/github_collector/secret.py`. Superseded the PAT-only form 2026-08-27. |
+| req-github-core-secret-1 | One Envelope, Both Credentials | Implemented | The current kind is `github`: one envelope carrying an `app` block, a `pat` block, or both (`anyOf` requires at least one). An unrecognized kind is refused BY NAME rather than by schema failure, because "kind 'x' is not one this collector accepts" is fixable where a wall of schema errors is not. | `SCHEMA_BY_KIND` in `collectors/github_collector/secret.py`. Replaced the either/or dispatch on 2026-08-27, the same day it was written — see `req-github-core-secret-3`. |
+| req-github-core-secret-3 | Legacy Kinds Fold Forward | Implemented | `github_pat` and `github_app` envelopes still validate and are folded into the current shape by one `normalize_credentials` function, so nothing above the auth seam branches on which kind arrived. | samsite's shipped record declares `github_pat`; breaking its boot to tidy a kind name would be a poor trade. Transition support, not a permanent second path. |
+| req-github-core-secret-4 | Placement Merges, Never Overwrites | Implemented | The App-creation flow writes into the envelope's `app` slot and carries any existing `pat` block (or legacy bare `token`) forward, saying so; the previous file is still copied aside. | Without it, standing up an App on an instance that already had a token would destroy the token silently, and the operator would meet it as a permanently blank column rather than an error. |
 | req-github-core-secret-2 | Plugin Owns Schema | Implemented | `github_core` ships and validates the JSON Schema for both kinds, strictly (`additionalProperties: false`), so a PAT pasted into a `github_app` envelope fails at load rather than at 401. | `GITHUB_PAT_SCHEMA` / `GITHUB_APP_SCHEMA` in `secret.py`; validated via `require_secret_kind`. |
 | req-github-core-secret-3 | Scope Fields | Implemented | The secret carries the collection scope: `data.owner` (account login) and/or `data.repos` (explicit `owner/repo` list — the filter when `owner` is present, the scope when it is not). At least one is required. | Schema `anyOf`; every field described (`GITHUB_PAT_SCHEMA`). Amended 2026-08-26. |
 | req-github-core-secret-4 | GitHub App Deferred | Proposed | GitHub App auth is deferred. | |

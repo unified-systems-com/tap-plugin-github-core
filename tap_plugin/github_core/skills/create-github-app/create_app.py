@@ -155,31 +155,66 @@ def convert(code: str, api_base_url: str) -> dict:
 
 
 def place_envelope(data: dict, *, owner: str, api_base_url: str, secrets_root: Path) -> Path:
-    """Write the github_app envelope, 0600, without ever printing the key."""
-    envelope = {
-        "scope": "github_core",
-        "key": "collector",
-        "kind": "github_app",
-        "description": (
-            f"git-serious GitHub App #{data['id']} ({data['slug']}) observing {owner}. Read-only. "
-            "The private key signs a short-lived JWT which is exchanged for an installation token "
-            "that expires in one hour; the key never authenticates a request directly."
-        ),
-        "data": {
-            "app_id": data["id"],
-            "app_slug": data["slug"],
-            "private_key": data["pem"],
-            "owner": owner,
-            "api_base_url": api_base_url,
-        },
+    """Write the App credential into the envelope, 0600, without ever printing the key.
+
+    **Merges into the App slot; never overwrites the file.** An envelope may carry a personal
+    access token alongside the App, because neither credential dominates: only an App sees the
+    account's installed-App inventory and its fine-grained PAT grants, and only an owner-minted
+    PAT sees a ruleset's bypass actors. Standing up an App must therefore not silently destroy the
+    token sitting beside it — the operator would discover it as a permanently blank column rather
+    than as an error, which is the worst way to lose a credential.
+
+    A pre-existing envelope of the older single-credential kinds is read for anything worth
+    keeping and still moved aside, since its shape is not the one we write.
+    """
+    app_block = {
+        "app_id": data["id"],
+        "app_slug": data["slug"],
+        "private_key": data["pem"],
     }
     target = secrets_root / "github_core" / "collector.secret.json"
     target.parent.mkdir(parents=True, exist_ok=True)
+
+    existing: dict = {}
     if target.exists():
+        try:
+            existing = json.loads(target.read_text())
+        except (OSError, ValueError):
+            existing = {}
         superseded = target.with_suffix(".json.superseded")
         target.replace(superseded)
-        print(f"  previous credential moved aside -> {superseded}")
+        print(f"  previous credential copied aside -> {superseded}")
         print("  delete it once verification passes")
+
+    existing_data = existing.get("data") if isinstance(existing.get("data"), dict) else {}
+    carried = {}
+    # Carry a token forward whichever shape it arrived in: the combined envelope's `pat` block,
+    # or a legacy `github_pat` envelope's bare `token`.
+    if isinstance(existing_data.get("pat"), dict):
+        carried["pat"] = existing_data["pat"]
+    elif existing.get("kind") == "github_pat" and existing_data.get("token"):
+        carried["pat"] = {k: v for k, v in existing_data.items() if k in {"token"}}
+    if carried:
+        print("  carried the existing personal access token forward into this envelope")
+
+    envelope = {
+        "scope": "github_core",
+        "key": "collector",
+        "kind": "github",
+        "description": (
+            f"git-serious credentials observing {owner}. Read-only. GitHub App #{data['id']} "
+            f"({data['slug']}): the private key signs a short-lived JWT exchanged for an "
+            "installation token that expires in one hour, and the key never authenticates a "
+            "request directly. A personal access token may ride alongside it — neither credential "
+            "can see everything the other can."
+        ),
+        "data": {
+            "owner": owner,
+            "api_base_url": api_base_url,
+            **carried,
+            "app": app_block,
+        },
+    }
     target.write_text(json.dumps(envelope, indent=2) + "\n")
     target.chmod(stat.S_IRUSR | stat.S_IWUSR)
     return target
