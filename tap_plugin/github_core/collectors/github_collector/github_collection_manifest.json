@@ -1,6 +1,6 @@
 {
   "manifest_version": "0",
-  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed.",
+  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth).",
   "api_base_url": "https://api.github.com",
   "sources": [
     {
@@ -17,7 +17,7 @@
       "fields": [
         "full_name"
       ],
-      "permission": "Metadata: read",
+      "permission": "repository:metadata:read",
       "description": "Scope enumeration (req-github-core-org-scope): every repository under the envelope's `owner` (org first, user on 404), paginated to the end of the Link chain; the run records the count and whether the walk was complete. Skipped when the envelope is repos-only."
     },
     {
@@ -32,7 +32,7 @@
         "account_type",
         "html_url"
       ],
-      "permission": "Metadata: read"
+      "permission": "repository:metadata:read"
     },
     {
       "name": "repository",
@@ -48,7 +48,7 @@
         "visibility",
         "html_url"
       ],
-      "permission": "Metadata: read"
+      "permission": "repository:metadata:read"
     },
     {
       "name": "workflows",
@@ -63,7 +63,7 @@
         "state",
         "html_url"
       ],
-      "permission": "Actions: read"
+      "permission": "repository:actions:read"
     },
     {
       "name": "workflow_yaml",
@@ -71,7 +71,7 @@
       "path_pattern": ".github/workflows/{file}",
       "target_field": "github_workflow.configuration.raw_yaml",
       "description": "Fetched via GET /repos/{owner}/{repo}/contents/{path}; base64-decoded inline; in-memory only (req-github-core-workflow-parse-5).",
-      "permission": "Contents: read"
+      "permission": "repository:contents:read"
     },
     {
       "name": "runs",
@@ -94,7 +94,7 @@
         "completed_at",
         "html_url"
       ],
-      "permission": "Actions: read"
+      "permission": "repository:actions:read"
     },
     {
       "name": "jobs",
@@ -112,7 +112,7 @@
         "html_url"
       ],
       "description": "Default endpoint returns latest-attempt jobs only (req-github-core-collector-8). /attempts/{n}/jobs is backlog (req-github-core-backlog-run-attempts).",
-      "permission": "Actions: read"
+      "permission": "repository:actions:read"
     },
     {
       "name": "runners",
@@ -130,7 +130,7 @@
       ],
       "permission_failure": "degrade_with_warning",
       "description": "Requires repo administration scope on the PAT; degrades gracefully on 403 (req-github-core-collector-5).",
-      "permission": "Administration: read"
+      "permission": "repository:administration:read"
     }
   ],
   "edges": [

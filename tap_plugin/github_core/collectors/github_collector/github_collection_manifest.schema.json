@@ -84,8 +84,8 @@
           },
           "permission": {
             "type": "string",
-            "minLength": 1,
-            "description": "The fine-grained PAT permission this source requires, as GitHub names it (e.g. `Actions: read`). The least-privilege set for the credential is the union over sources \u2014 derived, never restated."
+            "pattern": "^(repository|organization):[a-z_]+:(read|write)$",
+            "description": "The GitHub permission this source requires, as the canonical triple `<surface>:<key>:<level>` (e.g. `repository:actions:read`). The credential's least-privilege set \u2014 for a fine-grained PAT and for the App manifest alike \u2014 is the union over sources. Derived once, never restated."
           }
         }
       }

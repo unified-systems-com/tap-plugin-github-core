@@ -493,3 +493,210 @@ class TestEnrichmentDegrade:
         assert [(r.rule_name, r.missing_entity_type) for r in result.skipped_rules] == [
             ("to-aws", "aws_core__aws_route53_zone"), ("from-aws", "aws_core__aws_iam_oidc_provider")]
         assert calls == ["fetched"]  # only the installed-target rule was evaluated
+
+
+class TestEnvelopeCollapse:
+    """req-github-core-org-scope: a scope's shared nodes (account, platform, OIDC issuer) are
+    emitted once per repo by the per-repo walk. At 19 repos that produced 43 duplicate entity ids
+    and GRIFT rejected the whole batch — every repo lost for one repeated envelope."""
+
+    @staticmethod
+    def _env(eid, name):
+        return {"entity": {"entity_id": eid, "name": name}, "node": {"name": name}}
+
+    def test_last_occurrence_wins_and_order_is_preserved(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        out, removed = GithubCollector._collapse_by_entity_id([
+            self._env("a", "platform"), self._env("b", "repo-1"),
+            self._env("a", "platform-again"), self._env("c", "repo-2"),
+        ])
+        assert removed == 1
+        assert [e["entity"]["entity_id"] for e in out] == ["a", "b", "c"]
+        assert out[0]["entity"]["name"] == "platform-again", "the freshest observation should win"
+
+    def test_nothing_to_collapse_is_a_no_op(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        envs = [self._env("a", "x"), self._env("b", "y")]
+        out, removed = GithubCollector._collapse_by_entity_id(envs)
+        assert removed == 0 and out == envs
+
+    def test_envelopes_without_an_id_pass_through(self) -> None:
+        """An id-less envelope is a different bug; GRIFT should report it, not this helper."""
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        out, removed = GithubCollector._collapse_by_entity_id([{"node": {"name": "orphan"}}, self._env("a", "x")])
+        assert removed == 0 and len(out) == 2
+
+
+class TestPerRepoContainment:
+    """req-github-core-org-scope: at org scale a transient API error is a certainty. One bad repo
+    must not discard the other eighteen — but a partially-collected run must say so, because
+    tombstoning may not read absence as deletion (tap#140)."""
+
+    def test_partial_marks_collection_incomplete(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector import collector as mod
+
+        c = mod.GithubCollector.__new__(mod.GithubCollector)
+        c.results = {"info": [], "warn": [], "error": []}
+        c.record_warn(mod._SITE_COLLECTION_PARTIAL, "COLLECTION_PARTIAL", "x",
+                      message_data={"collected": 18, "failed": ["o/bad"], "collection_complete": False})
+        (w,) = c.results["warn"]
+        assert w["message_data"]["collection_complete"] is False
+        assert w["message_data"]["collected"] == 18
+
+
+def test_collapse_is_reachable_from_an_instance() -> None:
+    """Regression: the collapse helper was called as a bare function from run() while defined as a
+    staticmethod, so the class-level tests passed and the live run raised NameError. Exercise the
+    instance path the collector actually uses."""
+    from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+    c = GithubCollector.__new__(GithubCollector)
+    out, removed = c._collapse_by_entity_id([
+        {"entity": {"entity_id": "a"}}, {"entity": {"entity_id": "a"}},
+    ])
+    assert removed == 1 and len(out) == 1
+
+
+class TestDanglingEdgeGuard:
+    """A workflow run can name a workflow that has since been deleted. At one repo that never
+    happened; at nineteen it made GRIFT reject the batch and NOTHING landed."""
+
+    @staticmethod
+    def _edge(src, tgt, etype="EXECUTES_WORKFLOW__github_core"):
+        return {"entity": {"entity_id": f"{src}->{tgt}"},
+                "edge": {"from_entity_id": src, "to_entity_id": tgt, "edge_type": etype}}
+
+    def test_edge_to_uncollected_node_is_dropped_and_named(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        kept, dropped = GithubCollector._drop_dangling_edges(
+            [self._edge("run", "gone"), self._edge("run", "wf")], {"run", "wf"})
+        assert [e["edge"]["to_entity_id"] for e in kept] == ["wf"]
+        assert dropped == ["EXECUTES_WORKFLOW__github_core"]
+
+    def test_edge_from_uncollected_node_is_also_dropped(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        kept, dropped = GithubCollector._drop_dangling_edges([self._edge("ghost", "wf")], {"wf"})
+        assert kept == [] and len(dropped) == 1
+
+    def test_fully_resolved_batch_is_untouched(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        edges = [self._edge("a", "b")]
+        kept, dropped = GithubCollector._drop_dangling_edges(edges, {"a", "b"})
+        assert kept == edges and dropped == []
+
+
+class TestGraphQLConfigLayer:
+    """req-github-core-graphql-config: the config layer (metadata, rulesets, environments, workflow
+    YAML) comes from one GraphQL request; the operation layer stays REST because GitHub's GraphQL
+    API exposes no workflow runs or jobs."""
+
+    @staticmethod
+    def _repo(name="o/r", files=(("ci.yml", "on: push"),), truncated=False):
+        return {
+            "nameWithOwner": name, "name": name.split("/")[1], "databaseId": 7,
+            "isArchived": False, "isFork": False, "visibility": "PUBLIC",
+            "url": f"https://github.com/{name}",
+            "defaultBranchRef": {"name": "main", "target": {"oid": "abc"}},
+            "object": {"entries": [
+                {"name": f, "path": f, "object": {"byteSize": len(txt), "isTruncated": truncated, "text": txt}}
+                for f, txt in files]},
+        }
+
+    def test_workflow_files_are_keyed_by_repo_path(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
+
+        files = GithubGraphQLClient.workflow_files(self._repo(files=(("a.yml", "x"), ("b.yml", "y"))))
+        assert files == {".github/workflows/a.yml": "x", ".github/workflows/b.yml": "y"}
+
+    def test_truncated_blobs_are_omitted_not_half_parsed(self) -> None:
+        """A partial YAML parses into a workflow that is not the one in the repository. A missing
+        entry is honest; a wrong one is not."""
+        from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
+
+        assert GithubGraphQLClient.workflow_files(self._repo(truncated=True)) == {}
+
+    def test_graphql_node_shapes_like_the_rest_payload(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        p = GithubCollector._repo_payload_from_config(self._repo())
+        assert p["full_name"] == "o/r" and p["owner"]["login"] == "o"
+        assert p["default_branch"] == "main" and p["visibility"] == "public" and p["id"] == 7
+
+    def test_workflow_config_prefers_the_prefetched_yaml(self, monkeypatch) -> None:
+        """The whole point: no Contents call when the config layer already carries the file."""
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        c = GithubCollector.__new__(GithubCollector)
+        c._config = {"o/r": self._repo(files=(("ci.yml", "on: push\njobs: {}"),))}
+        called = []
+        monkeypatch.setattr(GithubCollector, "_fetch_workflow_config",
+                            lambda self, cl, fn, p: called.append(p) or ("", {}))
+        raw, parsed = c._workflow_config(None, "o/r", ".github/workflows/ci.yml")
+        assert raw.startswith("on: push") and called == []
+
+    def test_falls_back_to_rest_when_the_file_is_not_in_the_config_layer(self, monkeypatch) -> None:
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        c = GithubCollector.__new__(GithubCollector)
+        c._config = {"o/r": self._repo(files=())}
+        called = []
+        monkeypatch.setattr(GithubCollector, "_fetch_workflow_config",
+                            lambda self, cl, fn, p: called.append(p) or ("rest", {}))
+        raw, _ = c._workflow_config(None, "o/r", ".github/workflows/ci.yml")
+        assert raw == "rest" and called == [".github/workflows/ci.yml"]
+
+    def test_ghes_endpoint_is_derived_not_guessed(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
+
+        assert GithubGraphQLClient(token="t")._endpoint == "https://api.github.com/graphql"
+        ghes = GithubGraphQLClient(token="t", api_base_url="https://ghe.example/api/v3")
+        assert ghes._endpoint == "https://ghe.example/api/graphql"
+
+
+class TestCreateAppSkillIsHostRunnable:
+    """req-github-core-app-auth: the App-creation flow runs on the OPERATOR's machine, not in the
+    container, because the instance mounts its secrets root read-only and must never write its own
+    credentials. Host-runnable means stdlib-only — there is no dependency set out there to lean on.
+    Same discipline as `tap/git_invocation.py`."""
+
+    @staticmethod
+    def _imports(path):
+        import ast, sys
+        mods = set()
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                mods |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                mods.add(node.module.split(".")[0])
+        return {m for m in mods if m not in sys.stdlib_module_names}
+
+    def test_host_side_scripts_import_only_the_standard_library(self) -> None:
+        from pathlib import Path as P
+
+        skill = P(__file__).resolve().parents[1] / "skills" / "create-github-app"
+        for name in ("create_app.py", "manifest.py"):
+            extra = self._imports(skill / name) - {"manifest"}
+            assert not extra, f"{name} imports non-stdlib modules: {sorted(extra)}"
+
+    def test_permission_keys_cannot_collide_across_surfaces(self) -> None:
+        """The bug this assertion exists for: repository:administration and
+        organization:administration both map to a bare `administration` key unless the org surface
+        is namespaced, and one silently overwrites the other."""
+        import importlib.util
+        from pathlib import Path as P
+
+        skill = P(__file__).resolve().parents[1] / "skills" / "create-github-app" / "manifest.py"
+        spec = importlib.util.spec_from_file_location("gs_manifest", skill)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        built = mod.build(org="o", redirect_url="http://127.0.0.1:1/callback", name="n",
+                          public=False, exploratory=["organization:administration:read"])
+        keys = built["default_permissions"]
+        assert "administration" in keys and "organization_administration" in keys
+        assert keys["administration"] == "read" and keys["organization_administration"] == "read"

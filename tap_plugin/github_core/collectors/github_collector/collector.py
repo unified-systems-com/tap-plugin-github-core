@@ -47,6 +47,7 @@ from .identity import (
 )
 from .manifest import load_collection_manifest, load_link_manifest
 from .parser import parse_workflow_yaml
+from .graphql_client import GithubGraphQLClient, GithubGraphQLError
 from .secret import (
     GITHUB_SECRET_REF,
     api_base_url,
@@ -76,6 +77,12 @@ _SITE_DEPENDABOT_APP = "a7c1"
 _SITE_SCOPE_ENUMERATED = "462a"
 _SITE_ABORT_SCOPE = "8d47"
 _SITE_FILTER_UNMATCHED = "d087"
+_SITE_GRAPHQL_CONFIG = "1de2"
+_SITE_GRAPHQL_DEGRADED = "8630"
+_SITE_EDGE_DROPPED = "0fff"
+_SITE_REPO_FAILED = "4326"
+_SITE_COLLECTION_PARTIAL = "11d2"
+_SITE_ENVELOPE_COLLAPSED = "32c2"
 _SITE_LINK_RULE_SKIPPED = "1cb8"
 
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
@@ -126,7 +133,16 @@ class GithubCollectorError(Exception):
 
 
 class GithubCollector(CollectorBase):
-    """GitHub Actions collector — single PAT, account-scoped (or explicit repos), two-phase run."""
+    """GitHub Actions collector — single PAT, account-scoped (or explicit repos), two-phase run.
+
+    Transport is a deliberate hybrid (req-github-core-graphql-config): the CONFIG layer arrives via
+    GraphQL in one request per 100 repositories, the OPERATION layer (runs, jobs, runners) via REST
+    because GitHub's GraphQL API exposes no Actions executions.
+    """
+
+    # Config layer keyed by `owner/repo`, populated in run(); empty for a repos-only scope and on
+    # any path that does not go through run(), so every reader must treat it as optional.
+    _config: ClassVar[dict[str, Any]] = {}
 
     @classmethod
     def self_test(cls) -> CollectorSelfTestResult:
@@ -316,6 +332,18 @@ class GithubCollector(CollectorBase):
 
         # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope)
         owner = collection_owner(data)
+        # The configuration layer arrives in one GraphQL request per 100 repositories — metadata,
+        # default branch, rulesets, environments and every workflow file's YAML inlined. It
+        # replaces the enumeration walk, one metadata call per repo, and one Contents call per
+        # workflow file; measured on a 19-repo org that is ~85 REST calls collapsed into 1, at a
+        # cost of 1 rate-limit point (req-github-core-graphql-config). REST still serves the
+        # operation layer below, because GraphQL exposes no workflow runs or jobs.
+        self._config: dict[str, dict[str, Any]] = {}
+        if owner is not None:
+            try:
+                self._config = self._fetch_config_layer(data, owner)
+            except GithubGraphQLError as exc:
+                self._abort(_SITE_ABORT_SCOPE, "GITHUB_GRAPHQL_FAILED", f"config-layer fetch failed: {exc}")
         try:
             repos = self._resolve_repos(client, owner, explicit_repos(data))
         except GithubAPIError as exc:
@@ -357,14 +385,78 @@ class GithubCollector(CollectorBase):
         nodes.append(oidc_issuer_node_envelope(_OIDC_ISSUER_URL))
 
         # --- collection phase: per-repo walk ---
+        failed: list[str] = []
         for full_name in repos:
             try:
                 self._collect_repo(client, full_name, run_limit, nodes, edges, platform_uuid)
             except GithubAPIError as exc:
-                self._abort(_SITE_ABORT_API, f"GITHUB_API_{exc.status}", str(exc))
+                # Contain the failure to its repo. A scope of one repo could treat any API error
+                # as fatal; a scope of nineteen cannot, because across thousands of calls a
+                # transient timeout is a certainty, and aborting throws away every repo that
+                # DID collect. The run continues and reports honestly instead.
+                failed.append(full_name)
+                self.record_warn(
+                    _SITE_REPO_FAILED,
+                    f"REPO_FAILED_{exc.status}",
+                    f"Skipped {full_name}: {exc}",
+                    message_data={"repo": full_name, "status": exc.status},
+                )
+                continue
             self.record_info(_SITE_REPO_DONE, "REPO_DONE", f"Collected {full_name}")
 
+        if failed and len(failed) == len(repos):
+            # Everything failed: that is not a transient blip, it is a broken credential or a
+            # dead API. Fail loudly rather than submitting an empty batch that looks like an
+            # organization with nothing in it.
+            self._abort(_SITE_ABORT_API, "GITHUB_API_ALL_REPOS_FAILED",
+                        f"every repo in scope failed to collect ({len(failed)}/{len(repos)})")
+        if failed:
+            # Load-bearing for tombstoning (req-github-core-org-scope-3, tap#140): the scope was
+            # completely ENUMERATED but not completely COLLECTED, so absence within this run is
+            # not evidence of deletion. Anything inferring removal must read this first.
+            self.record_warn(
+                _SITE_COLLECTION_PARTIAL,
+                "COLLECTION_PARTIAL",
+                f"Collected {len(repos) - len(failed)} of {len(repos)} repo(s); "
+                f"{len(failed)} skipped after API errors. Absence in this batch is NOT evidence "
+                f"of deletion.",
+                message_data={"collected": len(repos) - len(failed), "failed": sorted(failed),
+                              "collection_complete": False},
+            )
+
         # --- submission phase ---
+        # Collapse envelopes that repeat across repos before submission. Several nodes and
+        # edges are legitimately shared by every repo in a scope — the account, the platform,
+        # the OIDC issuer and its ENABLED_ON edges — and the per-repo walk emits one copy each
+        # time. At a one-repo scope that never showed; at 19 repos GRIFT rejected the batch
+        # for duplicate entity ids and NOTHING landed. Deduping is correct rather than
+        # defensive: these are the same observation seen from several repos, and identity is
+        # deterministic, so the last copy is as good as the first.
+        nodes, node_dupes = self._collapse_by_entity_id(nodes)
+        edges, edge_dupes = self._collapse_by_entity_id(edges)
+        # Every edge in the COLLECTION batch must land on a node in the same batch — cross-grid
+        # edges are the enrichment phase's job and are resolved against what is already on the
+        # grid. A run can name a workflow that has since been deleted or renamed, which at a
+        # one-repo scope never happened and at nineteen rejected the whole batch for a dangling
+        # endpoint. Drop those edges and say how many, rather than losing every repo.
+        edges, dropped = self._drop_dangling_edges(edges, {e["entity"]["entity_id"] for e in nodes})
+        if dropped:
+            self.record_warn(
+                _SITE_EDGE_DROPPED,
+                "EDGES_DROPPED_DANGLING",
+                f"Dropped {len(dropped)} edge(s) whose endpoint was not collected — most often a run "
+                f"naming a workflow that no longer exists.",
+                message_data={"count": len(dropped), "edge_types": sorted({d for d in dropped})},
+            )
+        if node_dupes or edge_dupes:
+            self.record_info(
+                _SITE_ENVELOPE_COLLAPSED,
+                "ENVELOPES_COLLAPSED",
+                f"Collapsed {node_dupes} repeated node envelope(s) and {edge_dupes} edge envelope(s) "
+                f"shared across the scope's repos.",
+                message_data={"nodes": node_dupes, "edges": edge_dupes},
+            )
+
         scope_label = owner if owner is not None else ", ".join(repos)
         batch_dims = {"github.platform": "github.com"}
         if owner is not None:
@@ -406,6 +498,111 @@ class GithubCollector(CollectorBase):
             f"{len(enrichment.edge_envelopes)} link edge(s)."
         )
 
+    # ---------- config layer (GraphQL) ----------
+
+    def _fetch_config_layer(self, data: dict[str, Any], owner: str) -> dict[str, dict[str, Any]]:
+        """Fetch every repository's configuration for ``owner`` in one query, keyed by full name."""
+        gql = GithubGraphQLClient(token=data["token"], api_base_url=api_base_url(data))
+        repos, notes = gql.fetch_config_layer(owner)
+        config = {str(r["nameWithOwner"]): r for r in repos if r.get("nameWithOwner")}
+        self.record_info(
+            _SITE_GRAPHQL_CONFIG,
+            "GRAPHQL_CONFIG_FETCHED",
+            f"Config layer for {owner}: {len(config)} repo(s), "
+            f"{sum(len(GithubGraphQLClient.workflow_files(r)) for r in repos)} workflow file(s), "
+            f"cost {gql.last_cost} point(s).",
+            message_data={"repos": len(config), "cost": gql.last_cost, "remaining": gql.last_remaining},
+        )
+        for note in notes:
+            # A field the credential could not read. Surfaced, never swallowed: a silently missing
+            # ruleset list is indistinguishable from an account that has no rulesets.
+            self.record_warn(
+                _SITE_GRAPHQL_DEGRADED,
+                "GRAPHQL_FIELD_DEGRADED",
+                f"Config layer partially unreadable — {note}",
+                message_data={"detail": note},
+            )
+        return config
+
+    @staticmethod
+    def _repo_payload_from_config(gql: dict[str, Any]) -> dict[str, Any]:
+        """Shape a GraphQL repository node like the REST payload the emitters already consume."""
+        branch = gql.get("defaultBranchRef") or {}
+        owner_login = str(gql.get("nameWithOwner", "/")).split("/", 1)[0]
+        return {
+            "full_name": gql.get("nameWithOwner"),
+            "name": gql.get("name"),
+            "id": gql.get("databaseId"),
+            "owner": {"login": owner_login},
+            "default_branch": branch.get("name"),
+            "visibility": (gql.get("visibility") or "").lower(),
+            "archived": bool(gql.get("isArchived")),
+            "fork": bool(gql.get("isFork")),
+            "html_url": gql.get("url"),
+        }
+
+    def _workflow_config(self, client: GithubClient, full_name: str, path: str) -> tuple[str, dict[str, Any]]:
+        """Workflow YAML from the config layer when present, else the Contents API.
+
+        The GraphQL path is the reason the per-file Contents calls disappear — they were both the
+        bulk of the request count and the ones that timed out at org scale.
+        """
+        gql = self._config.get(full_name)
+        if gql and path:
+            files = GithubGraphQLClient.workflow_files(gql)
+            raw = files.get(path)
+            if raw is not None:
+                return raw, parse_workflow_yaml(raw)
+        return self._fetch_workflow_config(client, full_name, path)
+
+    # ---------- envelope hygiene ----------
+
+    @staticmethod
+    def _drop_dangling_edges(
+        edges: list[dict[str, Any]], node_ids: set[str]
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Drop edges with an endpoint outside ``node_ids``; return the survivors and their types.
+
+        Applies to the collection batch only, where both endpoints are always emitted alongside
+        the edge. Enrichment edges resolve against the grid and must never be filtered this way.
+        """
+        kept: list[dict[str, Any]] = []
+        dropped: list[str] = []
+        for env in edges:
+            e = env.get("edge") or {}
+            src, tgt = str(e.get("from_entity_id")), str(e.get("to_entity_id"))
+            if src in node_ids and tgt in node_ids:
+                kept.append(env)
+            else:
+                dropped.append(str(e.get("edge_type", "unknown")))
+        return kept, dropped
+
+    @staticmethod
+    def _collapse_by_entity_id(envelopes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+        """Return the envelopes with duplicate ``entity.entity_id`` collapsed, and the count removed.
+
+        Order is preserved and the LAST occurrence wins, so the freshest observation of a shared
+        node survives. Envelopes without an entity id pass through untouched rather than being
+        silently dropped — an id-less envelope is a different bug and GRIFT should be the one to
+        say so.
+        """
+        seen: dict[str, int] = {}
+        out: list[dict[str, Any]] = []
+        removed = 0
+        for env in envelopes:
+            eid = (env.get("entity") or {}).get("entity_id")
+            if eid is None:
+                out.append(env)
+                continue
+            key = str(eid)
+            if key in seen:
+                out[seen[key]] = env
+                removed += 1
+            else:
+                seen[key] = len(out)
+                out.append(env)
+        return out, removed
+
     # ---------- scope resolution ----------
 
     def _resolve_repos(self, client: GithubClient, owner: str | None, explicit: list[str]) -> list[str]:
@@ -420,6 +617,10 @@ class GithubCollector(CollectorBase):
         """
         if owner is None:
             return list(explicit)
+        if self._config:
+            # Already enumerated by the config-layer query; do not walk REST again.
+            enumerated = sorted(self._config)
+            return self._apply_filter(owner, enumerated, explicit, account_kind="graphql", complete=True)
         params = {"type": "all", "per_page": "100"}
         try:
             listing = client.get_paginated(f"/orgs/{owner}/repos", params=params)
@@ -431,6 +632,12 @@ class GithubCollector(CollectorBase):
             account_kind = "user"
         complete = bool(client.last_walk_complete)
         enumerated = [str(item["full_name"]) for item in listing if isinstance(item, dict) and item.get("full_name")]
+        return self._apply_filter(owner, enumerated, explicit, account_kind=account_kind, complete=complete)
+
+    def _apply_filter(
+        self, owner: str, enumerated: list[str], explicit: list[str], *, account_kind: str, complete: bool
+    ) -> list[str]:
+        """Apply the optional include-filter to an enumerated scope and record the enumeration."""
         repos = enumerated
         if explicit:
             wanted = set(explicit)
@@ -502,8 +709,10 @@ class GithubCollector(CollectorBase):
         # edge id dedupes across repos that share an owner.
         edges.append(self._edge("HOSTS_ACCOUNT__github_core", platform_uuid, account_uuid, dict(_PLATFORM_DIMENSIONS)))
 
-        # repository (envelope name == payload name == full_name for display)
-        repo_payload = client.get(f"/repos/{full_name}")
+        # repository. Prefer the config layer already in hand; fall back to REST for a
+        # repos-only scope, where no GraphQL enumeration ran.
+        gql = self._config.get(full_name)
+        repo_payload = self._repo_payload_from_config(gql) if gql else client.get(f"/repos/{full_name}")
         repo_uuid = repository_id(full_name)
         nodes.append(
             node_envelope(
@@ -547,7 +756,7 @@ class GithubCollector(CollectorBase):
                 continue
 
             wf_uuid = workflow_id(full_name, wf["id"])
-            raw_yaml, parsed_config = self._fetch_workflow_config(client, full_name, wf.get("path", ""))
+            raw_yaml, parsed_config = self._workflow_config(client, full_name, wf.get("path", ""))
             wf_display_name = wf.get("name") or wf.get("path") or str(wf["id"])
             nodes.append(
                 node_envelope(

@@ -67,6 +67,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | RID | Name | Status | Notes |
 | --- | --- | :---: | --- |
 | req-github-core-scope | [Plugin Scope](#plugin-scope) | Implemented | Actions plumbing for a configured scope: an account (org/user, enumerated — `req-github-core-org-scope`) or an explicit repo list |
+| req-github-core-app-auth | [GitHub App Authentication](#github-app-authentication) | In Development | 2026-08-27: the App is the product credential — its permissions are DERIVED from the collection manifest, it is created per-instance from a manifest so the operator holds their own key, and two surfaces git-serious needs are App-only (organization PAT grants, installed Apps) |
 | req-github-core-org-scope | [Account Scope](#account-scope) | Implemented | 2026-08-26 (pulled by git-serious): the envelope names an `owner`; the collector enumerates its repositories (org, user fallback), `repos` becomes an optional include-filter, and the run records the enumeration incl. walk completeness. Repos-only envelopes remain valid as the degenerate run config |
 | req-github-core-models | [Model Set](#model-set) | Implemented | account/repo/workflow/run/job/runner (0001) + synthesized `github_platform` (0002) — seven tables. `oidc_issuer` was extracted to the `identity_core` substrate plugin (dropped here in 0004); github still mints the issuer node via `identity_core.issuer`. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
@@ -104,6 +105,51 @@ surface; those arrive as further manifest sources behind the same scope.
 | req-github-core-scope-1 | Target Scope | Implemented | The collector target is configured in the `github_pat` envelope: an `owner` (account scope, enumerated) and/or an explicit `repos` list. | Was `notgeorge/samsite` by repo list; account scope added 2026-08-26 (`req-github-core-org-scope`). |
 | req-github-core-scope-2 | Actions Plumbing Focus | Implemented | v0 focuses on repository, workflow, run, job, and runner data needed to explain deployment flow. | Variables and secret references are deferred (`req-github-core-backlog-references`). |
 | req-github-core-scope-3 | No Broad Introspection | Implemented | Full GitHub account/org/repo introspection is deferred. | Collector touches only the documented endpoints; no broad walk. |
+
+### GitHub App Authentication
+----
+RID: `req-github-core-app-auth`
+Status: `In Development`
+
+A personal access token is a *person's* power in token form: it inherits their role, expires on
+someone's calendar, and dies when they leave. A GitHub App is its own principal with its own
+declared permissions, and two surfaces this plugin needs are **App-only** — the organization's
+fine-grained PAT grants and the list of installed Apps both return `404` to any token (verified
+2026-08-27). The App is therefore the product credential; `github_pat` remains supported because a
+token is the right tool for pointing an instance at one repository in ten minutes.
+
+**The permission set is derived, never hand-written.** Every source in the collection manifest
+declares the canonical triple it needs (`<surface>:<key>:<level>`), and the App's permissions are
+the union over sources — the same declaration the collector obeys, so the published claim about
+what we ask for cannot drift from what we use. Anything requested beyond that union must be passed
+explicitly and is rendered as `EXPLORATORY`, because silently over-requesting permission in a
+security product is the behaviour the product exists to find in other people.
+
+**Creation is per-instance and operator-held.** GitHub offers no API for creating an App — a
+logged-in human must confirm in a browser — so the flow renders a manifest, serves a review page
+from a short-lived listener on `127.0.0.1`, and catches GitHub's redirect locally. The operator's
+own machine performs the exchange and writes the envelope. This is not a preference: **the instance
+mounts its secrets root read-only and cannot write its own credentials.** The operator provisions;
+the instance consumes. A hosted variant, where one App is installed into many accounts, is
+explicitly rejected — it would route adopters' data through infrastructure we run.
+
+**Signing adds no crypto provider.** The JWT is minted with `cryptography` against the system
+OpenSSL the FIPS posture validates (`spec-fips.md`); no JWT library is introduced.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-app-auth-1 | Both Kinds Supported | In Development | The collector authenticates from either a `github_pat` or a `github_app` envelope, dispatched on the resolved secret's `kind`; neither path is privileged in the code above the auth seam. | The PAT path stays for first-look and for repos-only scopes. |
+| req-github-core-app-auth-2 | Permissions Derived | Implemented | The App manifest's permissions are the union of the collection manifest's per-source permission triples. Extras require an explicit flag and render as `EXPLORATORY`. | `skills/create-github-app/manifest.py`. |
+| req-github-core-app-auth-3 | Surfaces Namespaced | Implemented | Repository and organization permissions are namespaced before emission, and a key collision raises rather than silently overwriting. | Found in review: `repository:administration` and `organization:administration` collapsed onto one key and one was dropped. |
+| req-github-core-app-auth-4 | Operator Holds The Key | In Development | Creation happens on the operator's machine; the private key is written to their secret store at `0600` and never printed, logged, or transmitted. The instance never writes a credential. | Enforced by the read-only secrets mount, not only by convention. |
+| req-github-core-app-auth-5 | Host Flow Is Stdlib-Only | Implemented | The creation flow runs outside the container and imports only the standard library, per the `tap/git_invocation.py` discipline. | Asserted by test. |
+| req-github-core-app-auth-6 | Redirect Is State-Checked | Implemented | The manifest carries a random `state`; a redirect whose state does not match is refused and no exchange is attempted. | |
+| req-github-core-app-auth-7 | Token Lifecycle | In Development | The private key signs a JWT (≤10 min) exchanged for an installation token (~1 h). Installation tokens are cached per installation on the auth object — never at module or class scope, so concurrent collections cannot share a credential. | The failure mode is cross-account leakage that produces plausible results. |
+| req-github-core-app-auth-8 | No Webhook By Default | Implemented | The generated App subscribes to no events and declares no webhook. Receiving events is a separate capability decision. | `tap_cares`'s receiver half is not yet built. |
+| req-github-core-app-auth-9 | Verified Before Trusted | In Development | A placed credential is proven end-to-end — key → JWT → installation → token → one probe per reachable surface — before the collector relies on it. | `skills/create-github-app/verify_app.py`. |
+| req-github-core-app-auth-10 | Public Apps Rejected | Implemented | The per-instance model never marks an App public; a public App implies a hosted, centralized deployment that routes adopters' data through our infrastructure. | The flag exists only to keep the shape describable. |
 
 ### Account Scope
 ----
