@@ -25,8 +25,6 @@ from tap_plugin.github_core.collectors.github_collector.app_jwt import GithubApp
 from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
 from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
 from tap_plugin.github_core.collectors.github_collector.identity import (
-    actions_cache_id,
-    app_installation_id,
     environment_id,
     git_ref_id,
     ruleset_id,
@@ -718,6 +716,62 @@ class TestAppInventoryScope:
         unreachable = [r for r in collector.records if "APP_INVENTORY_UNREACHABLE" in str(r)]
         assert unreachable, "an empty inventory must be reported as unreachable, not as empty"
         assert "GitHub App" in unreachable[0][3]
+
+
+class TestAppEndpointHygiene:
+    """The App JWT and the installation token minted from it cross this transport."""
+
+    def test_a_non_https_base_url_is_refused_before_anything_moves(self) -> None:
+        """`urlopen` honours whatever scheme it is handed: an http:// base would send the JWT in
+        cleartext to a host the envelope chose, and file:// would turn an API call into a local
+        file read. The schema refuses both at load; this refuses them again at the call."""
+        from tap_plugin.github_core.collectors.github_collector import app_jwt
+
+        for bad in ("http://api.github.com", "file:///etc", "ftp://x", "api.github.com"):
+            with pytest.raises(GithubAppAuthError, match="https|host"):
+                app_jwt.app_get(bad, "/app/installations", "jwt")
+
+    def test_the_envelope_schema_refuses_a_non_https_base_url_too(self) -> None:
+        import jsonschema
+
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {"owner": "acme", "pat": {"token": "t"}, "api_base_url": "http://api.github.com"},
+                GITHUB_SCHEMA,
+            )
+
+    def test_the_installation_walk_follows_pagination(self, monkeypatch) -> None:
+        """GitHub's default page is 30, and this list is what `owner` is matched against. A
+        truncated walk does not produce a short list — it produces "App is not installed on
+        <account>" for an account it IS installed on."""
+        from tap_plugin.github_core.collectors.github_collector import app_jwt
+
+        pages = {1: [{"id": i} for i in range(100)], 2: [{"id": 100}]}
+        seen: list[str] = []
+
+        def _fake_get(base, path, jwt, **_):
+            seen.append(path)
+            page = int(path.rsplit("page=", 1)[1])
+            app_jwt._LAST_LINK_HEADER[0] = '<...>; rel="next"' if page == 1 else ""
+            return pages[page]
+
+        monkeypatch.setattr(app_jwt, "app_get", _fake_get)
+        result = app_jwt.list_installations("https://api.github.com", "jwt")
+        assert len(result) == 101
+        assert seen == ["/app/installations?per_page=100&page=1", "/app/installations?per_page=100&page=2"]
+
+    def test_a_single_short_page_stops_immediately(self) -> None:
+        """One request for the overwhelmingly common case — an App installed once."""
+        from tap_plugin.github_core.collectors.github_collector import app_jwt
+
+        calls: list[str] = []
+        original = app_jwt.app_get
+        try:
+            app_jwt.app_get = lambda base, path, jwt, **_: (calls.append(path) or [{"id": 1}])
+            assert len(app_jwt.list_installations("https://api.github.com", "jwt")) == 1
+            assert len(calls) == 1
+        finally:
+            app_jwt.app_get = original
 
 
 class TestVocabularyIsDeclared:

@@ -217,9 +217,14 @@ GITHUB_SCHEMA: dict[str, Any] = {
         },
         "api_base_url": {
             "type": "string",
-            "minLength": 1,
+            "pattern": "^https://",
             "default": "https://api.github.com",
-            "description": "GitHub REST API base URL; a GitHub Enterprise Server tenant has its own.",
+            "description": (
+                "GitHub REST API base URL; a GitHub Enterprise Server tenant has its own. HTTPS "
+                "only, enforced here rather than trusted: the value is interpolated into a URL "
+                "that carries the App JWT and the installation token, and `urlopen` honours "
+                "whatever scheme it is given."
+            ),
         },
         "app": {
             "type": "object",
