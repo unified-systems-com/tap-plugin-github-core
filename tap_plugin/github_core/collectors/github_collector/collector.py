@@ -285,7 +285,14 @@ class GithubCollector(CollectorBase):
         # built to catch it. A missing credential and a dead one must not read the same.
         if auth.has_pat:
             try:
-                auth.probe_pat()
+                # Through GithubClient, not around it: the self-test's transport is injectable so
+                # a caller can stub it, and a liveness probe that reaches past it would make a
+                # stubbed self-test talk to the real GitHub.
+                GithubClient(
+                    token=auth.token(prefer=PREFER_PAT),
+                    api_base_url=api_base_url(data),
+                    retry_empty_404=False,
+                ).get("/rate_limit")
             except (GithubAppAuthError, GithubAPIError) as exc:
                 checks.append(
                     check_fail(

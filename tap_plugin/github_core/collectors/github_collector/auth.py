@@ -24,13 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .app_jwt import (
-    GithubAppAuthError,
-    app_get,
-    exchange_installation_token,
-    list_installations,
-    mint_jwt,
-)
+from .app_jwt import GithubAppAuthError, exchange_installation_token, list_installations, mint_jwt
 from .secret import normalize_credentials
 
 logger = logging.getLogger(__name__)
@@ -106,20 +100,8 @@ class GithubAuth:
 
     @property
     def installation(self) -> dict[str, Any] | None:
-        """The installation whose token is in use, once one has been minted (App mode only)."""
+        """The installation whose token is in use, once an App token has been minted."""
         return self._installation
-
-    def probe_pat(self) -> None:
-        """Prove the personal access token is alive, or raise.
-
-        Liveness is per CREDENTIAL, not per envelope. A self-test that exercises only the
-        preferred credential passes with a **dead token beside a live App** — and then the bypass
-        actors degrade at collection time, on the deployment that did the most work to be
-        observable. The check meant to catch that failure would have been the one delivering it.
-        """
-        if not self.has_pat:
-            raise GithubAppAuthError("no personal access token in the envelope")
-        app_get(self._api_base_url, "/rate_limit", str(self._pat["token"]))
 
     def token(self, prefer: str | None = None) -> str:
         """A bearer token for repository-scoped calls.
@@ -149,7 +131,7 @@ class GithubAuth:
         return mint_jwt(self._app["app_id"], self._app["private_key"])
 
     def installations(self) -> list[dict[str, Any]]:
-        """Every installation of this App, or an empty list in PAT mode.
+        """Every installation of this App, or an empty list when the envelope carries no App.
 
         Empty means *nothing observed*, and the caller must not render it as *nothing installed*:
         without an App the surface is unreachable, not empty. The collector records which it was.

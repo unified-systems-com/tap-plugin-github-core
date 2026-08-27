@@ -572,13 +572,13 @@ class TestAuthSeam:
     def test_a_missing_credential_says_which_one_would_have_shown_more(self) -> None:
         """This is what turns an unobservable cell into something an operator can act on."""
         app_only = self._app_auth([])
-        assert "personal access token" in app_only.absent_note(PREFER_PAT)
+        assert "write access to the ruleset" in app_only.absent_note(PREFER_PAT)
         assert app_only.absent_note(PREFER_APP) == ""
 
         token_only = GithubAuth(
             kind="github", data={"owner": "acme", "pat": {"token": "t"}}, api_base_url="x"
         )
-        assert "GitHub App" in token_only.absent_note(PREFER_APP)
+        assert "GitHub App would show them" in token_only.absent_note(PREFER_APP)
         assert token_only.absent_note(PREFER_PAT) == ""
 
     def test_holding_both_leaves_nothing_to_explain(self) -> None:
@@ -654,9 +654,9 @@ class TestAppInventoryScope:
         collector.record_info = lambda *a, **k: collector.records.append(("info", *a[:3]))
 
         class _Auth:
-            mode = auth_mode
             has_app = auth_mode == PREFER_APP
             has_pat = auth_mode == PREFER_PAT
+            held = [auth_mode]
 
             def absent_note(self, prefer):
                 return "" if (prefer == PREFER_APP and self.has_app) else "a GitHub App would show more here"
@@ -708,12 +708,16 @@ class TestAppInventoryScope:
             "the run must say the inventory is about this App, not about the account"
         )
 
-    def test_pat_mode_emits_nothing_and_claims_nothing(self) -> None:
+    def test_a_token_only_envelope_emits_nothing_and_claims_nothing(self) -> None:
+        """Without an App the surface is unreachable, not empty — and the run must say which,
+        naming the credential that would have answered."""
         collector = self._collector(auth_mode=PREFER_PAT)
         nodes: list[dict] = []
         collector._collect_app_installations(object(), "acme", nodes, [])
         assert nodes == []
-        assert any("APP_INVENTORY_UNREACHABLE" in str(r) for r in collector.records)
+        unreachable = [r for r in collector.records if "APP_INVENTORY_UNREACHABLE" in str(r)]
+        assert unreachable, "an empty inventory must be reported as unreachable, not as empty"
+        assert "GitHub App" in unreachable[0][3]
 
 
 class TestVocabularyIsDeclared:

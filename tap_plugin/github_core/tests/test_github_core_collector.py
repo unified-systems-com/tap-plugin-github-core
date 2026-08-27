@@ -491,7 +491,11 @@ class TestAccountScope:
         codes = {c.code: c.is_failure for c in result.checks}
         assert codes["GITHUB_OWNER_ACCESS:o"] is False
         assert not [k for k in codes if k.startswith("GITHUB_REPO_ACCESS:")]
-        assert calls == ["/rate_limit", "/orgs/o/repos"]
+        # Two /rate_limit calls, and both earn their place: the first proves the TOKEN is alive
+        # on its own (liveness is per credential — a dead token beside a live App must not pass),
+        # the second is the shared API-reachability check. The point of this test is the single
+        # LISTING walk that follows, with no per-repo probe behind it.
+        assert calls == ["/rate_limit", "/rate_limit", "/orgs/o/repos"]
 
 
 class TestEnrichmentDegrade:
