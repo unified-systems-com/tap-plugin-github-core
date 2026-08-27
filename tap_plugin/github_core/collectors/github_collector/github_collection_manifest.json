@@ -1,6 +1,6 @@
 {
   "manifest_version": "0",
-  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth).",
+  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth). A source that genuinely needs no triple states why in `permission_not_applicable` \u2014 the exemption is declared, never achieved by leaving the field out.",
   "api_base_url": "https://api.github.com",
   "sources": [
     {
@@ -231,7 +231,8 @@
         "suspended"
       ],
       "permission_failure": "degrade_with_warning",
-      "description": "The App's own installation inventory (req-github-core-app-installations). Declares NO permission triple on purpose: this is an App-JWT-level endpoint about the App itself, not a grant over anybody's repositories, so it contributes nothing to the derived least-privilege set. A personal access token gets 404 here, and the run records that the surface was unreachable rather than emitting an empty inventory."
+      "description": "The App's own installation inventory (req-github-core-app-installations). Declares NO permission triple on purpose: this is an App-JWT-level endpoint about the App itself, not a grant over anybody's repositories, so it contributes nothing to the derived least-privilege set. A personal access token gets 404 here, and the run records that the surface was unreachable rather than emitting an empty inventory.",
+      "permission_not_applicable": "App-JWT-level endpoint describing the App itself, not a grant over any account's resources. No fine-grained permission triple exists for it, and inventing one would corrupt the derived least-privilege set. A personal access token gets 404."
     }
   ],
   "edges": [

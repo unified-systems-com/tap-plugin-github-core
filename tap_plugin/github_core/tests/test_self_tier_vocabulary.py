@@ -638,8 +638,33 @@ class TestVocabularyIsDeclared:
         assert "observable" in edge["property_schema"]["properties"]
         assert "ABSENCE OF THIS EDGE IS NOT ABSENCE OF BYPASS" in edge["description"]
 
-    def test_the_collection_manifest_still_declares_a_permission_per_source(self) -> None:
-        """The App's permission set is DERIVED from these declarations, so a source without one
-        silently narrows what the credential is allowed to see."""
+    def test_every_source_declares_a_permission_or_says_why_it_needs_none(self) -> None:
+        """The App's permission set is DERIVED from these declarations, so a source that quietly
+        omits one narrows what the credential is allowed to see with nobody deciding to.
+
+        The exemption is deliberate and narrow: `/app/installations` is an App-JWT-level endpoint
+        about the App itself rather than a grant over anyone's resources, and inventing a triple
+        for it would corrupt the derived set. So it must SAY so.
+        """
         for source in load_collection_manifest()["sources"]:
-            assert source.get("permission"), f"{source['name']} declares no permission"
+            assert source.get("permission") or source.get("permission_not_applicable"), (
+                f"{source['name']} declares neither a permission nor a reason it needs none"
+            )
+
+    def test_an_exempt_source_contributes_nothing_to_the_derived_permissions(self) -> None:
+        """The exemption must not become a back door into the least-privilege set."""
+        import importlib.util
+        from pathlib import Path
+
+        skill = Path(__file__).resolve().parents[1] / "skills" / "create-github-app" / "manifest.py"
+        spec = importlib.util.spec_from_file_location("gs_manifest_perms", skill)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        repo_perms, org_perms = module.derive_permissions()
+        assert repo_perms == {
+            "metadata": "read",
+            "actions": "read",
+            "contents": "read",
+            "administration": "read",
+        }
+        assert org_perms == {}

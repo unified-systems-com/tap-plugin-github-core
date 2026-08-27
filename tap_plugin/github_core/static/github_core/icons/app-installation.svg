@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. The grant, not the application: a plug seated in a socket. The application
+     is `github-app`; this is one account's installation of it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>App Installation</title>
+  <rect x="2.7" y="6.4" width="9.2" height="11.2" rx="2" fill="none" stroke="#1f2328" stroke-width="1.5"/>
+  <path fill="#1f2328" d="M11.9 10.2h4.3v1.6h-4.3Zm0 4.1h4.3v1.6h-4.3Z"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linejoin="round"
+        d="M16.2 7.9h3.4a1.7 1.7 0 0 1 1.7 1.7v4.9a1.7 1.7 0 0 1-1.7 1.7h-3.4Z"/>
+</svg>

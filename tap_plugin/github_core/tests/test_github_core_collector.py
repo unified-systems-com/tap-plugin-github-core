@@ -218,7 +218,10 @@ jobs:
         config = parse_workflow_yaml(yaml_text)
         assert config["triggers"] == ["push"]
         assert config["jobs"][0]["id"] == "build"
-        assert config["jobs"][0]["runs_on"] == "ubuntu-latest"
+        # `runs_on` is canonicalized to a list whichever of the three written forms was used
+        # (req-github-core-declared-jobs-5), so one query shape answers "which jobs run on a
+        # self-hosted label".
+        assert config["jobs"][0]["runs_on"] == ["ubuntu-latest"]
         assert config["raw_yaml"] == yaml_text
 
     def test_triggers_normalized(self) -> None:

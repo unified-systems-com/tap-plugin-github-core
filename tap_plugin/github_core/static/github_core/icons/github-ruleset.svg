@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. A shield: the gate a commit must pass. The gap at the base is deliberate —
+     a ruleset's bypass list is the part you often cannot see. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>GitHub Ruleset</title>
+  <path fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"
+        d="M12 2.9 20 5.6v6.2c0 4.4-3.4 7.7-8 9.3-4.6-1.6-8-4.9-8-9.3V5.6Z"/>
+  <path fill="#1f2328" d="m11.1 14.4-2.8-2.8 1.2-1.2 1.6 1.6 4-4 1.2 1.2-5.2 5.2Z"/>
+</svg>

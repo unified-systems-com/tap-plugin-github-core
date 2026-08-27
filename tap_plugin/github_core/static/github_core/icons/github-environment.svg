@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. A deployment target behind a gate: the target on the right, the bar that
+     stands in front of it on the left. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>GitHub Environment</title>
+  <rect x="10.5" y="4.5" width="10.8" height="15" rx="2" fill="none" stroke="#1f2328" stroke-width="1.5"/>
+  <path fill="#1f2328" d="M13 7.6h5.8v1.5H13Zm0 3.6h5.8v1.5H13Zm0 3.6h3.4v1.5H13Z"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linecap="round" d="M5.4 3.4v17.2"/>
+  <circle cx="5.4" cy="12" r="2.3" fill="#fff" stroke="#1f2328" stroke-width="1.5"/>
+</svg>

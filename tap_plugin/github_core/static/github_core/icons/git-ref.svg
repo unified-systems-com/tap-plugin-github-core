@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. A name pointing at a commit: the tag body on the left, the commit on the
+     right. One icon for branches and tags, because one type covers both. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>Git Ref</title>
+  <path fill="#1f2328" d="M2.5 7.2A1.7 1.7 0 0 1 4.2 5.5h6.1c.45 0 .88.18 1.2.5l3.6 3.6a1.7 1.7 0
+    0 1 0 2.4l-3.6 3.6c-.32.32-.75.5-1.2.5H4.2a1.7 1.7 0 0 1-1.7-1.7Zm3.6 3.1a1.4 1.4 0 1 0 0 2.8
+    1.4 1.4 0 0 0 0-2.8Z"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" d="M15.6 11.7h3.2"/>
+  <circle cx="20.6" cy="11.7" r="2.1" fill="none" stroke="#1f2328" stroke-width="1.5"/>
+</svg>
