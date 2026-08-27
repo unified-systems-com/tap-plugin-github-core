@@ -230,10 +230,29 @@ readable catalogue, a collector can land it on the grid so "what changed" become
      current state (field absent, HTTP 200), org-level ruleset endpoints (403), and ruleset version
      history (403). GitHub is consistent rather than leaky, so there is no back door and no
      disclosure inconsistency to report. Note the App *was* granted `organization_administration:
-     read` and still received 403, so the cause is **unexplained** — the live candidates are that
-     the whole ruleset family is write-to-read, or that `enabledForGitHubApps` does not encode the
-     required level. Do not record either as fact; settling it needs a write-capable credential,
-     which is a posture decision rather than an experiment.
+     read` and still received 403. **Two distinct facts live here and only one is understood:**
+
+     *Understood — the stripped field is deliberate.* GitHub documents the rationale for the
+     detail endpoint verbatim: *"To prevent leaking sensitive information, the `bypass_actors`
+     property is only returned if the user making the API request has write access to the
+     ruleset."* Design, not accident.
+
+     *Open — the 403s contradict GitHub's own published permission table.* The fine-grained
+     permissions reference places `GET .../rulesets/{id}/history`, `.../history/{version_id}` and
+     `GET /orgs/{org}/rulesets` under **read** access (write covers only POST/PUT/DELETE). Our App
+     holds those grants and is refused. The grant is provably live: `rule-suites` and the plain
+     ruleset **list** both return 200 under the same permission at the same level, so this is not
+     permission drift. Measured 2026-08-27 — repo history 403 on the list *and* on three known
+     version ids fetched directly; org rulesets 403. **Record as an over-restriction or
+     documentation defect on GitHub's side, not as our misconfiguration**, and do not "fix" it by
+     requesting write.
+
+     A theory that fits the repo-scope observations and is offered as a theory only: the gate
+     follows the *field through the response* rather than the endpoint — payloads that can embed
+     `bypass_actors` are restricted, payloads that cannot are not (list: no field, 200; detail:
+     field, 200 stripped; history: full prior state, 403). It does not explain the org-level 403,
+     and GitHub is inconsistent about mechanism (strip vs refuse) even where consistent about
+     intent.
    - **Detection has no ceiling.** `/repos/{o}/{r}/rulesets/rule-suites` works on the read-only App
      (HTTP 200), returning per-push evaluations with `actor_id`, `actor_name`, `result`
      (`pass|fail|bypass`) and `rule_evaluations` on the detail. **`time_period` silently defaults to
