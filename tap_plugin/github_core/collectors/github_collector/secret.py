@@ -40,7 +40,7 @@ GITHUB_KIND = "github"
 #: (`req-github-core-secret-3`). samsite's shipped record still declares `github_pat`, and
 #: breaking its boot to tidy a kind name would be a poor trade.
 GITHUB_SECRET_KIND = "github_pat"
-GITHUB_APP_SECRET_KIND = "github_app"
+GITHUB_APP_SECRET_KIND = "github_app"  # nosec B105 — the KIND's name, not a credential
 
 # github_core owns this schema for the kind's `data` (req-github-core-secret-2).
 # Strict: additionalProperties false. Behavioral knobs beyond `initial_run_limit`

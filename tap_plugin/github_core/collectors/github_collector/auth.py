@@ -174,8 +174,10 @@ class GithubAuth:
             chosen = installations[0]
         self._installation = chosen
         token, expires_at = exchange_installation_token(self._api_base_url, self.app_jwt(), chosen["id"])
+        # nosec B105 — the message NAMES the act of minting; the token itself is never an
+        # argument here, and must never become one.
         logger.info(
-            "[17b1] minted installation token for %s (installation %s), expires %s",
+            "[17b1] minted installation token for %s (installation %s), expires %s",  # nosec B105
             (chosen.get("account") or {}).get("login", "?"),
             chosen.get("id"),
             expires_at or "unknown",

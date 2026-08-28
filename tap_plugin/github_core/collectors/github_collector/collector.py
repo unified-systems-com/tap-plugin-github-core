@@ -141,8 +141,8 @@ _TERMINAL_RUN_STATUSES: frozenset[str] = frozenset({"completed"})
 _CACHE_LIMIT_PER_REPO = 100
 
 # Ruleset condition tokens GitHub uses in place of a ref pattern.
-_REF_TOKEN_DEFAULT_BRANCH = "~DEFAULT_BRANCH"
-_REF_TOKEN_ALL = "~ALL"
+_REF_TOKEN_DEFAULT_BRANCH = "~DEFAULT_BRANCH"  # nosec B105 — GitHub ref token, not a secret
+_REF_TOKEN_ALL = "~ALL"  # nosec B105 — GitHub ref token, not a secret
 
 # Which ref type a ruleset's target governs. A `push` ruleset restricts the push itself (file
 # sizes, secret scanning) rather than a named ref, so it resolves to no refs at all.
