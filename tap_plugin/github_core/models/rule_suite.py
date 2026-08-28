@@ -115,7 +115,7 @@ class RuleSuite(BaseModel):
     pushed_at = models.DateTimeField(null=True, blank=True)
     #: `[{"rule_type": "required_status_checks", "ruleset_id": 20613528, "ruleset_name": "...",
     #: "details": "Required status check \"gate\" is expected."}, ...]` — the rules that were NOT
-    #: satisfied. Kept as data because the BYPASSED edge carries only the ruleset join, and the
+    #: satisfied. Kept as data because the HAS_BYPASSED edge carries only the ruleset join, and the
     #: rule type and GitHub's own explanation are what make the event readable.
     bypassed_rules = models.JSONField(default=list, blank=True)
     configuration = models.JSONField(default=dict, blank=True)

@@ -21,9 +21,9 @@ EDGES_DIR = Path(github_models.__file__).parent.parent / "edges"
 EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "RuleSuite"}
 # SCOPED_TO is sourced on actions_cache, which is execution — the layer follows the
 # source model rather than a second map (req-github-core-dimensions-6).
-# PUSHED_BY / BYPASSED / EVALUATED_ON are all sourced on rule_suite, which is execution.
+# PUSHED_BY / HAS_BYPASSED / EVALUATED_ON are all sourced on rule_suite, which is execution.
 EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "HAS_ACTIONS_JOB", "EXECUTED_ON", "SCOPED_TO",
-                   "PUSHED_BY", "BYPASSED", "EVALUATED_ON"}
+                   "PUSHED_BY", "HAS_BYPASSED", "EVALUATED_ON"}
 # Sources span both layers, so the layer belongs to the endpoint, not the edge
 # type; the collector sets it per emitted edge (req-github-core-dimensions-6).
 LAYER_SPANNING_EDGES = {"REFERENCES_RESOURCE"}

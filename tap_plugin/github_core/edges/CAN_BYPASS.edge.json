@@ -1,6 +1,6 @@
 {
-  "slug": "BYPASSES__github_core",
-  "name": "Bypasses",
+  "slug": "CAN_BYPASS__github_core",
+  "name": "Can Bypass",
   "description": "An actor may bypass a ruleset. Present only for an actor GitHub actually disclosed: the bypass list is returned only to a caller with write access to the ruleset, so ABSENCE OF THIS EDGE IS NOT ABSENCE OF BYPASS. The ruleset node's bypass_observability field carries that distinction, because when nobody bypasses \u2014 or nobody could be seen \u2014 there is no edge here to carry anything.",
   "sources": [
     "github_core__github_account",

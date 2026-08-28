@@ -159,8 +159,8 @@ class TestTheBypassedControlIsNamed:
     def test_bypassed_edge_points_at_the_ruleset_that_was_gone_around(self) -> None:
         """Without this join the event is a log line. With it, it names the control."""
         _, edges, _, _ = _collect(_FakeClient())
-        bypassed = _edges_of(edges, "BYPASSED__github_core")
-        assert bypassed, "no BYPASSED edge — the suite detail names a ruleset"
+        bypassed = _edges_of(edges, "HAS_BYPASSED__github_core")
+        assert bypassed, "no HAS_BYPASSED edge — the suite detail names a ruleset"
         failing = [
             e for e in _FIXTURE["detail"]["rule_evaluations"]
             if e["result"] != "pass" and (e.get("rule_source") or {}).get("type") == "ruleset"
@@ -207,7 +207,7 @@ class TestRefusedIsNotEmpty:
         suites = _of_type(nodes, "github_core__rule_suite")
         assert len(suites) == len(_FIXTURE["list_bypass"])
         assert suites[0]["node"]["bypassed_rules"] == []
-        assert not _edges_of(edges, "BYPASSED__github_core")
+        assert not _edges_of(edges, "HAS_BYPASSED__github_core")
 
 
 class TestRefResolution:

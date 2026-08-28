@@ -272,7 +272,7 @@
       ],
       "permission": "repository:administration:read",
       "permission_failure": "degrade_with_warning",
-      "description": "Pushes evaluated against the repo's rulesets, filtered to those that BYPASSED one (req-github-core-rule-suites). Answers a read-only App with actor names, where the ruleset's own bypass_actors list does not. `time_period` is explicit because omitting it silently means `day`."
+      "description": "Pushes evaluated against the repo's rulesets, filtered to those that bypassed one (req-github-core-rule-suites). Answers a read-only App with actor names, where the ruleset's own bypass_actors list does not. `time_period` is explicit because omitting it silently means `day`."
     },
     {
       "name": "rule_suite_detail",
@@ -339,7 +339,7 @@
       "target": "github_core__github_repository"
     },
     {
-      "slug": "BYPASSES__github_core",
+      "slug": "CAN_BYPASS__github_core",
       "source": "github_core__github_app",
       "target": "github_core__github_ruleset",
       "condition": "an actor GitHub actually disclosed; see req-github-core-rulesets-bypass"

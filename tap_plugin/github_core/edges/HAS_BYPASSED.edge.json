@@ -1,6 +1,6 @@
 {
-  "slug": "BYPASSED__github_core",
-  "name": "Bypassed",
+  "slug": "HAS_BYPASSED__github_core",
+  "name": "Has Bypassed",
   "description": "A push went around this ruleset rather than satisfying it. Distinct from BYPASSES, and the distinction is the point: BYPASSES is a standing permission (who MAY), this is an occurrence (who DID). Conflating them would make 'is permitted' and 'has actually done it' indistinguishable in a query, which is the whole value of the finding.",
   "sources": [
     "github_core__rule_suite"
