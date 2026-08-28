@@ -92,7 +92,7 @@ def test_declared_fields_exist_in_the_response_schema(source: dict) -> None:
     )
     # Manifest field names are the names WE give the node; the collector maps some of them.
     # Only assert on the ones claiming to be verbatim response keys.
-    unknown = {f for f in declared if f not in published} - _RENAMED_BY_THE_COLLECTOR.get(source["name"], set())
+    unknown = {f for f in declared if f not in published} - set(_RENAMED_FROM.get(source["name"], {}))
     assert not unknown, (
         f"{source['name']}: manifest declares field(s) {sorted(unknown)} that GitHub's schema for "
         f"{path} does not publish. Either GitHub renamed them, or the manifest names a mapped field "
@@ -100,42 +100,62 @@ def test_declared_fields_exist_in_the_response_schema(source: dict) -> None:
     )
 
 
-#: Manifest field names that are deliberately OUR name, not GitHub's response key.
+#: Manifest field name -> the response key it is READ FROM. A map, not a set, because a set
+#: exempts a field from checking entirely and would hide the exact drift this file exists to
+#: catch: if GitHub removed `id`, an exemption saying only "workflow_id is renamed" still
+#: passes. Naming the upstream key makes the exemption assert something.
 #:
-#: This table exists because of a SHAPE GAP, and it should shrink to nothing rather than grow.
-#: github_core's manifest declares `fields` as a LIST of the names we store. aws_core declares
-#: its equivalent as a MAP — `{"account_id": "Account"}`, our name to their key — which makes
-#: this check derivable instead of hand-listed. Until this manifest adopts that shape, each
-#: rename is enumerated here, per source, so the check stays strict about every OTHER field
-#: rather than being loosened for all of them at once.
+#: This table exists because of a SHAPE GAP and should shrink to nothing. github_core's
+#: manifest declares `fields` as a LIST of the names we store; aws_core declares its
+#: equivalent as a MAP, our-name to their-key, which would make all of this derivable rather
+#: than hand-listed. Until this manifest adopts that shape, the renames live here.
 #:
-#: Nearly all of these are the same rename: GitHub returns a bare `id`, and a graph needs a
-#: name that says what it is the id OF, because `id` on a node shared across four types is
-#: unreadable. That is a good decision the manifest simply cannot express yet.
-_RENAMED_BY_THE_COLLECTOR: dict[str, set[str]] = {
-    "account": {"github_id", "account_type"},             # id; type (renamed — `type` is unusable
-                                                         # as a column name on a typed node)
-    "repository": {"github_id", "owner_login"},          # id; owner.login flattened
-    "workflows": {"workflow_id"},                        # id
-    "runs": {"run_id", "completed_at"},                  # id; updated_at read as completion
-    "jobs": {"job_id"},                                  # id
-    "runners": {"runner_id"},                            # id
-    "rulesets": {"ruleset_id"},                          # id
-    "caches": {"cache_id"},                              # id
-    "app_installations": {"installation_id", "account_login", "suspended"},
-    "app_installation_self": {"installation_id", "account_login"},
+#: Nearly all are the same one: GitHub returns a bare `id`, and a graph needs a name saying
+#: what it is the id OF, because `id` on a node type shared across four kinds is unreadable.
+_RENAMED_FROM: dict[str, dict[str, str]] = {
+    "account": {"github_id": "id", "account_type": "type"},
+    "repository": {"github_id": "id", "owner_login": "owner"},  # owner.login, flattened
+    "workflows": {"workflow_id": "id"},
+    "runs": {"run_id": "id", "completed_at": "updated_at"},
+    "jobs": {"job_id": "id"},
+    "runners": {"runner_id": "id"},
+    "rulesets": {"ruleset_id": "id"},
+    "caches": {"cache_id": "id"},
+    "app_installations": {"installation_id": "id", "account_login": "account", "suspended": "suspended_at"},
+    "app_installation_self": {"installation_id": "id", "account_login": "account"},
 }
+
+
+@pytest.mark.parametrize("source", _rest_sources(), ids=lambda s: s["name"])
+def test_every_rename_names_a_key_github_still_publishes(source: dict) -> None:
+    """The upstream side of each rename still exists.
+
+    Without this, an exemption is a hole: `workflow_id` would stay exempt and green even if
+    GitHub stopped returning `id` altogether. Asserting the SOURCE key is what makes the
+    exemption a claim rather than a silence.
+    """
+    renames = _RENAMED_FROM.get(source["name"], {})
+    if not renames:
+        pytest.skip("no renames declared for this source")
+    path = source.get("path") or source.get("path_pattern")
+    published = set(_EXTRACT["paths"][path]["item_properties"])
+    gone = {ours: theirs for ours, theirs in renames.items() if theirs not in published}
+    assert not gone, (
+        f"{source['name']}: field(s) mapped from response key(s) GitHub no longer publishes at "
+        f"{path}: {gone}. The rename is stale — either the upstream key moved, or the collector "
+        "now reads something else and this table was not updated with it."
+    )
 
 
 def test_the_rename_table_does_not_outlive_its_entries() -> None:
     """A rename listed here that GitHub now publishes verbatim is a stale exemption.
 
-    Same discipline as the guard baselines: an exclusion that no longer excludes anything
-    is a lie about the strictness of the check above it, and it only shrinks.
+    Same discipline as the guard baselines: an exclusion that no longer excludes anything is a
+    lie about the strictness of the check above it, and it only shrinks.
     """
     stale: list[str] = []
     for source in _rest_sources():
-        renamed = _RENAMED_BY_THE_COLLECTOR.get(source["name"], set())
+        renamed = set(_RENAMED_FROM.get(source["name"], {}))
         if not renamed:
             continue
         path = source.get("path") or source.get("path_pattern")

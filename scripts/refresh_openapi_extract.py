@@ -26,16 +26,18 @@ Stdlib only: it runs on a maintainer's host, not in the container.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
 import urllib.request
 from pathlib import Path
 
-SPEC_URL = (
-    "https://raw.githubusercontent.com/github/rest-api-description/main/"
-    "descriptions/api.github.com/api.github.com.json"
-)
+#: Resolved to a COMMIT before fetching. `main` is mutable, so a refresh from it cannot be
+#: reproduced and a reviewer cannot tell which upstream revision produced the extract.
+SPEC_REPO = "github/rest-api-description"
+SPEC_PATH = "descriptions/api.github.com/api.github.com.json"
+SPEC_BRANCH = "main"
 _HERE = Path(__file__).resolve().parent
 MANIFEST = _HERE.parent / "tap_plugin/github_core/collectors/github_collector/github_collection_manifest.json"
 EXTRACT = _HERE.parent / "tap_plugin/github_core/collectors/github_collector/github_openapi_extract.json"
@@ -103,9 +105,21 @@ def _item_properties(op: dict, spec: dict, item_path: str | None) -> list[str]:
     return sorted((schema.get("properties") or {}).keys())
 
 
+def _resolve_commit() -> str:
+    """The commit `main` points at right now, so the fetch below is reproducible."""
+    url = f"https://api.github.com/repos/{SPEC_REPO}/commits/{SPEC_BRANCH}"
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github.sha"})
+    with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 — constant https URL
+        return response.read().decode("utf-8").strip()
+
+
 def build() -> dict:
-    with urllib.request.urlopen(SPEC_URL, timeout=120) as response:  # nosec B310 — constant https URL
-        spec = json.loads(response.read().decode("utf-8"))
+    commit = _resolve_commit()
+    url = f"https://raw.githubusercontent.com/{SPEC_REPO}/{commit}/{SPEC_PATH}"
+    with urllib.request.urlopen(url, timeout=120) as response:  # nosec B310 — constant https host
+        raw = response.read()
+    spec = json.loads(raw.decode("utf-8"))
+    digest = hashlib.sha256(raw).hexdigest()
 
     # Map normalized-path -> the OPERATION ITSELF, not the path string. Re-indexing
     # `spec["paths"][name]` with a name derived from the manifest reads as path construction
@@ -139,7 +153,9 @@ def build() -> dict:
             "regenerate it away."
         ),
         "spec_version": spec.get("info", {}).get("version"),
-        "spec_url": SPEC_URL,
+        "spec_commit": commit,
+        "spec_sha256": digest,
+        "spec_url": f"https://raw.githubusercontent.com/{SPEC_REPO}/{commit}/{SPEC_PATH}",
         "paths": out,
     }
 
@@ -158,7 +174,11 @@ def main() -> int:
             return 0
         print("extract is STALE — GitHub's description has moved. Re-run without --check and review the diff.")
         return 1
-    EXTRACT.write_text(json.dumps(fresh, indent=2, sort_keys=True) + "\n")
+    # NOSONAR — EXTRACT is a module constant derived from __file__, not from argv. Sonar's
+    # taint analysis reaches it because main() also reads sys.argv. Restructuring once already
+    # moved the finding to a different line rather than clearing it; chasing it further would
+    # be shaping code around an analyzer instead of a risk.
+    EXTRACT.write_text(json.dumps(fresh, indent=2, sort_keys=True) + "\n")  # NOSONAR
     print(f"wrote {EXTRACT.name}: {len(fresh['paths'])} path(s), spec version {fresh['spec_version']}")
     return 0
 

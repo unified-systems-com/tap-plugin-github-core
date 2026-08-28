@@ -448,6 +448,8 @@
       "source": "account"
     }
   },
-  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json",
+  "spec_commit": "33c2d320fd411e9db6c8b68401e0ad2bdb0243fd",
+  "spec_sha256": "a45de408e21266796d2c6a14f09ca2866bc695aa6952ee970a48f2a48bffbead",
+  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/33c2d320fd411e9db6c8b68401e0ad2bdb0243fd/descriptions/api.github.com/api.github.com.json",
   "spec_version": "1.1.4"
 }
