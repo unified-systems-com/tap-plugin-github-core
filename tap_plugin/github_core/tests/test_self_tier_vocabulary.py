@@ -56,8 +56,15 @@ def _create(type_slug: str, payload: dict):
 
 class TestIdentity:
     def test_ids_are_deterministic(self) -> None:
-        assert workflow_job_id("o/r", 1, "build") == workflow_job_id("o/r", 1, "build")
-        assert git_ref_id("o/r", "refs/heads/main") == git_ref_id("o/r", "refs/heads/main")
+        """Pinned to literals, not compared against themselves.
+
+        A natural key cannot be changed once nodes exist, so what needs guarding is the
+        DERIVATION — its namespace and its input string. `f(x) == f(x)` cannot fail for a
+        pure function and would stay green through a change that silently re-keyed every
+        node on every existing grid.
+        """
+        assert str(workflow_job_id("o/r", 1, "build")) == "54d41673-76fd-519d-9c9e-f60c310a0b49"
+        assert str(git_ref_id("o/r", "refs/heads/main")) == "af4586d6-f818-5b46-ad1c-82baf0dc61b8"
         assert str(ruleset_id("o", 7)) == "c4a175e4-20e4-563f-a41e-15c24d4f35f1"
 
     def test_a_branch_and_a_tag_of_the_same_name_are_different_nodes(self) -> None:

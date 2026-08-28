@@ -109,7 +109,9 @@ def app_get(api_base_url: str, path: str, jwt: str, *, method: str = "GET") -> A
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # noqa: S310 - scheme validated above
+        # nosec B310 — `url` is built from _validate_base_url() above, which refuses any
+        # scheme but https. Both spellings: ruff reads noqa, Bandit reads nosec.
+        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # noqa: S310  # nosec B310
             body = json.loads(response.read().decode("utf-8"))
             _LAST_LINK_HEADER[0] = response.headers.get("Link", "")
             return body
