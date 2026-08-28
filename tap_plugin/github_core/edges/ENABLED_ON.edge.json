@@ -1,10 +1,11 @@
 {
   "slug": "ENABLED_ON__github_core",
   "name": "Enabled On",
-  "description": "A GitHub App or first-party platform service is enabled on a repository — a github_app (e.g. Dependabot) or the Actions OIDC issuer (token.actions.githubusercontent.com), which every repo's workflows use to mint identity tokens.",
+  "description": "A GitHub App or first-party platform service is enabled on a repository \u2014 a github_app (e.g. Dependabot) or the Actions OIDC issuer (token.actions.githubusercontent.com), which every repo's workflows use to mint identity tokens. An app_installation is also a source: the installation is what actually reaches a repository, and an installation with repository_selection `all` reaches repositories nobody granted it individually.",
   "sources": [
     "github_core__github_app",
-    "identity_core__oidc_issuer"
+    "identity_core__oidc_issuer",
+    "github_core__app_installation"
   ],
   "targets": [
     "github_core__github_repository"

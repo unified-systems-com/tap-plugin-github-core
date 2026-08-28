@@ -16,8 +16,12 @@ import tap_plugin.github_core.models as github_models
 
 EDGES_DIR = Path(github_models.__file__).parent.parent / "edges"
 
-EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob"}
-EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "HAS_ACTIONS_JOB", "EXECUTED_ON"}
+# ActionsCache is a BYPRODUCT of a run, not configuration someone wrote — it exists
+# because a workflow executed and wrote it.
+EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache"}
+# SCOPED_TO is sourced on actions_cache, which is execution — the layer follows the
+# source model rather than a second map (req-github-core-dimensions-6).
+EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "HAS_ACTIONS_JOB", "EXECUTED_ON", "SCOPED_TO"}
 # Sources span both layers, so the layer belongs to the endpoint, not the edge
 # type; the collector sets it per emitted edge (req-github-core-dimensions-6).
 LAYER_SPANNING_EDGES = {"REFERENCES_RESOURCE"}

@@ -75,8 +75,8 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
-| req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation (`execution` \| `declaration`) on every node/edge |
-| req-github-core-secret | [PAT Secret Kind](#pat-secret-kind) | Implemented | `github_pat` data shape, additionalProperties: false; GitHub App auth still deferred |
+| req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
+| req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
 | req-github-core-collector | [Collector Runtime](#collector-runtime) | Implemented | Two-phase run + degraded-runner + no-delete + single-attempt + incremental + non-terminal refresh + empty-body-404 retry + per-run-/jobs degrade |
 | req-github-core-manifests | [Collection And Link Manifests](#collection-and-link-manifests) | Implemented | Two manifests + JSON Schemas, validated at load; link manifest is data-driven |
 | req-github-core-workflow-parse | [Workflow File Parsing](#workflow-file-parsing) | Implemented | YAML parse + raw retention + in-memory fetch + scope-bound ref extraction + local-action detection |
@@ -112,7 +112,7 @@ surface; those arrive as further manifest sources behind the same scope.
 ### GitHub App Authentication
 ----
 RID: `req-github-core-app-auth`
-Status: `In Development`
+Status: `Implemented`
 
 A personal access token is a *person's* power in token form: it inherits their role, expires on
 someone's calendar, and dies when they leave. A GitHub App is its own principal with its own
@@ -143,13 +143,14 @@ OpenSSL the FIPS posture validates (`spec-fips.md`); no JWT library is introduce
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-app-auth-1 | Both Kinds Supported | In Development | The collector authenticates from either a `github_pat` or a `github_app` envelope, dispatched on the resolved secret's `kind`; neither path is privileged in the code above the auth seam. | The PAT path stays for first-look and for repos-only scopes. |
+| req-github-core-app-auth-1 | Both Credentials Held, Chosen Per Source | Implemented | `GithubAuth` holds whichever credentials the envelope carries. A caller names the one that answers ITS question — `token(prefer=PREFER_PAT)` for the ruleset detail (bypass actors), `app_jwt()` for the App-only inventory — and a caller that does not care asks for `token()`. No global preference order. | `collectors/github_collector/auth.py`. The one PAT-preferring call is the ruleset detail, and the reason is recorded at the call site so it is not "simplified" back into a preference order. |
+| req-github-core-app-auth-11 | A Gap Names Its Missing Credential | Implemented | When the credential that would answer better is absent, `absent_note(prefer)` supplies the operator-facing reason, carried onto the ruleset node, the run warning, and a self-test row. It is empty when that credential IS present, so it never becomes noise. | This is what turns `bypass_observability = unobservable` from a dead end into "an owner PAT would show these". |
 | req-github-core-app-auth-2 | Permissions Derived | Implemented | The App manifest's permissions are the union of the collection manifest's per-source permission triples. Extras require an explicit flag and render as `EXPLORATORY`. | `skills/create-github-app/manifest.py`. |
 | req-github-core-app-auth-3 | Surfaces Namespaced | Implemented | Repository and organization permissions are namespaced before emission, and a key collision raises rather than silently overwriting. | Found in review: `repository:administration` and `organization:administration` collapsed onto one key and one was dropped. |
 | req-github-core-app-auth-4 | Operator Holds The Key | In Development | Creation happens on the operator's machine; the private key is written to their secret store at `0600` and never printed, logged, or transmitted. The instance never writes a credential. | Enforced by the read-only secrets mount, not only by convention. |
-| req-github-core-app-auth-5 | Host Flow Is Stdlib-Only | Implemented | The creation flow runs outside the container and imports only the standard library, per the `tap/git_invocation.py` discipline. | Asserted by test. |
+| req-github-core-app-auth-5 | Host Flow Is Stdlib-Only | Implemented | The creation flow runs outside the container and imports only the standard library, per the `tap/git_invocation.py` discipline. The verification half additionally needs `cryptography`, and path-imports the SAME `app_jwt.py` the collector uses rather than carrying its own copy — so the credential it proves is minted the way the collector will mint it. | Asserted by test, including that `verify_app.py` defines no `mint_jwt` of its own. |
 | req-github-core-app-auth-6 | Redirect Is State-Checked | Implemented | The manifest carries a random `state`; a redirect whose state does not match is refused and no exchange is attempted. | |
-| req-github-core-app-auth-7 | Token Lifecycle | In Development | The private key signs a JWT (≤10 min) exchanged for an installation token (~1 h). Installation tokens are cached per installation on the auth object — never at module or class scope, so concurrent collections cannot share a credential. | The failure mode is cross-account leakage that produces plausible results. |
+| req-github-core-app-auth-7 | Token Lifecycle | Implemented | The private key signs a JWT (≤10 min) exchanged for an installation token (~1 h). The token is held on the auth INSTANCE — never at module or class scope — and the envelope's `owner` selects which installation to mint for; an App installed into several accounts with no `owner` is refused rather than guessed at. | The failure mode is cross-account leakage that produces plausible results, which is why the ambiguous case raises instead of taking the first installation. |
 | req-github-core-app-auth-8 | No Webhook By Default | Implemented | The generated App subscribes to no events and declares no webhook. Receiving events is a separate capability decision. | `tap_cares`'s receiver half is not yet built. |
 | req-github-core-app-auth-9 | Verified Before Trusted | In Development | A placed credential is proven end-to-end — key → JWT → installation → token → one probe per reachable surface — before the collector relies on it. | `skills/create-github-app/verify_app.py`. |
 | req-github-core-app-auth-10 | Public Apps Rejected | Implemented | The per-instance model never marks an App public; a public App implies a hosted, centralized deployment that routes adopters' data through our infrastructure. | The flag exists only to keep the shape describable. |
@@ -210,8 +211,16 @@ Models:
 - `github_actions_run` — one workflow run (latest observed state; multi-attempt tracking deferred to `req-github-core-backlog-run-attempts`).
 - `github_actions_job` — one job within a workflow run. Step details live in `configuration` in v0.
 - `github_runner` — durable registered self-hosted runner configuration when visible through the API.
-- `github_ruleset` — a repository ruleset: the enforcement gate on a set of refs. Keyed by GitHub's ruleset `databaseId` so one node is shared across every repository the ruleset governs, mirroring `github_app`'s slug keying. See [Ruleset Collection](#ruleset-collection).
-- `github_app` — a GitHub App or first-party platform app (e.g. Dependabot) enabled on a repository. Generic across GitHub's app surface (managed apps, third-party apps, OIDC token-issuing apps); keyed by app slug so one node is shared across every repo that enables it, with `ENABLED_ON` edges fanning in. See [GitHub Apps](#github-apps).
+- `github_app` — a GitHub App or first-party platform app (e.g. Dependabot) enabled on a repository. Generic across GitHub's app surface (managed apps, third-party apps, OIDC token-issuing apps); keyed by app slug so one node is shared across every repo that enables it, with `ENABLED_ON` edges fanning in. See [GitHub Apps](#github-apps). **The application only** — one account's installation of it is `app_installation`.
+
+The **self-tier vocabulary** (added 2026-08-27, `spec-github-core-vocabulary.md`):
+
+- `workflow_job` — a job as WRITTEN: `permissions`, `runs-on`, `if`, the environment it deploys to, the ref it checks out. See [Declared Jobs](#declared-jobs).
+- `git_ref` — a branch or a tag, and the commit it points at. One type for both. See [Refs](#refs).
+- `github_ruleset` — the gate a commit must pass to land on a ref, with its rules and its bypass *observability*. See [Rulesets](#rulesets).
+- `github_environment` — a named deployment target and the protection rules in front of it. See [Environments](#environments).
+- `actions_cache` — a stored cache entry and the ref scope that produced it. See [Caches](#caches).
+- `app_installation` — one account's installation of an App, with the permissions that account granted. See [App Installations](#app-installations).
 
 The OIDC issuer (`oidc_issuer`) is **no longer a github_core model** — it was
 extracted to the `identity_core` substrate plugin as the cross-cutting
@@ -242,6 +251,12 @@ Natural-key inputs:
 | `github_runner` | `owner/repo` + runner id for durable registered runners |
 | `github_ruleset` | ruleset `databaseId` **alone** — deliberately not scoped by repo or org |
 | `github_app` | app slug (`dependabot`) — singleton across repos |
+| `workflow_job` | `owner/repo` + workflow id + the job's YAML key |
+| `git_ref` | `owner/repo` + the FULL ref path (`refs/heads/main`) |
+| `github_ruleset` | owner login + GitHub's ruleset id — **not** repo-scoped |
+| `github_environment` | `owner/repo` + environment name |
+| `actions_cache` | `owner/repo` + cache id |
+| `app_installation` | GitHub's installation id (unique platform-wide) |
 
 Entity IDs are deterministic UUIDv5 values over the model type and natural key.
 
@@ -390,7 +405,18 @@ V0 edge types:
 | `REFERENCES_RESOURCE` | GitHub node -> external grid node | Conservative exact-match link to existing AWS nodes (resolved in the enrichment phase). |
 | `FEDERATES_VIA` | `github_repository` -> `aws_iam_oidc_provider` | Repo federates into AWS through the GitHub Actions OIDC provider (URL `token.actions.githubusercontent.com`). Chains with the AWS-side `FEDERATES_INTO` (provider -> deploy role). Derived link resolved in the enrichment phase. |
 | `TRUSTS_ISSUER` | `aws_iam_oidc_provider` -> `identity_core__oidc_issuer` | The AWS IAM OIDC provider registers trust in an OIDC issuer — its scheme-less `url` matches the issuer's `host`. **The edge type is the generic `identity_core`-owned `TRUSTS_ISSUER__identity_core`** (wildcard source — trusting an issuer is a cross-cloud federation relationship, not AWS-specific); github_core no longer owns it, but its enrichment phase still *emits* it (edge types resolve globally, and github is today the plugin that runs a grid-link engine + mints the issuer in the same run). Derived link resolved in the enrichment phase (not hotlink-backed). |
-| `ENABLED_ON` | `github_app` \| `identity_core__oidc_issuer` -> `github_repository` | A GitHub App, platform app, or the Actions OIDC issuer is enabled on the repo. Emitted during the per-repo walk. The issuer source type lives in `identity_core`. See [GitHub Apps](#github-apps). |
+| `DEFINES_JOB` | `github_workflow` -> `workflow_job` | A workflow file declares a job. Properties `{job_key, order}`. |
+| `DEPENDS_ON_JOB` | `workflow_job` -> `workflow_job` | The `needs:` graph — what a job compromised early can reach later. Property `{condition}`. |
+| `HAS_REF` | `github_repository` -> `git_ref` | Repo contains a branch or tag. |
+| `PROTECTS` | `github_ruleset` -> `github_repository` \| `git_ref` | A ruleset gates a repository (`match_kind: declared`) or a specific observed ref (`match_kind: resolved`, with the `ref_pattern` that matched). |
+| `BYPASSES` | `github_account` \| `github_app` \| `app_installation` -> `github_ruleset` | An actor may bypass a ruleset. **Absence of this edge is not absence of bypass** — see `req-github-core-rulesets`. |
+| `HAS_ENVIRONMENT` | `github_repository` -> `github_environment` | Repo declares a deployment environment. |
+| `USES_ENVIRONMENT` | `workflow_job` -> `github_environment` | A declared job deploys through an environment's protection rules. Its absence beside a deploying job is the finding. |
+| `HAS_CACHE` | `github_repository` -> `actions_cache` | Repo holds a stored cache entry. |
+| `SCOPED_TO` | `actions_cache` -> `git_ref` | A cache entry belongs to an observed ref's scope; absence usually means a pull-request ref. |
+| `HAS_INSTALLATION` | `github_app` -> `app_installation` | The application, and one installation of it. |
+| `INSTALLED_ON` | `app_installation` -> `github_account` | The account that granted the installation. |
+| `ENABLED_ON` | `github_app` \| `app_installation` \| `identity_core__oidc_issuer` -> `github_repository` | A GitHub App, platform app, or the Actions OIDC issuer is enabled on the repo. Emitted during the per-repo walk. The issuer source type lives in `identity_core`. See [GitHub Apps](#github-apps). |
 
 Secret and variable reference edges (`REFERENCES_SECRET`, `REFERENCES_VARIABLE`)
 are deferred to `req-github-core-backlog-references`.
@@ -406,6 +432,219 @@ ownership, or runtime control.
 | req-github-core-edges-1 | Containment + Execution Spine | Implemented | The platform/account/repo/workflow/run/job/runner edges (`HOSTS_ACCOUNT`, `OWNS_REPO`, `DEFINES_WORKFLOW`, `EXECUTES_WORKFLOW`, `HAS_ACTIONS_JOB`, `EXECUTED_ON`) are declared and constrained. | `HOSTS_ACCOUNT` is the top-of-tree containment edge synthesized with the platform singleton. |
 | req-github-core-edges-2 | Cross-Grid Edges | Implemented | The v0 cross-grid edges github owns are `REFERENCES_RESOURCE` (conservative resource reference) and `FEDERATES_VIA` (repo -> AWS OIDC provider federation). The enrichment phase also emits `TRUSTS_ISSUER` (AWS OIDC provider -> `identity_core__oidc_issuer`), the generic `identity_core`-owned type. All resolve in the enrichment phase. | Secret/variable reference edges deferred. |
 | req-github-core-edges-3 | Conservative Resource Semantics | Implemented | `REFERENCES_RESOURCE` is used only for exact, unambiguous matches and does not overstate deployment semantics. | Enforced by the link-manifest schema (`match_mode: exact`-only enum) and the resolver's one-candidate-only emission rule. |
+
+### Declared Jobs
+----
+RID: `req-github-core-declared-jobs`
+Status: `Implemented`
+
+A job as **written** and a job as **run** are different objects, and the vocabulary corpus found
+that almost nobody models both: the published GitHub graph schemas model the declaration only, and
+of sixteen surveyed sources only eight model a pipeline run at all. `github_actions_job` is an
+execution — it keys on GitHub's job id and carries `status`/`conclusion`. `workflow_job` is the
+declaration — `permissions`, `runs-on`, `if`, the environment it deploys to, and the ref it checks
+out. **Every privilege decision in CI is made at the declared level**, which is why ~20 of the 35
+incidents in the corpus need this node and why it was the largest gap in the model set.
+
+Identity keys on the workflow id plus the YAML job key, not on `name:`: a renamed file keeps its
+jobs, and a retitled job stays the same job.
+
+**`permissions` distinguishes three states, and must.** No `permissions:` block means the job
+inherits the workflow's (`null` — unobserved at this level). `permissions: {}` means the job's
+token is granted nothing. Collapsing those two reads the most locked-down job in a repository as
+the most permissive one, and the field history would show a change that never happened.
+
+`checkout_ref` is a column rather than a key inside a steps blob because it is half of the
+most-cited shape in the corpus: a `pull_request_target` workflow that checks out
+`github.event.pull_request.head.sha` runs a contributor's code with the base repository's secrets.
+The other half — the trigger — is carried onto the job's `configuration` alongside the workflow's
+own permissions, so the question can be adjudicated at one node instead of by walking up.
+
+Steps remain structured data rather than nodes (`step` was rejected on the node test: nothing
+points at a step). Cache usage and action pins are extracted onto the job's `configuration` now;
+`USES_ACTION` and `WRITES_CACHE`/`RESTORES_CACHE` are a later wave.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-declared-jobs-1 | Declaration Node Exists | Implemented | Every job declared in a collected workflow file lands as a `workflow_job` with a deterministic id over `owner/repo` + workflow id + job key, joined to its workflow by `DEFINES_JOB`. | The declaration and the execution are never merged. |
+| req-github-core-declared-jobs-2 | Inherited And Empty Permissions Differ | Implemented | An absent `permissions:` block stores `null`; `permissions: {}` stores `{}`. The two are never collapsed. | Asserted at both the parser and the model layer. |
+| req-github-core-declared-jobs-3 | Checkout Ref Is First-Class | Implemented | The ref passed to `actions/checkout` is a queryable column, and the workflow's triggers and permissions ride on the job's `configuration` so a single node answers the `pull_request_target` question. | |
+| req-github-core-declared-jobs-4 | Needs Graph Emitted | Implemented | `needs:` becomes `DEPENDS_ON_JOB` edges carrying the dependent's `if:`. A `needs:` naming a job that does not exist emits no edge and keeps the name visible on the node. | Emitted after all jobs in a file are known, since a job may need one declared below it. |
+| req-github-core-declared-jobs-5 | Runner Declaration Canonicalized | Implemented | `runs-on` is stored as a list whichever of the three written forms was used (string, list, `{group, labels}`); a job that declares none stores `null`, not `[]`. | One query shape for "which jobs run on a self-hosted label". |
+
+### Refs
+----
+RID: `req-github-core-refs`
+Status: `Implemented`
+
+A ref is a name and the commit it points at. Branches (`refs/heads/`) and tags (`refs/tags/`) are
+the same structure under different prefixes; what differs is a social contract — a branch is
+expected to move, a tag is expected to be frozen. **One type covers both** (ruled 2026-08-27,
+`spec-github-core-vocabulary.md` decision 2), because tag movement is the detection for three
+incidents and a ruleset's target is one enum spanning `branch|tag|push`, so a split type would fan
+that join across two types and two edges. The slug is a modelling name; views render "Branches"
+and "Tags".
+
+Identity keys on the full ref path, since a branch and a tag may share a short name.
+
+**Tag-movement detection is not implemented and does not need to be.** `head_sha` is a field on a
+node with a deterministic id, so the grid's own field history records the move; detection is a
+query over history rather than a diff the collector keeps. `target_sha` is kept apart from
+`head_sha` because an annotated tag's ref points at a tag object which points at the commit — a
+re-tag that swaps only the tag object moves one and not the other.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-refs-1 | Branches And Tags Are One Type | Implemented | Both land as `git_ref` with `ref_type` ∈ `branch`\|`tag`, keyed on the full ref path, joined to the repository by `HAS_REF`. | |
+| req-github-core-refs-2 | Annotated Tags Keep Both SHAs | Implemented | `target_sha` is what the ref holds; `head_sha` is the commit it resolves to. They differ for an annotated tag. | |
+| req-github-core-refs-3 | Truncation Is Reported | Implemented | When the per-repository page cap leaves refs uncollected, the run records a warning naming the count and stating that absence in the batch is not evidence of deletion. | Same discipline as the scope-enumeration assertion (`req-github-core-org-scope-3`). |
+| req-github-core-refs-4 | Config Layer Only | Implemented | Refs arrive in the GraphQL config layer at no extra request. A repos-only scope, which runs no GraphQL enumeration, collects none — and says so rather than reporting a repository with no branches. | |
+
+### Rulesets
+----
+RID: `req-github-core-rulesets`
+Status: `Implemented`
+
+A ruleset is the gate: what must be true for a commit to land on a ref. It is a node because many
+repositories point at one — an organization ruleset applies to every repository it matches — where
+an organization *policy* object is a field (nothing points at one). Identity is therefore owner +
+ruleset id, never repo-scoped.
+
+**Two transports, because neither is sufficient.** GraphQL says which rulesets apply to a
+repository and answers `bypassActors`; REST's ruleset detail is the only place the rules'
+*parameters* live — including the required check contexts, without which a gate view knows that a
+repository requires some status check but not which. REST detail is fetched once per ruleset per
+run and cached, since one organization ruleset would otherwise be the same call once per
+repository.
+
+#### Bypass observability
+
+GitHub returns a ruleset's bypass-actor list only to a caller with **write access to the ruleset**.
+Measured against our own organization on 2026-08-27: an owner-minted fine-grained PAT sees it; a
+GitHub App with `administration: read` does not — REST omits the `bypass_actors` key entirely
+(HTTP 200), while **GraphQL answers with an empty connection and no error at all**. Our own
+rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful zero versus a
+silently filtered connection — is untested and cannot be tested here without adding a bypass actor
+to a live ruleset, which would be a change to our security posture rather than a measurement.
+
+The derivation that follows:
+
+```
+observable = REST detail carried `bypass_actors`  OR  GraphQL returned a NON-EMPTY list
+```
+
+A non-empty GraphQL answer proves itself — a filtered connection cannot invent actors. An empty one
+proves nothing. **False presence is impossible here; false absence is the entire risk.**
+
+The three states live on the **ruleset node** (`bypass_observability`, with `bypass_actor_count`
+meaningful only when `observed`), not on the `BYPASSES` edge, because when the answer is *none* or
+*unknown* there are no edges to carry anything and a view reading only edges would render both as
+an empty list. Generalized: *a property that qualifies an absence belongs on the node the absence
+is about, never on the edges that failed to appear.*
+
+**The read-only posture has a hard ceiling here**, and it is published rather than engineered
+around: seeing the exemption list requires write access to the thing being audited, and we do not
+request write.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-rulesets-1 | One Node Per Ruleset | Implemented | A ruleset is one node keyed on owner + ruleset id however many repositories it protects, applied by `PROTECTS` edges. | |
+| req-github-core-rulesets-2 | Rule Parameters Retained | Implemented | The rules array carries each rule's parameters as returned (required check contexts among them), falling back to the type-only GraphQL list when the REST detail is unreadable — and warning when it does. | The gate view needs the contexts, not just the rule types. |
+| req-github-core-rulesets-bypass | Bypass Observability Is Recorded | Implemented | `bypass_observability` is `observed` only when REST carried the key or GraphQL returned a non-empty list; otherwise `unobservable` with a **null** actor count. A run warns per unobservable ruleset. | The failure guarded against is rendering "we could not look" as "nobody can bypass". |
+| req-github-core-rulesets-3 | Unmodelled Actors Are Counted | Implemented | Bypass actors with no node type yet (teams, organization-admin roles) are kept as data on the ruleset and counted, never dropped. | Understating who can bypass is the one direction that must never happen. |
+| req-github-core-rulesets-4 | Ref Resolution Is Additive | Implemented | Condition patterns are stored verbatim (`~DEFAULT_BRANCH`, `~ALL`, globs) AND resolved against observed refs into `PROTECTS` edges with `match_kind: resolved`. A pattern matching nothing is an answer, not a failure. | Intent and effect are both queryable. |
+
+### Environments
+----
+RID: `req-github-core-environments`
+Status: `Implemented`
+
+A deployment environment is where protection rules — required reviewers, wait timers, branch
+policies — stand in front of a deployment. Its value is mostly in the *absence*: a job that deploys
+with no environment beside it is a deployment with no gate, which is why `USES_ENVIRONMENT` links
+the declared job to it.
+
+The GraphQL config layer carries the environment and its protection rules but not its branch
+policy; that field is left `null` (unobserved) rather than defaulted, because defaulting it to
+"none" would assert an absence this transport never looked for.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-environments-1 | Environments Collected | Implemented | Each repository's environments land as `github_environment` joined by `HAS_ENVIRONMENT`, with their protection rules. | Free from the config layer. |
+| req-github-core-environments-2 | Declared Jobs Link To Them | Implemented | A job declaring `environment:` (in either written form) gets a `USES_ENVIRONMENT` edge to that environment. | |
+| req-github-core-environments-3 | Unobserved Fields Stay Null | Implemented | `deployment_branch_policy` and `can_admins_bypass` are null until a transport that reads them is added. | Null is unobserved; a default would be a claim. |
+
+### Caches
+----
+RID: `req-github-core-caches`
+Status: `Implemented`
+
+Five incidents turn on the Actions cache, including the two most recent: an entry written by a job
+an outsider can reach and restored by a job that holds publish rights. It is a convergence node
+between two trust levels rather than a performance detail, and the `ref` is the load-bearing
+field — it says which side of the trust boundary the entry came from.
+
+**The declared and the observed cache are different objects and are not joined in v0.** A declared
+key is an expression (`${{ runner.os }}-node-${{ hashFiles('**/lock') }}`); resolving it would mean
+implementing GitHub's expression language, and a guessed key that happened to be wrong would link a
+job to another job's entry. So the declared side lives on `workflow_job.configuration.cache_steps`
+(step index, action, mode, key expression, restore keys) and the observed side is `actions_cache`.
+The join is a named gap. `WRITES_CACHE` / `RESTORES_CACHE` wait for it.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-caches-1 | Entries Collected | Implemented | Stored cache entries land as `actions_cache` joined by `HAS_CACHE`, carrying key, version, ref, size and access times. | Degrades with a warning on 403/404 like runners. |
+| req-github-core-caches-2 | Ref Scope Resolved | Implemented | `SCOPED_TO` links an entry to an observed `git_ref`. Its absence is informative — usually a pull-request ref — and is not treated as an error. | |
+| req-github-core-caches-3 | Truncation Reported | Implemented | The per-repository cap is stated with the total, since entries are returned most-recently-accessed first. | |
+| req-github-core-caches-4 | Declared Usage Not Guessed | Implemented | Cache key expressions are stored as written and never evaluated; no edge claims a declared step wrote a particular entry. | The gap is named rather than papered over. |
+
+### App Installations
+----
+RID: `req-github-core-app-installations`
+Status: `Implemented`
+
+The registered application and its installation into an account are different objects: one App is
+installed into many accounts, each installation carrying its own approved permissions, its own
+repository selection, and its own suspension state. Merged — as they were before this split — an
+account's granted permissions would hang off a node shared by every account that installed the
+same App.
+
+This is an **App-only surface**: the installed-App inventory answers `404` to any personal access
+token. In PAT mode nothing is emitted and nothing is *claimed* — the run records that the surface
+was unreachable, because an empty inventory from a token means "could not look", not "no Apps are
+installed".
+
+**Which endpoint answers this matters more than it looks.** `/app/installations` answers "where is
+THIS App installed" — one row, about ourselves. `/orgs/{owner}/installations` answers "which Apps
+can reach this account's repositories", which is the question the product exists to ask. The
+collector asks the account first and falls back to its own installation, recording which it got:
+an inventory of one is not an inventory, and the two must not be reported as if they were the same
+answer.
+
+**This widens the derived permission set, deliberately and once.** The account-wide list requires
+`organization:administration:read`, the first organization-surface permission the collection
+manifest declares. It is named here rather than left as an "exploratory" extra on the App because
+it is now *used*: the alternative is a product that promises to show you which Apps reach your
+repositories and then shows you one row about itself. Read-only, like everything else in the set.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-app-installations-1 | Split From The Application | Implemented | `app_installation` holds installation id, granted permissions, repository selection, events and suspension; `github_app` keeps the application. Joined by `HAS_INSTALLATION`, and to the account by `INSTALLED_ON`. | |
+| req-github-core-app-installations-2 | PAT Mode Claims Nothing | Implemented | Running as a token records that the inventory is unreachable rather than emitting an empty one. | An empty inventory is otherwise indistinguishable from a clean account. |
+| req-github-core-app-installations-4 | Account Inventory Preferred, Fallback Named | Implemented | The collector reads `/orgs/{owner}/installations` (which Apps reach this account) and falls back to `/app/installations` (its own installation) only when refused — warning that the absence of other Apps is then not evidence there are none, and recording which scope the answer came from. | Requires `organization:administration:read`; declared in the collection manifest so the App's permission set derives it rather than carrying it as an unexplained extra. |
+| req-github-core-app-installations-3 | Repository Selection Retained | Implemented | `repository_selection: all` is stored as-is: such an installation follows the account into new repositories without anyone granting it again. | |
 
 ### GitHub Apps
 ----
@@ -455,8 +694,14 @@ GitHub-specific dimensions:
 | `github.platform` | `github.com` | All GitHub nodes and edges |
 | `github.owner` | `notgeorge` | Repo-scoped nodes and edges |
 | `github.repo` | `samsite` | Repo-scoped nodes and edges |
-| `github.surface` | `actions` | Actions workflows, runs, jobs, runners |
-| `github.observation` | `execution` \| `declaration` | **Every** GitHub node and edge — `execution` for runs and jobs, `declaration` for everything else |
+| `github.surface` | `actions` | Actions workflows, runs, jobs, runners, caches |
+| `github.surface` | `git` | Refs |
+| `github.surface` | `rules` | Rulesets and the edges that apply them |
+| `github.surface` | `deployments` | Environments |
+| `github.surface` | `apps` | Apps and app installations |
+| `github.observation` | `execution` | Runs, jobs, caches — what happened |
+| `github.observation` | `declaration` | Declared workflow jobs — what is written. The dimension that separates `workflow_job` from `github_actions_job` without renaming either slug. |
+| `github.ref_type` | `branch` \| `tag` | Refs. One type carries both, so the partition that matters is a dimension rather than a type boundary. |
 
 Static model defaults should include only dimensions that are true for all
 instances, such as `github.platform = "github.com"`. The collector supplies
@@ -489,7 +734,7 @@ than an invisible member of the config layer.
 | req-github-core-dimensions-5 | Declaration Observation Dimension | Implemented | Every plugin-owned node and edge that is NOT a run or job observation carries `github.observation = "declaration"`. | Set on the remaining model defaults and edge `default_dimensions`. The config layer must be a positive fact, not the absence of a dimension: a query for it reads `observation = "declaration"`, never `NOT observation = "execution"`. |
 | req-github-core-dimensions-6 | Layer-Spanning Link Edges | Implemented | An edge type whose sources span both observation layers declares no default `github.observation`; the collector sets it per emitted edge from the source model's own default. | `REFERENCES_RESOURCE` only. Derived in `enrichment._dimensions_for_rule` by reading the source model's `DEFAULT_DIMENSIONS` through the registry — one derivation, no second map. |
 
-### PAT Secret Kind
+### Collector Secret Kinds
 ----
 RID: `req-github-core-secret`
 Status: `Implemented`
@@ -555,8 +800,10 @@ Do not pre-build it; wait for the trigger.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-secret-1 | PAT First | Implemented | v0 supports `github_pat` as the first and only credential kind. | `collectors/github_collector/secret.py:GITHUB_SECRET_KIND`. |
-| req-github-core-secret-2 | Plugin Owns Schema | Implemented | `github_core` ships and validates the `github_pat` JSON Schema. | `GITHUB_PAT_SCHEMA` in `secret.py`; validated via `require_secret_kind`. |
+| req-github-core-secret-1 | One Envelope, Both Credentials | Implemented | The current kind is `github`: one envelope carrying an `app` block, a `pat` block, or both (`anyOf` requires at least one). An unrecognized kind is refused BY NAME rather than by schema failure, because "kind 'x' is not one this collector accepts" is fixable where a wall of schema errors is not. | `SCHEMA_BY_KIND` in `collectors/github_collector/secret.py`. Replaced the either/or dispatch on 2026-08-27, the same day it was written — see `req-github-core-secret-3`. |
+| req-github-core-secret-3 | Legacy Kinds Fold Forward | Implemented | `github_pat` and `github_app` envelopes still validate and are folded into the current shape by one `normalize_credentials` function, so nothing above the auth seam branches on which kind arrived. | samsite's shipped record declares `github_pat`; breaking its boot to tidy a kind name would be a poor trade. Transition support, not a permanent second path. |
+| req-github-core-secret-4 | Placement Merges, Never Overwrites | Implemented | The App-creation flow writes into the envelope's `app` slot and carries any existing `pat` block (or legacy bare `token`) forward, saying so; the previous file is still copied aside. | Without it, standing up an App on an instance that already had a token would destroy the token silently, and the operator would meet it as a permanently blank column rather than an error. |
+| req-github-core-secret-2 | Plugin Owns Schema | Implemented | `github_core` ships and validates the JSON Schema for both kinds, strictly (`additionalProperties: false`), so a PAT pasted into a `github_app` envelope fails at load rather than at 401. | `GITHUB_PAT_SCHEMA` / `GITHUB_APP_SCHEMA` in `secret.py`; validated via `require_secret_kind`. |
 | req-github-core-secret-3 | Scope Fields | Implemented | The secret carries the collection scope: `data.owner` (account login) and/or `data.repos` (explicit `owner/repo` list — the filter when `owner` is present, the scope when it is not). At least one is required. | Schema `anyOf`; every field described (`GITHUB_PAT_SCHEMA`). Amended 2026-08-26. |
 | req-github-core-secret-4 | GitHub App Deferred | Proposed | GitHub App auth is deferred. | |
 | req-github-core-secret-5 | Minimal Knob Set | Implemented | The only behavioral knob is `initial_run_limit`; `collect_workflow_files`, `collect_runner_config`, and `collect_grid_links` are not data fields. | Schema is `additionalProperties: false`; the three pruned names trigger validation errors at load. |

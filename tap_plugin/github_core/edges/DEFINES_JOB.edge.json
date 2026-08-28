@@ -1,0 +1,30 @@
+{
+  "slug": "DEFINES_JOB__github_core",
+  "name": "Defines Job",
+  "description": "A workflow file declares a job. The declaration side of the pipeline: what a job is permitted to do is written here, while what it did is on the github_actions_job it instantiates.",
+  "sources": [
+    "github_core__github_workflow"
+  ],
+  "targets": [
+    "github_core__workflow_job"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "job_key": {
+        "type": "string",
+        "description": "The job's YAML key \u2014 its identity within the file, and what `needs:` refers to."
+      },
+      "order": {
+        "type": "integer",
+        "description": "Position of the job in the file, so the declaration can be rendered in written order rather than alphabetically."
+      }
+    }
+  }
+}

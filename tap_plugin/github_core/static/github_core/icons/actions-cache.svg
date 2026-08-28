@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. A stored bucket — written by one job, restored by another. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>Actions Cache</title>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" d="M4.4 6.3c0-1.5 3.4-2.7 7.6-2.7s7.6 1.2
+    7.6 2.7v11.4c0 1.5-3.4 2.7-7.6 2.7s-7.6-1.2-7.6-2.7Z"/>
+  <ellipse cx="12" cy="6.3" rx="7.6" ry="2.7" fill="none" stroke="#1f2328" stroke-width="1.5"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.4" d="M4.4 12c0 1.5 3.4 2.7 7.6 2.7s7.6-1.2 7.6-2.7"/>
+</svg>

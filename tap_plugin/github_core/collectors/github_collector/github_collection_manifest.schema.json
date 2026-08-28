@@ -86,8 +86,25 @@
             "type": "string",
             "pattern": "^(repository|organization):[a-z_]+:(read|write)$",
             "description": "The GitHub permission this source requires, as the canonical triple `<surface>:<key>:<level>` (e.g. `repository:actions:read`). The credential's least-privilege set \u2014 for a fine-grained PAT and for the App manifest alike \u2014 is the union over sources. Derived once, never restated."
+          },
+          "permission_not_applicable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Why this source needs no repository/organization permission triple \u2014 the narrow, stated exemption for an endpoint that is not a grant over anybody's resources (e.g. `/app/installations`, which is App-JWT-level and describes the App itself). Sources without a triple contribute nothing to the derived least-privilege set, so the exemption must be declared rather than achieved by omission: a silently missing `permission` would quietly narrow what the credential is allowed to see."
           }
-        }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "permission"
+            ]
+          },
+          {
+            "required": [
+              "permission_not_applicable"
+            ]
+          }
+        ]
       }
     },
     "edges": {

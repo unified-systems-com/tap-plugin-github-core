@@ -8,3 +8,37 @@
 # Seeded at 17 (every node and edge type, no articles) on 2026-08-27 and drained to
 # zero in the same change. It is empty on purpose: adding a model or a field without
 # its paragraph reds the build rather than landing here.
+#
+# RE-INCURRED 2026-08-28, deliberately, by the self-tier vocabulary merge: six new models
+# and eleven new edges arrived from a branch written before this guard existed, and their
+# author's session ended before they could be documented. Nineteen entries.
+#
+# Recorded rather than written. A domain article's value is the reasoning — why THIS
+# natural key (unchangeable once nodes exist), what was deliberately excluded, and what a
+# given credential cannot see. Whoever merges the branch does not hold those answers, and
+# an article invented to clear a ratchet is worse than an honest debt: it reads as
+# canonical and cannot be told from one that was thought through.
+#
+# `github_ruleset` is NOT in this list — its field paragraphs were written by the model's
+# author and handed over, so they landed with the merge. That is the pattern the rest
+# should follow. Tracked in git-serious-tap; drain per type, not in a sweep.
+
+tap_plugin/github_core/domain/actions_cache.md::node:github_core__actions_cache::missing-article
+tap_plugin/github_core/domain/app_installation.md::node:github_core__app_installation::missing-article
+tap_plugin/github_core/domain/BYPASSES.md::edge:BYPASSES__github_core::missing-article
+tap_plugin/github_core/domain/DEFINES_JOB.md::edge:DEFINES_JOB__github_core::missing-article
+tap_plugin/github_core/domain/DEPENDS_ON_JOB.md::edge:DEPENDS_ON_JOB__github_core::missing-article
+tap_plugin/github_core/domain/dimensions/github.surface.md::dimension:github.surface::undocumented-value:deployments
+tap_plugin/github_core/domain/dimensions/github.surface.md::dimension:github.surface::undocumented-value:git
+tap_plugin/github_core/domain/git_ref.md::node:github_core__git_ref::missing-article
+tap_plugin/github_core/domain/github_app.md::node:github_core__github_app::undocumented-field:client_id
+tap_plugin/github_core/domain/github_environment.md::node:github_core__github_environment::missing-article
+tap_plugin/github_core/domain/HAS_CACHE.md::edge:HAS_CACHE__github_core::missing-article
+tap_plugin/github_core/domain/HAS_ENVIRONMENT.md::edge:HAS_ENVIRONMENT__github_core::missing-article
+tap_plugin/github_core/domain/HAS_INSTALLATION.md::edge:HAS_INSTALLATION__github_core::missing-article
+tap_plugin/github_core/domain/HAS_REF.md::edge:HAS_REF__github_core::missing-article
+tap_plugin/github_core/domain/INSTALLED_ON.md::edge:INSTALLED_ON__github_core::missing-article
+tap_plugin/github_core/domain/PROTECTS.md::edge:PROTECTS__github_core::missing-article
+tap_plugin/github_core/domain/SCOPED_TO.md::edge:SCOPED_TO__github_core::missing-article
+tap_plugin/github_core/domain/USES_ENVIRONMENT.md::edge:USES_ENVIRONMENT__github_core::missing-article
+tap_plugin/github_core/domain/workflow_job.md::node:github_core__workflow_job::missing-article

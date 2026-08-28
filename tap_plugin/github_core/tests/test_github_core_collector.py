@@ -218,7 +218,10 @@ jobs:
         config = parse_workflow_yaml(yaml_text)
         assert config["triggers"] == ["push"]
         assert config["jobs"][0]["id"] == "build"
-        assert config["jobs"][0]["runs_on"] == "ubuntu-latest"
+        # `runs_on` is canonicalized to a list whichever of the three written forms was used
+        # (req-github-core-declared-jobs-5), so one query shape answers "which jobs run on a
+        # self-hosted label".
+        assert config["jobs"][0]["runs_on"] == ["ubuntu-latest"]
         assert config["raw_yaml"] == yaml_text
 
     def test_triggers_normalized(self) -> None:
@@ -488,7 +491,11 @@ class TestAccountScope:
         codes = {c.code: c.is_failure for c in result.checks}
         assert codes["GITHUB_OWNER_ACCESS:o"] is False
         assert not [k for k in codes if k.startswith("GITHUB_REPO_ACCESS:")]
-        assert calls == ["/rate_limit", "/orgs/o/repos"]
+        # Two /rate_limit calls, and both earn their place: the first proves the TOKEN is alive
+        # on its own (liveness is per credential — a dead token beside a live App must not pass),
+        # the second is the shared API-reachability check. The point of this test is the single
+        # LISTING walk that follows, with no per-repo probe behind it.
+        assert calls == ["/rate_limit", "/rate_limit", "/orgs/o/repos"]
 
 
 class TestEnrichmentDegrade:

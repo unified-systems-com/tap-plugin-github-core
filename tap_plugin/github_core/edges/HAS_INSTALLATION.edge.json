@@ -1,0 +1,16 @@
+{
+  "slug": "HAS_INSTALLATION__github_core",
+  "name": "Has Installation",
+  "description": "A registered GitHub App is installed somewhere. The application is one node; each installation of it carries its own approved permissions.",
+  "sources": [
+    "github_core__github_app"
+  ],
+  "targets": [
+    "github_core__app_installation"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "apps",
+    "github.observation": "declaration"
+  }
+}

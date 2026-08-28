@@ -1,0 +1,16 @@
+{
+  "slug": "INSTALLED_ON__github_core",
+  "name": "Installed On",
+  "description": "An App installation is granted on an account, with the permissions that account approved.",
+  "sources": [
+    "github_core__app_installation"
+  ],
+  "targets": [
+    "github_core__github_account"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "apps",
+    "github.observation": "declaration"
+  }
+}

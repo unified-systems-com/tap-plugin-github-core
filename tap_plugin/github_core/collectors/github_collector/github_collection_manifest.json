@@ -1,6 +1,6 @@
 {
   "manifest_version": "0",
-  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth).",
+  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth). A source that genuinely needs no triple states why in `permission_not_applicable` \u2014 the exemption is declared, never achieved by leaving the field out.",
   "api_base_url": "https://api.github.com",
   "sources": [
     {
@@ -131,6 +131,123 @@
       "permission_failure": "degrade_with_warning",
       "description": "Requires repo administration scope on the PAT; degrades gracefully on 403 (req-github-core-collector-5).",
       "permission": "repository:administration:read"
+    },
+    {
+      "name": "config_layer",
+      "kind": "custom_fn",
+      "path": "POST /graphql",
+      "target_entity_type": "github_core__github_repository",
+      "fields": [
+        "full_name",
+        "default_branch",
+        "visibility",
+        "html_url"
+      ],
+      "permission": "repository:metadata:read",
+      "description": "The configuration layer in one GraphQL request per 100 repositories (req-github-core-graphql-config): repository metadata, rulesets with their conditions and bypass actors, environments, every branch and tag with the commit it points at, and the inlined content of every workflow file. Measured at 64 rate-limit points of 5000 for a 19-repo organization. Field access degrades per-field (GraphQL answers 200 with both data and errors), and each degraded field is surfaced rather than swallowed."
+    },
+    {
+      "name": "refs",
+      "kind": "custom_fn",
+      "path": "POST /graphql (repository.refs)",
+      "target_entity_type": "github_core__git_ref",
+      "fields": [
+        "ref",
+        "ref_type",
+        "name",
+        "head_sha",
+        "target_sha",
+        "is_default"
+      ],
+      "permission": "repository:contents:read",
+      "description": "Branches and tags with the commit each points at (req-github-core-refs). Arrives inside the config-layer query at no extra request; declared separately because it needs its own permission statement. Contents read is already in the union for workflow file bodies, so this widens nothing."
+    },
+    {
+      "name": "rulesets",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/rulesets/{ruleset_id}",
+      "target_entity_type": "github_core__github_ruleset",
+      "fields": [
+        "ruleset_id",
+        "name",
+        "target",
+        "enforcement",
+        "conditions",
+        "rules"
+      ],
+      "permission": "repository:administration:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Ruleset DETAIL, fetched once per ruleset per run and cached across the repos it protects (req-github-core-rulesets). The config-layer query already says which rulesets apply; this is the only place each rule's PARAMETERS live, including the required status-check contexts a gate view needs. Whether the response carries a `bypass_actors` key is itself the observability signal: GitHub returns it only to a caller with WRITE access to the ruleset, which this read-only credential deliberately does not have."
+    },
+    {
+      "name": "environments",
+      "kind": "custom_fn",
+      "path": "POST /graphql (repository.environments)",
+      "target_entity_type": "github_core__github_environment",
+      "fields": [
+        "environment_id",
+        "name",
+        "protection_rules"
+      ],
+      "permission": "repository:metadata:read",
+      "description": "Deployment environments and their protection rules (req-github-core-environments), delivered inside the config-layer query. The REST `/environments` endpoint documents an Environments permission; the GraphQL path returned them under the permissions already in this union, so nothing wider is requested. `deployment_branch_policy` is NOT available here and is left null (unobserved) rather than defaulted."
+    },
+    {
+      "name": "caches",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/actions/caches",
+      "query": {
+        "per_page": "100"
+      },
+      "item_path": "actions_caches[*]",
+      "target_entity_type": "github_core__actions_cache",
+      "fields": [
+        "cache_id",
+        "key",
+        "version",
+        "ref",
+        "size_in_bytes",
+        "created_at",
+        "last_accessed_at"
+      ],
+      "permission": "repository:actions:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Stored cache entries, most-recently-accessed first (req-github-core-caches). The `ref` is the load-bearing field: it says which side of the trust boundary an entry came from. Capped per repository, with the total reported."
+    },
+    {
+      "name": "app_installations",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}/installations",
+      "item_path": "installations[*]",
+      "target_entity_type": "github_core__app_installation",
+      "fields": [
+        "installation_id",
+        "app_id",
+        "app_slug",
+        "account_login",
+        "repository_selection",
+        "permissions",
+        "events",
+        "suspended"
+      ],
+      "permission_failure": "degrade_with_warning",
+      "description": "Which Apps can reach this account's repositories, and with which granted permissions (req-github-core-app-installations). App-ONLY: a personal access token gets 404, which is one of the two surfaces that make the App the product credential rather than a convenience. Falls back to `/app/installations` \u2014 THIS App's own installation, an inventory of one \u2014 when the account-wide list is refused, and says which it got, because an inventory of one is not an inventory.",
+      "permission": "organization:administration:read"
+    },
+    {
+      "name": "app_installation_self",
+      "kind": "rest_endpoint",
+      "path": "/app/installations",
+      "item_path": "[*]",
+      "target_entity_type": "github_core__app_installation",
+      "fields": [
+        "installation_id",
+        "app_id",
+        "app_slug",
+        "account_login"
+      ],
+      "permission_not_applicable": "App-JWT-level endpoint describing THIS App's own installations, not a grant over any account's resources. No fine-grained permission triple exists for it, and inventing one would corrupt the derived least-privilege set. Also the fallback when the account-wide inventory is refused, and how the collector learns which installation it is authenticating as.",
+      "description": "Self-identification and fallback. A personal access token gets 404 here too."
     }
   ],
   "edges": [
@@ -159,6 +276,65 @@
       "source": "github_core__github_actions_job",
       "target": "github_core__github_runner",
       "condition": "job.runner_id matches runner.runner_id"
+    },
+    {
+      "slug": "DEFINES_JOB__github_core",
+      "source": "github_core__github_workflow",
+      "target": "github_core__workflow_job"
+    },
+    {
+      "slug": "DEPENDS_ON_JOB__github_core",
+      "source": "github_core__workflow_job",
+      "target": "github_core__workflow_job",
+      "condition": "job.needs names another job in the same file"
+    },
+    {
+      "slug": "HAS_REF__github_core",
+      "source": "github_core__github_repository",
+      "target": "github_core__git_ref"
+    },
+    {
+      "slug": "PROTECTS__github_core",
+      "source": "github_core__github_ruleset",
+      "target": "github_core__github_repository"
+    },
+    {
+      "slug": "BYPASSES__github_core",
+      "source": "github_core__github_app",
+      "target": "github_core__github_ruleset",
+      "condition": "an actor GitHub actually disclosed; see req-github-core-rulesets-bypass"
+    },
+    {
+      "slug": "HAS_ENVIRONMENT__github_core",
+      "source": "github_core__github_repository",
+      "target": "github_core__github_environment"
+    },
+    {
+      "slug": "USES_ENVIRONMENT__github_core",
+      "source": "github_core__workflow_job",
+      "target": "github_core__github_environment",
+      "condition": "job.environment matches environment.name"
+    },
+    {
+      "slug": "HAS_CACHE__github_core",
+      "source": "github_core__github_repository",
+      "target": "github_core__actions_cache"
+    },
+    {
+      "slug": "SCOPED_TO__github_core",
+      "source": "github_core__actions_cache",
+      "target": "github_core__git_ref",
+      "condition": "cache.ref matches an observed git_ref.ref"
+    },
+    {
+      "slug": "HAS_INSTALLATION__github_core",
+      "source": "github_core__github_app",
+      "target": "github_core__app_installation"
+    },
+    {
+      "slug": "INSTALLED_ON__github_core",
+      "source": "github_core__app_installation",
+      "target": "github_core__github_account"
     }
   ]
 }

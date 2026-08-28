@@ -1,0 +1,16 @@
+{
+  "slug": "HAS_REF__github_core",
+  "name": "Has Ref",
+  "description": "A repository contains a branch or tag. Ref movement is not a property of this edge \u2014 it is field history on the ref's head_sha, which is where a tag that moved becomes visible.",
+  "sources": [
+    "github_core__github_repository"
+  ],
+  "targets": [
+    "github_core__git_ref"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "git",
+    "github.observation": "declaration"
+  }
+}

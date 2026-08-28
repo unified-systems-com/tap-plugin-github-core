@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph, drawn to match the Octicons family used elsewhere in this set (MIT-licensed
+     Octicons are used where one exists; this concept has none). A DASHED outline for the job as
+     WRITTEN, against the solid outlines used for things that actually ran. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>Workflow Job (declared)</title>
+  <rect x="2.75" y="4.75" width="18.5" height="14.5" rx="2" fill="none" stroke="#1f2328"
+        stroke-width="1.5" stroke-dasharray="3 2.2"/>
+  <path fill="#1f2328" d="M6.5 8.5h7v1.6h-7Zm0 3.7h11v1.6h-11Zm0 3.7h5v1.6h-5Z"/>
+</svg>

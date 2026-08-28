@@ -1,0 +1,16 @@
+{
+  "slug": "HAS_ENVIRONMENT__github_core",
+  "name": "Has Environment",
+  "description": "A repository declares a deployment environment.",
+  "sources": [
+    "github_core__github_repository"
+  ],
+  "targets": [
+    "github_core__github_environment"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "deployments",
+    "github.observation": "declaration"
+  }
+}

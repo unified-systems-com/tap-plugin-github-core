@@ -1,0 +1,26 @@
+{
+  "slug": "DEPENDS_ON_JOB__github_core",
+  "name": "Depends On Job",
+  "description": "A declared job waits for another (`needs:`). Determines what a job compromised early in the graph can reach later: everything downstream of it runs after, with whatever it left behind.",
+  "sources": [
+    "github_core__workflow_job"
+  ],
+  "targets": [
+    "github_core__workflow_job"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "condition": {
+        "type": "string",
+        "description": "The dependent job's `if:` expression when it has one \u2014 a `needs:` edge that only fires under a condition is not the same reachability claim as an unconditional one."
+      }
+    }
+  }
+}

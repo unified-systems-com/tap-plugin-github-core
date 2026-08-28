@@ -1,0 +1,16 @@
+{
+  "slug": "SCOPED_TO__github_core",
+  "name": "Scoped To",
+  "description": "A cache entry belongs to a ref's scope. Emitted only when the ref is one we observed, so its absence usually means the entry came from a pull-request ref \u2014 which is the interesting case, not a gap: an entry written from outside the branch and restorable from within it.",
+  "sources": [
+    "github_core__actions_cache"
+  ],
+  "targets": [
+    "github_core__git_ref"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "execution"
+  }
+}
