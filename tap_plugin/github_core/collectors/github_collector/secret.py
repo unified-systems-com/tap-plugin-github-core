@@ -52,6 +52,19 @@ GITHUB_APP_SECRET_KIND = "github_app"
 # repositories itself. `repos` is then an optional include-filter. A `repos`-only envelope
 # (no `owner`) remains valid: the explicit list IS the scope — the degenerate run config,
 # never a parallel code path (tap#142). At least one of the two must be present.
+# One derivation for the three schemas below (req-tap-derive-once). These had already
+# drifted: two carried the full rule and the combined kind carried a bare `^https://`,
+# which still admits `https://u:p@host` and `https://host?x=1`. A security constraint
+# spelled out three times is a security constraint that will disagree with itself.
+#
+# https only, a real host, no userinfo, no query, no fragment. The value is interpolated
+# into every request URL and handed to `urlopen`, which honours whatever scheme it is
+# given; the REST and GraphQL clients carry a `# nosec B310` citing THIS as what makes
+# them safe.
+_HTTPS_BASE_URL_PATTERN = r"^https://[^\s/@?#]+(/[^\s?#]*)?$"
+_ACCOUNT_LOGIN_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$"
+_OWNER_REPO_PATTERN = r"^[^/]+/[^/]+$"
+
 GITHUB_PAT_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -79,7 +92,7 @@ GITHUB_PAT_SCHEMA: dict[str, Any] = {
             # http:// base would carry the PAT in cleartext to a host named by the envelope, and
             # a file:// base would turn an API call into a local read. Refusing it here, once, at
             # the point the value enters the system, beats a check at each consumer.
-            "pattern": r"^https://[^\s/@?#]+(/[^\s?#]*)?$",
+            "pattern": _HTTPS_BASE_URL_PATTERN,
             "description": (
                 "GitHub REST API base URL. Rides with the credential because a GitHub Enterprise "
                 "Server tenant has its own base URL and its own PAT. Must be https with no "
@@ -88,7 +101,7 @@ GITHUB_PAT_SCHEMA: dict[str, Any] = {
         },
         "owner": {
             "type": "string",
-            "pattern": r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$",
+            "pattern": _ACCOUNT_LOGIN_PATTERN,
             "description": (
                 "Login of the GitHub organization or user whose repositories are the collection "
                 "scope. The collector enumerates the account's repositories (org first, user "
@@ -100,7 +113,7 @@ GITHUB_PAT_SCHEMA: dict[str, Any] = {
             "minItems": 1,
             "items": {
                 "type": "string",
-                "pattern": r"^[^/]+/[^/]+$",
+                "pattern": _OWNER_REPO_PATTERN,
                 "minLength": 3,
             },
             "description": (
@@ -153,11 +166,23 @@ GITHUB_APP_SCHEMA: dict[str, Any] = {
             "type": "string",
             "minLength": 1,
             "default": "https://api.github.com",
-            "description": "GitHub REST API base URL; a GitHub Enterprise Server tenant has its own.",
+            # https only, no userinfo/query/fragment — carried over from GITHUB_PAT_SCHEMA when
+            # this combined kind replaced it. The REST and GraphQL clients build request URLs
+            # from this value and hand them to `urlopen`, which honours whatever scheme it is
+            # given, and both carry a `# nosec B310` citing THIS constraint as what makes them
+            # safe. An http:// base would carry the token in cleartext to a host the envelope
+            # names; a file:// base would turn an API call into a local read. app_jwt.py
+            # re-checks independently because it must hold for the App path even if this
+            # schema is bypassed.
+            "pattern": _HTTPS_BASE_URL_PATTERN,
+            "description": (
+                "GitHub REST API base URL; a GitHub Enterprise Server tenant has its own. Must be "
+                "https with no userinfo, query or fragment — it is interpolated into every request URL."
+            ),
         },
         "owner": {
             "type": "string",
-            "pattern": r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$",
+            "pattern": _ACCOUNT_LOGIN_PATTERN,
             "description": (
                 "Login of the organization or user whose repositories are the collection scope. It "
                 "also SELECTS the installation to authenticate as: an App installed into several "
@@ -168,7 +193,7 @@ GITHUB_APP_SCHEMA: dict[str, Any] = {
         "repos": {
             "type": "array",
             "minItems": 1,
-            "items": {"type": "string", "pattern": r"^[^/]+/[^/]+$", "minLength": 3},
+            "items": {"type": "string", "pattern": _OWNER_REPO_PATTERN, "minLength": 3},
             "description": "Explicit `owner/repo` targets — an include-filter with `owner`, the scope without it.",
         },
         "initial_run_limit": {
@@ -207,7 +232,7 @@ GITHUB_SCHEMA: dict[str, Any] = {
     "properties": {
         "owner": {
             "type": "string",
-            "pattern": r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$",
+            "pattern": _ACCOUNT_LOGIN_PATTERN,
             "description": (
                 "Login of the organization or user whose repositories are the collection scope. "
                 "Also SELECTS the App installation to authenticate as: an App installed into "
@@ -217,7 +242,7 @@ GITHUB_SCHEMA: dict[str, Any] = {
         },
         "api_base_url": {
             "type": "string",
-            "pattern": "^https://",
+            "pattern": _HTTPS_BASE_URL_PATTERN,
             "default": "https://api.github.com",
             "description": (
                 "GitHub REST API base URL; a GitHub Enterprise Server tenant has its own. HTTPS "
@@ -270,7 +295,7 @@ GITHUB_SCHEMA: dict[str, Any] = {
         "repos": {
             "type": "array",
             "minItems": 1,
-            "items": {"type": "string", "pattern": r"^[^/]+/[^/]+$", "minLength": 3},
+            "items": {"type": "string", "pattern": _OWNER_REPO_PATTERN, "minLength": 3},
             "description": "Explicit `owner/repo` targets — an include-filter over the enumerated repositories.",
         },
         "initial_run_limit": {

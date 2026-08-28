@@ -25,7 +25,6 @@ from tap_plugin.github_core.collectors.github_collector.app_jwt import GithubApp
 from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
 from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
 from tap_plugin.github_core.collectors.github_collector.identity import (
-    environment_id,
     git_ref_id,
     ruleset_id,
     workflow_job_id,
