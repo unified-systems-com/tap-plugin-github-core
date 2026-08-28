@@ -1456,7 +1456,7 @@ class GithubCollector(CollectorBase):
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
-        """Emit one CAN_BYPASS_RULE edge per actor we can name, and say what we could not name."""
+        """Emit one EXEMPTS_ACTOR edge per actor we can name, and say what we could not name."""
         for actor in observability["actors"]:
             app_uuid = github_app_id(actor["slug"])
             if str(app_uuid) not in self._emitted_app_ids:
@@ -1481,10 +1481,13 @@ class GithubCollector(CollectorBase):
                 )
             edges.append(
                 edge_envelope(
-                    entity_id=edge_id("CAN_BYPASS_RULE__github_core", app_uuid, rs_uuid),
-                    edge_type="CAN_BYPASS_RULE__github_core",
-                    source_id=app_uuid,
-                    target_id=rs_uuid,
+                    # Ruleset -> actor. The exemption is something the RULESET declares
+                    # (it is an entry in its own bypass_actors list); nobody initiates a
+                    # permission, so the declaring object is the source.
+                    entity_id=edge_id("EXEMPTS_ACTOR__github_core", rs_uuid, app_uuid),
+                    edge_type="EXEMPTS_ACTOR__github_core",
+                    source_id=rs_uuid,
+                    target_id=app_uuid,
                     dimensions=dims,
                     properties={
                         "actor_type": "Integration",
@@ -1787,7 +1790,9 @@ class GithubCollector(CollectorBase):
                     )
                 edges.append(
                     self._edge(
-                        "PUSHED_BY__github_core", suite_uuid, actor_uuid, dims,
+                        # Account -> suite: the push is what happened, and the account is
+                        # what initiated it. The passive form had the initiator as target.
+                        "TRIGGERED_EVALUATION__github_core", actor_uuid, suite_uuid, dims,
                         properties={"actor_id": suite.get("actor_id")},
                     )
                 )
@@ -1807,7 +1812,7 @@ class GithubCollector(CollectorBase):
                     continue
                 edges.append(
                     self._edge(
-                        "HAS_BYPASSED_RULE__github_core",
+                        "BYPASSED_RULE__github_core",
                         suite_uuid,
                         ruleset_id(_owner_of(full_name), rule["ruleset_id"]),
                         dims,

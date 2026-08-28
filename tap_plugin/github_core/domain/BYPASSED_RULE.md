@@ -1,4 +1,4 @@
-# HAS_BYPASSED_RULE
+# BYPASSED_RULE
 
 ## Blurb
 
@@ -18,7 +18,7 @@ It is also the pair that makes the two halves of the bypass story queryable toge
 
 ## Identity
 
-Derived: `uuid5(ns, "HAS_BYPASSED_RULE__github_core:<suite_uuid>:<ruleset_uuid>")`. One suite may bypass several rules belonging to the same ruleset; that is one edge, with the first rule type on it and the full list on the suite's `bypassed_rules`.
+Derived: `uuid5(ns, "BYPASSED_RULE__github_core:<suite_uuid>:<ruleset_uuid>")`. One suite may bypass several rules belonging to the same ruleset; that is one edge, with the first rule type on it and the full list on the suite's `bypassed_rules`.
 
 ## Boundaries
 

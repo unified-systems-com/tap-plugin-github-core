@@ -31,7 +31,7 @@ class RuleSuite(BaseModel):
 
     **The actor is an account, and that is all we know.** GitHub gives a login and a numeric
     id. Whether it is a person, a bot or a machine account is not stated, and this model does
-    not guess — `PUSHED_BY` points at a `github_account`, the user-or-organization primitive.
+    not guess — `TRIGGERED_EVALUATION` points at a `github_account`, the user-or-organization primitive.
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__rule_suite"
@@ -115,7 +115,7 @@ class RuleSuite(BaseModel):
     pushed_at = models.DateTimeField(null=True, blank=True)
     #: `[{"rule_type": "required_status_checks", "ruleset_id": 20613528, "ruleset_name": "...",
     #: "details": "Required status check \"gate\" is expected."}, ...]` — the rules that were NOT
-    #: satisfied. Kept as data because the HAS_BYPASSED_RULE edge carries only the ruleset join, and the
+    #: satisfied. Kept as data because the BYPASSED_RULE edge carries only the ruleset join, and the
     #: rule type and GitHub's own explanation are what make the event readable.
     bypassed_rules = models.JSONField(default=list, blank=True)
     configuration = models.JSONField(default=dict, blank=True)

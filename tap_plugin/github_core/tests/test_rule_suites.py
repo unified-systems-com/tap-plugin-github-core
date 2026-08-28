@@ -138,7 +138,7 @@ class TestTheActorIsAnAccount:
         assert accounts[0]["node"]["login"] == login
         assert accounts[0]["node"]["account_type"] == "", "must not claim User/Bot — the API does not say"
         assert accounts[0]["entity"]["entity_id"] == str(account_id(login))
-        assert _edges_of(edges, "PUSHED_BY__github_core")
+        assert _edges_of(edges, "TRIGGERED_EVALUATION__github_core")
 
     @pytest.mark.spec("req-github-core-rule-suites-2")
     def test_one_actor_across_many_suites_is_one_node(self) -> None:
@@ -148,9 +148,25 @@ class TestTheActorIsAnAccount:
         assert len({a["entity"]["entity_id"] for a in accounts}) == len(accounts) == 1
 
     @pytest.mark.spec("req-github-core-rule-suites-2")
+    def test_the_account_is_the_source_because_the_account_initiated(self) -> None:
+        """Direction is a decision, so it is asserted.
+
+        The edge points the way the action was initiated: an account pushed, and that push
+        was evaluated. The earlier `PUSHED_BY` form was passive and made the initiator the
+        TARGET — which read fine in English and inverted the convention. Nothing caught the
+        flip when it was corrected, because no test named the direction; this one does.
+        """
+        nodes, edges, _, _ = _collect(_FakeClient())
+        edge = _edges_of(edges, "TRIGGERED_EVALUATION__github_core")[0]
+        account = _of_type(nodes, "github_core__github_account")[0]["entity"]["entity_id"]
+        suite = _of_type(nodes, "github_core__rule_suite")[0]["entity"]["entity_id"]
+        assert edge["edge"]["from_entity_id"] == account, "the account initiates; it is the source"
+        assert edge["edge"]["to_entity_id"] == suite
+
+    @pytest.mark.spec("req-github-core-rule-suites-2")
     def test_actor_id_rides_the_edge_so_a_rename_is_detectable(self) -> None:
         _, edges, _, _ = _collect(_FakeClient())
-        edge = _edges_of(edges, "PUSHED_BY__github_core")[0]
+        edge = _edges_of(edges, "TRIGGERED_EVALUATION__github_core")[0]
         assert edge["edge"]["properties"]["actor_id"] == _FIXTURE["list_bypass"][0]["actor_id"]
 
 
@@ -159,8 +175,8 @@ class TestTheBypassedControlIsNamed:
     def test_bypassed_edge_points_at_the_ruleset_that_was_gone_around(self) -> None:
         """Without this join the event is a log line. With it, it names the control."""
         _, edges, _, _ = _collect(_FakeClient())
-        bypassed = _edges_of(edges, "HAS_BYPASSED_RULE__github_core")
-        assert bypassed, "no HAS_BYPASSED_RULE edge — the suite detail names a ruleset"
+        bypassed = _edges_of(edges, "BYPASSED_RULE__github_core")
+        assert bypassed, "no BYPASSED_RULE edge — the suite detail names a ruleset"
         failing = [
             e for e in _FIXTURE["detail"]["rule_evaluations"]
             if e["result"] != "pass" and (e.get("rule_source") or {}).get("type") == "ruleset"
@@ -169,6 +185,14 @@ class TestTheBypassedControlIsNamed:
         expected = str(ruleset_id("unified-systems-com", failing[0]["rule_source"]["id"]))
         assert any(e["edge"]["to_entity_id"] == expected for e in bypassed)
         assert bypassed[0]["edge"]["properties"]["rule_type"] == failing[0]["rule_type"]
+
+    @pytest.mark.spec("req-github-core-rule-suites-3")
+    def test_the_suite_is_the_source_because_the_push_did_the_bypassing(self) -> None:
+        """The event acted on the gate, not the reverse."""
+        nodes, edges, _, _ = _collect(_FakeClient())
+        suite = _of_type(nodes, "github_core__rule_suite")[0]["entity"]["entity_id"]
+        edge = _edges_of(edges, "BYPASSED_RULE__github_core")[0]
+        assert edge["edge"]["from_entity_id"] == suite
 
     @pytest.mark.spec("req-github-core-rule-suites-3")
     def test_githubs_own_explanation_is_preserved_verbatim(self) -> None:
@@ -207,7 +231,7 @@ class TestRefusedIsNotEmpty:
         suites = _of_type(nodes, "github_core__rule_suite")
         assert len(suites) == len(_FIXTURE["list_bypass"])
         assert suites[0]["node"]["bypassed_rules"] == []
-        assert not _edges_of(edges, "HAS_BYPASSED_RULE__github_core")
+        assert not _edges_of(edges, "BYPASSED_RULE__github_core")
 
 
 class TestRefResolution:

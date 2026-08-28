@@ -69,7 +69,7 @@ Populated from `GET /repos/{owner}/{repo}/rulesets/rule-suites` at **`repository
 - `full_name` — `owner/repo`, carried so a suite is attributable without walking edges. The API returns `repository_name` and `repository_id`; the composite form is what the rest of this plugin keys on.
 - `result` — `bypass`, `fail` or `pass`. Only `bypass` is collected today. `""` is permitted so a partially-read suite lands rather than being dropped, per the grid's unobserved convention.
 - `ref` — the full ref path (`refs/heads/main`) as returned, matching `git_ref`'s identity so the `EVALUATED_ON` join is a lookup rather than a reconstruction.
-- `actor_login` — the account that pushed. An **account**, not an identity: GitHub returns a login and a numeric id and does not say whether it belongs to a person, a bot or a machine account, so nothing here claims one. See `PUSHED_BY`.
+- `actor_login` — the account that pushed. An **account**, not an identity: GitHub returns a login and a numeric id and does not say whether it belongs to a person, a bot or a machine account, so nothing here claims one. See `TRIGGERED_EVALUATION`.
 - `actor_id` — GitHub's numeric account id, carried so a login rename is detectable — the same id under a new login is a rename, not a new actor. Same reasoning as `github_account.github_id`.
 - `before_sha` / `after_sha` — the ref tip either side of the push. All zeroes in `before_sha` means a branch creation. Fields rather than edges because `git_commit` is not built.
 - `pushed_at` — when the push was evaluated. Null is "we did not observe a timestamp", never "now".

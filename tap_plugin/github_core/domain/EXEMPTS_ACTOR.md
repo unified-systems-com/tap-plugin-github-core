@@ -1,8 +1,8 @@
-# CAN_BYPASS_RULE
+# EXEMPTS_ACTOR
 
 ## Blurb
 
-An actor is exempt from a ruleset — permitted to push past a gate that stops everyone else. The standing permission, where `HAS_BYPASSED_RULE` is the occurrence.
+A ruleset exempts an actor — naming someone permitted to push past a gate that stops everyone else. The standing exemption, where `BYPASSED_RULE` is the occurrence.
 
 ## Purpose
 
@@ -14,15 +14,15 @@ This edge exists to make that answerable, and to make its **absence honest**. It
 
 1. Name who is exempt from a gate, where the credential can see it.
 2. Never let "we could not look" render as "nobody is exempt".
-3. Stay separate from `HAS_BYPASSED_RULE`, so permission and occurrence cannot be conflated.
+3. Stay separate from `BYPASSED_RULE`, so permission and occurrence cannot be conflated.
 
 ## Identity
 
-Derived: `uuid5(ns, "CAN_BYPASS_RULE__github_core:<actor_uuid>:<ruleset_uuid>")`.
+Derived: `uuid5(ns, "EXEMPTS_ACTOR__github_core:<ruleset_uuid>:<actor_uuid>")`.
 
 ## Boundaries
 
-- **Not `HAS_BYPASSED_RULE`.** This is *may*; that is *did*. The names were `BYPASSES` and `BYPASSED` until 2026-08-28 — one letter apart, for the pair whose whole value is the distinction. The modal/perfect forms carry it in the slug, and the `_RULE` object keeps both inside the `<ACTION>_<OBJECT>` convention: `CAN_`/`HAS_` alone would have been a verb pair with no object, and `HAS_` already means possession here (`HAS_REF`, `HAS_CACHE`), not perfect tense.
+- **Not `BYPASSED_RULE`.** This is the standing exemption; that is a push that went around a rule. They were `BYPASSES` and `BYPASSED` until 2026-08-28 — one letter apart, for the pair whose entire value is the distinction. Two attempts at fixing it by TENSE (`CAN_BYPASS`/`HAS_BYPASSED`, then `CAN_BYPASS_RULE`/`HAS_BYPASSED_RULE`) were both wrong: `CAN` and `HAS` are a modal and an auxiliary, not mechanical actions, and every edge in the wider vocabulary is a plain verb plus its destination noun — `ASSUMES_ROLE`, `TRUSTS_ISSUER`, `WRITES_LOGS`. Separating the pair by VERB rather than by tense is what the convention was asking for all along.
 - **Not all exemption kinds are nodes.** Apps have `github_app`; teams and organization-admin roles do not yet, so those are kept as counted data on the ruleset rather than dropped. Understating who can bypass is the one direction that must never happen.
 - **Not authorisation.** That an actor is on the list does not say who put them there or why. Ruleset history carries that, and is refused to every read-only credential.
 
@@ -66,7 +66,7 @@ Three things follow, and only the first was previously understood:
 
 ## Endpoints
 
-- **Source:** `github_core__github_app` — an exempt actor this vocabulary has a node for.
-- **Target:** `github_core__github_ruleset` — the gate it is exempt from.
+- **Source:** `github_core__github_ruleset` — the gate that declares the exemption.
+- **Target:** `github_core__github_app` (and other actor types as they gain nodes) — the actor it exempts.
 - **Dimensions:** `github.platform`, `github.surface: rules`, `github.observation: declaration`.
 - **Properties:** `actor_type`, `bypass_mode` (`always` or `pull_request`), `observable` (whether the list was actually read), `source` (which transport answered).
