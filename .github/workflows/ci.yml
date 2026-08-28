@@ -32,14 +32,20 @@ permissions:
 
 jobs:
   tap:
-    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@main
+    # SHA-pinned, matching ai-review.yml and ai-review-capture.yml in this directory.
+    # `harness_ref` selects the harness CODE that gets checked out; THIS selects the
+    # workflow DEFINITION — which steps run, which secrets reach them, how boot_profile
+    # is interpreted. Pinning the former and not the latter, as this file did until now,
+    # pins the smaller of the two. Bump deliberately; a gate improvement upstream does
+    # not reach this repo until someone reviews and bumps it, which is the trade.
+    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@2f0ec95393b73266bb52f8ff6af6f3f09f6889ff # core main 2026-08-28
     with:
       plugin_slug: github_core
       # A full commit SHA, not a branch. The old value was `main` under a comment
       # claiming it was "pinned deliberately" — which it was not: a branch moves, and
-      # this input selects code that EXECUTES in a job holding TAP_CORE_RO_PAT. That was
-      # tolerable while the job only ran Django-free structure validation; enabling the
-      # boot leg below makes the same mutable ref build an image and stand up a stack.
+      # this input selects the harness code that EXECUTES here. That was tolerable while
+      # the job only ran Django-free structure validation; enabling the boot leg below
+      # makes the same ref build an image and stand up a stack.
       # Bump this on purpose, to a reviewed SHA.
       harness_ref: 2f0ec95393b73266bb52f8ff6af6f3f09f6889ff # core main 2026-08-28
       # Opt into the boot-and-test leg. Without it this repo's OWN tests never execute
@@ -48,5 +54,9 @@ jobs:
       # run by CI at all. PR #5 added exactly such a test and CI never executed it; it
       # was verified by hand. A gate that cannot run the suite is not yet the gate.
       boot_profile: ci/nightly.boot.json
-    secrets:
-      harness_pat: ${{ secrets.TAP_CORE_RO_PAT }}
+    # NO secrets passed. TAP_CORE_RO_PAT existed to read core while it was PRIVATE; core
+    # went public on 2026-08-08 and the harness workflow falls back to `github.token`,
+    # which can read a public repo anonymously. Passing it was vestigial — and it was the
+    # premise of every "executes beside a repository secret" finding on this PR. Removing
+    # it dissolves that class rather than mitigating it. Retiring the secret org-wide is a
+    # separate, deliberate step (core's plugin-ci.yml says so); this drops one caller's use.
