@@ -210,6 +210,14 @@ def test_the_traversed_set_covers_what_the_query_actually_selects() -> None:
     that grew — the same exemption-without-assertion shape the REST rename table had. So:
     read the real query, pull the identifiers out, and assert every one is accounted for
     either as a selected field or as a deliberate exclusion.
+
+    **Its residual limit, stated rather than implied.** The `selected` set below is flattened
+    across every traversed type, so a NEW selection of an already-known field name on an
+    UNTRACKED type would pass here — the name-match coincidence that the per-type assertions
+    above are careful to avoid. Closing it needs real type inference through the selection
+    set (a GraphQL parser), which is tracked separately. What this catches today is the case
+    that actually happens: a selection whose name appears nowhere in what we verify. It found
+    `entries` — the workflow-file tree walk — on its first run.
     """
     import re
 
@@ -221,19 +229,18 @@ def test_the_traversed_set_covers_what_the_query_actually_selects() -> None:
     identifiers = set(re.findall(r"(?:^|\s)(?:[A-Za-z_]+:\s*)?([a-z][A-Za-z0-9_]*)\s*[({\n]", query))
 
     selected = {f for entry in _GQL["types"].values() for f in entry["selected"]}
-    #: Query tokens that are deliberately not type-anchored fields: GraphQL builtins, connection
-    #: plumbing, variables, and scalars reached through a connection rather than selected on one
-    #: of the traversed types. Each is named so the exclusion is a claim, not a shrug.
+    #: Tokens that are NOT field selections. Every real field now lives in GQL_TRAVERSED and is
+    #: verified against its own type; what remains here is grammar, arguments and aliases —
+    #: things introspection has nothing to say about. The previous version of this list
+    #: exempted real fields (`oid`, `url`, `slug`, `type`, `refName`, `include`, `exclude`),
+    #: which is how an exclusion list quietly becomes the hole it was meant to close.
     not_type_anchored = {
-        "query", "on",                                   # GraphQL keywords
-        "nodes", "pageInfo", "totalCount", "hasNextPage", "endCursor",  # connection plumbing
-        "repositoryOwner", "repositories", "rateLimit", "cost", "remaining",  # root/meta
-        "login", "cursor", "first", "after", "refPrefix", "ownerAffiliations",  # arguments
-        "branchRefs", "tagRefs",                          # aliases OF `refs`, already covered
-        "name", "target", "oid", "url", "slug", "type", "timeout", "include", "exclude",
-        "refName", "actor", "bypassMode", "organizationAdmin", "repositoryRoleName",
-        "databaseId", "protectionRules", "conditions", "rules", "bypassActors",
-        "object", "entries", "path", "byteSize", "isTruncated", "text",  # tree walk, now traversed
+        "query", "on",                                                   # grammar
+        "login", "cursor", "first", "after", "refPrefix", "ownerAffiliations", "expression",
+        "repositoryOwner", "repositories", "rateLimit", "cost", "remaining",  # root + meta
+        "nodes", "pageInfo", "totalCount", "hasNextPage", "endCursor",   # connection plumbing
+        "branchRefs", "tagRefs",                                         # ALIASES of `refs`
+        "defaultBranchRef",                                              # verified on Repository
     }
     unaccounted = identifiers - selected - not_type_anchored
     assert not unaccounted, (

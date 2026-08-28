@@ -4,6 +4,27 @@
     "commit": "82ff2d4780080e6929ebb95608cefa22dfa05ac7",
     "sha256": "bbdb03f4006f4e34964d67d55385f1c8c47c4cacd507ccdc38af2544247ecddd",
     "types": {
+      "App": {
+        "fields": [
+          "createdAt",
+          "databaseId",
+          "description",
+          "id",
+          "ipAllowListEntries",
+          "logoBackgroundColor",
+          "logoUrl",
+          "name",
+          "slug",
+          "updatedAt",
+          "url"
+        ],
+        "present": true,
+        "selected": [
+          "databaseId",
+          "name",
+          "slug"
+        ]
+      },
       "Blob": {
         "fields": [
           "abbreviatedOid",
@@ -24,6 +45,73 @@
           "text"
         ]
       },
+      "Commit": {
+        "fields": [
+          "abbreviatedOid",
+          "additions",
+          "associatedPullRequests",
+          "author",
+          "authoredByCommitter",
+          "authoredDate",
+          "authors",
+          "blame",
+          "changedFiles",
+          "changedFilesIfAvailable",
+          "checkSuites",
+          "comments",
+          "commitResourcePath",
+          "commitUrl",
+          "committedDate",
+          "committedViaWeb",
+          "committer",
+          "deletions",
+          "deployments",
+          "file",
+          "history",
+          "id",
+          "message",
+          "messageBody",
+          "messageBodyHTML",
+          "messageHeadline",
+          "messageHeadlineHTML",
+          "oid",
+          "onBehalfOf",
+          "parents",
+          "pushedDate",
+          "repository",
+          "resourcePath",
+          "signature",
+          "status",
+          "statusCheckRollup",
+          "submodules",
+          "tarballUrl",
+          "tree",
+          "treeResourcePath",
+          "treeUrl",
+          "url",
+          "viewerCanSubscribe",
+          "viewerSubscription",
+          "zipballUrl"
+        ],
+        "present": true,
+        "selected": [
+          "oid"
+        ]
+      },
+      "DeploymentProtectionRule": {
+        "fields": [
+          "databaseId",
+          "preventSelfReview",
+          "reviewers",
+          "timeout",
+          "type"
+        ],
+        "present": true,
+        "selected": [
+          "timeout",
+          "type"
+        ]
+      },
       "Environment": {
         "fields": [
           "databaseId",
@@ -39,6 +127,20 @@
           "databaseId",
           "name",
           "protectionRules"
+        ]
+      },
+      "GitObject": {
+        "fields": [
+          "abbreviatedOid",
+          "commitResourcePath",
+          "commitUrl",
+          "id",
+          "oid",
+          "repository"
+        ],
+        "present": true,
+        "selected": [
+          "oid"
         ]
       },
       "Ref": {
@@ -58,6 +160,17 @@
         "selected": [
           "name",
           "target"
+        ]
+      },
+      "RefNameConditionTarget": {
+        "fields": [
+          "exclude",
+          "include"
+        ],
+        "present": true,
+        "selected": [
+          "exclude",
+          "include"
         ]
       },
       "Repository": {
@@ -206,7 +319,32 @@
           "object",
           "refs",
           "rulesets",
+          "url",
           "visibility"
+        ]
+      },
+      "RepositoryRule": {
+        "fields": [
+          "id",
+          "parameters",
+          "repositoryRuleset",
+          "type"
+        ],
+        "present": true,
+        "selected": [
+          "type"
+        ]
+      },
+      "RepositoryRuleConditions": {
+        "fields": [
+          "refName",
+          "repositoryId",
+          "repositoryName",
+          "repositoryProperty"
+        ],
+        "present": true,
+        "selected": [
+          "refName"
         ]
       },
       "RepositoryRuleset": {
@@ -269,6 +407,59 @@
         "present": true,
         "selected": [
           "target"
+        ]
+      },
+      "Team": {
+        "fields": [
+          "ancestors",
+          "avatarUrl",
+          "childTeams",
+          "combinedSlug",
+          "createdAt",
+          "databaseId",
+          "description",
+          "discussion",
+          "discussions",
+          "discussionsResourcePath",
+          "discussionsUrl",
+          "editTeamResourcePath",
+          "editTeamUrl",
+          "id",
+          "invitations",
+          "memberStatuses",
+          "members",
+          "membersResourcePath",
+          "membersUrl",
+          "name",
+          "newTeamResourcePath",
+          "newTeamUrl",
+          "notificationSetting",
+          "organization",
+          "parentTeam",
+          "privacy",
+          "projectV2",
+          "projectsV2",
+          "repositories",
+          "repositoriesResourcePath",
+          "repositoriesUrl",
+          "resourcePath",
+          "reviewRequestDelegationAlgorithm",
+          "reviewRequestDelegationEnabled",
+          "reviewRequestDelegationMemberCount",
+          "reviewRequestDelegationNotifyTeam",
+          "slug",
+          "teamsResourcePath",
+          "teamsUrl",
+          "updatedAt",
+          "url",
+          "viewerCanAdminister",
+          "viewerCanSubscribe",
+          "viewerSubscription"
+        ],
+        "present": true,
+        "selected": [
+          "name",
+          "slug"
         ]
       },
       "Tree": {

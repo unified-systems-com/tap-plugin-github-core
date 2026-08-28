@@ -50,7 +50,7 @@ GQL_BRANCH = "main"
 #: Anchored to the TYPE rather than checked as bare names, because a field existing somewhere
 #: in a 1,600-type schema proves nothing about the type we select it on.
 GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
-    "Repository": ("nameWithOwner", "databaseId", "isArchived", "isFork", "visibility",
+    "Repository": ("nameWithOwner", "databaseId", "isArchived", "isFork", "visibility", "url",
                    "defaultBranchRef", "rulesets", "environments", "refs", "object"),
     "RepositoryRuleset": ("databaseId", "name", "enforcement", "target", "conditions",
                           "rules", "bypassActors"),
@@ -61,6 +61,17 @@ GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
     "TreeEntry": ("name", "path", "object"),
     "Blob": ("byteSize", "isTruncated", "text"),
     "Tag": ("target",),
+    # Types reached deeper in the selection set. Declared so the exclusion list below shrinks
+    # to things that are genuinely NOT field selections — keywords, arguments, aliases and
+    # connection plumbing — rather than hiding real fields behind a name-match.
+    "GitObject": ("oid",),
+    "Commit": ("oid",),
+    "RepositoryRuleConditions": ("refName",),
+    "RefNameConditionTarget": ("include", "exclude"),
+    "RepositoryRule": ("type",),
+    "DeploymentProtectionRule": ("type", "timeout"),
+    "App": ("databaseId", "slug", "name"),
+    "Team": ("slug", "name"),
 }
 _HERE = Path(__file__).resolve().parent
 MANIFEST = _HERE.parent / "tap_plugin/github_core/collectors/github_collector/github_collection_manifest.json"
