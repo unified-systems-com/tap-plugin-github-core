@@ -38,5 +38,11 @@ jobs:
       # Pinned deliberately. `main` means "whatever core is today", which turns an
       # unrelated core change into a surprise red here. Bump this on purpose.
       harness_ref: main
+      # Opt into the boot-and-test leg. Without it this repo's OWN tests never execute
+      # in its own gate: the conformance job is Django-free structure validation, so a
+      # test importing a core module — or asserting anything about collection — is not
+      # run by CI at all. PR #5 added exactly such a test and CI never executed it; it
+      # was verified by hand. A gate that cannot run the suite is not yet the gate.
+      boot_profile: ci/nightly.boot.json
     secrets:
       harness_pat: ${{ secrets.TAP_CORE_RO_PAT }}
