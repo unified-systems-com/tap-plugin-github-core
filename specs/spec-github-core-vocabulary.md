@@ -208,8 +208,24 @@ readable catalogue, a collector can land it on the grid so "what changed" become
 2. ~~Where `package_version` lives.~~ **Settled:** `supply_chain_core` (see decisions above).
 3. ~~**`BYPASSES` observability.**~~ **SETTLED EMPIRICALLY 2026-08-27, and the answer is worse than
    expected.** GitHub returns `bypass_actors` only to a caller with **write access to the ruleset**.
-   Measured against our own org: an owner-minted fine-grained PAT sees it; a **GitHub App with
-   `administration: read` does not** (`bypass_actors` absent from the ruleset detail, HTTP 200).
+   Measured against our own org, and **read the next paragraph before relying on the comparison**:
+   an owner-minted fine-grained PAT sees it; a **GitHub App with `administration: read` does not**
+   (`bypass_actors` absent from the ruleset detail, HTTP 200).
+
+   **The comparison was admin-versus-read, not read-versus-read (corrected 2026-08-27).** The PAT
+   used for every early probe carries an envelope description reading *"Read-only fine-grained
+   GitHub PAT"* that was authored by hand and never verified; it reports `{"admin": true,
+   "maintain": true, "push": true, ...}` on `unified-systems-com/tap`. A fine-grained PAT inherits
+   its user's repository role, and a GitHub App has no user to inherit from — which is the actual
+   mechanism behind the asymmetry recorded here.
+
+   **What the measurement established, and what it did not.** Every ruleset in the org has
+   *genuinely zero* bypass actors, so for the most part "empty" and "withheld" are the same bytes
+   and no credential could have discriminated them. One thing *was* discriminating: the PAT
+   received `bypass_actors: []` while the App received **no key at all**, and absent-key versus
+   present-and-empty does establish that gating exists. What has never been observed is **what the
+   App receives when the list is populated** — no populated list existed until a probe ruleset was
+   built on 2026-08-27, and the App half of that probe is still unmeasured.
 
    Three consequences that are now facts rather than precautions:
 

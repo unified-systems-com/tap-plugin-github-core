@@ -10,6 +10,7 @@
   ],
   "default_dimensions": {
     "github.platform": "github.com",
-    "github.surface": "actions"
+    "github.surface": "actions",
+    "github.observation": "execution"
   }
 }

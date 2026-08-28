@@ -35,6 +35,7 @@ class GithubApp(BaseModel):
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.platform": "github.com",
         "github.surface": "apps",
+        "github.observation": "declaration",
     }
     # Same family scheme as the other github_core nodes — white fill so it reads
     # as a card; GitHub-purple border to distinguish apps from the blue Actions

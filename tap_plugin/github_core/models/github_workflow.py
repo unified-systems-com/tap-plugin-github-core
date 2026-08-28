@@ -24,6 +24,7 @@ class GithubWorkflow(BaseModel):
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.platform": "github.com",
         "github.surface": "actions",
+        "github.observation": "declaration",
     }
     # Leaf cards inside the repo box — white fill, accent-blue border so they
     # pop on the deeper-blue repo bed. See github_platform for the family scheme.

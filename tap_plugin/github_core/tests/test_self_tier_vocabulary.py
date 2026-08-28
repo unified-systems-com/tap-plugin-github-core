@@ -59,7 +59,7 @@ class TestIdentity:
     def test_ids_are_deterministic(self) -> None:
         assert workflow_job_id("o/r", 1, "build") == workflow_job_id("o/r", 1, "build")
         assert git_ref_id("o/r", "refs/heads/main") == git_ref_id("o/r", "refs/heads/main")
-        assert ruleset_id("o", 7) == ruleset_id("o", 7)
+        assert str(ruleset_id("o", 7)) == "c4a175e4-20e4-563f-a41e-15c24d4f35f1"
 
     def test_a_branch_and_a_tag_of_the_same_name_are_different_nodes(self) -> None:
         """The reason identity keys on the full ref path rather than the short name."""
@@ -67,8 +67,20 @@ class TestIdentity:
 
     def test_one_ruleset_is_one_node_however_many_repositories_it_protects(self) -> None:
         """An organization ruleset is a single object. Keying it per repository would turn
-        "what does this ruleset protect" into a string comparison across duplicates."""
-        assert ruleset_id("acme", 20613528) == ruleset_id("acme", 20613528)
+        "what does this ruleset protect" into a string comparison across duplicates.
+
+        Asserted as a pinned literal keyed on owner + id ALONE. Comparing the call against
+        itself — the previous form — cannot detect a repo-scoped key, because it never varies
+        a repository; and a natural key cannot be changed once nodes exist, so the derivation
+        is pinned rather than merely exercised. The signature assertion is the actual guard:
+        a repository parameter appearing here would mint one node per repo (measured on the
+        fixture org: 3 organization rulesets x 19 repositories = 57 attachments).
+        """
+        assert str(ruleset_id("acme", 20613528)) == "392446ce-239d-5222-a877-372fe1b5e06b"
+        assert ruleset_id.__code__.co_argcount == 2, (
+            "ruleset_id takes (owner, ruleset_id) and nothing else — a third parameter would "
+            "let a caller scope the key by repository"
+        )
 
     def test_a_declared_job_is_not_keyed_on_its_display_name(self) -> None:
         """`name:` is free text an author retitles without changing what the job is."""

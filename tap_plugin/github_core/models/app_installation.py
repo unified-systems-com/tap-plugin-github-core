@@ -32,6 +32,7 @@ class AppInstallation(BaseModel):
     )
     ENTITY_ICON: ClassVar[str] = "app-installation"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
+        "github.observation": "declaration",
         "github.platform": "github.com",
         "github.surface": "apps",
     }

@@ -11,7 +11,8 @@
   ],
   "default_dimensions": {
     "github.platform": "github.com",
-    "github.surface": "rules"
+    "github.surface": "rules",
+    "github.observation": "declaration"
   },
   "property_schema": {
     "type": "object",

@@ -51,6 +51,7 @@ from .identity import (
     repository_id,
     ruleset_id,
     run_id,
+    ruleset_id,
     runner_id,
     workflow_id,
     workflow_job_id,
@@ -434,6 +435,10 @@ class GithubCollector(CollectorBase):
         # github_app nodes are singletons shared across repos; dedupe the node
         # emission across the whole run (the ENABLED_ON edges still fan in).
         self._emitted_app_ids: set[str] = set()
+        # Rulesets are singletons too, and far more fan-in than apps: an
+        # organization-sourced ruleset is reported by every repository it governs
+        # (measured: 6 rulesets across 60 attachments on a 19-repo org).
+        self._emitted_ruleset_ids: set[str] = set()
 
         # --- secret resolution (unrecoverable on failure) ---
         try:

@@ -17,7 +17,10 @@ class GithubAccount(BaseModel):
     ENTITY_NAME: ClassVar[str] = "GitHub Account"
     ENTITY_DESCRIPTION: ClassVar[str] = "A GitHub user or organization account."
     ENTITY_ICON: ClassVar[str] = "github-account"
-    DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {"github.platform": "github.com"}
+    DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
+        "github.platform": "github.com",
+        "github.observation": "declaration",
+    }
     # Mid level of the GitHub nesting palette — light accent blue. See
     # github_platform.GithubPlatform.DEFAULT_DISPLAY for the family scheme.
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

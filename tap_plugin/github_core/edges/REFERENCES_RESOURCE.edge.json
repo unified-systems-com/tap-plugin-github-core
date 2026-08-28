@@ -1,7 +1,7 @@
 {
   "slug": "REFERENCES_RESOURCE__github_core",
   "name": "References Resource",
-  "description": "GitHub plumbing names or depends on a resource on the grid (conservative exact-match link via the github_grid_link_manifest). Does not claim deployment, ownership, or runtime control. Derived link — not hotlink-backed.",
+  "description": "GitHub plumbing names or depends on a resource on the grid (conservative exact-match link via the github_grid_link_manifest). Does not claim deployment, ownership, or runtime control. Derived link — not hotlink-backed. Deliberately carries NO default `github.observation`: its sources span both observation layers (a workflow is a declaration, a run/job is an execution), so the layer is a property of the source endpoint, not of the edge type. The enrichment pass sets it per emitted edge from the source model's own default (req-github-core-dimensions-6).",
   "sources": [
     "github_core__github_workflow",
     "github_core__github_actions_run",

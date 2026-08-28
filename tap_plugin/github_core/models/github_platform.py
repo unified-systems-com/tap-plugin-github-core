@@ -23,7 +23,10 @@ class GithubPlatform(BaseModel):
     ENTITY_NAME: ClassVar[str] = "GitHub Platform"
     ENTITY_DESCRIPTION: ClassVar[str] = "A GitHub platform instance (github.com or a GHES host)."
     ENTITY_ICON: ClassVar[str] = "github-platform"
-    DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {"github.platform": "github.com"}
+    DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
+        "github.platform": "github.com",
+        "github.observation": "declaration",
+    }
     # GitHub family palette: a cool blue/neutral scheme that reads as "external
     # source system," distinct from aws_core's warm beige in-boundary nodes.
     # Graduated by nesting depth — platform (outer) is a near-white frame with a

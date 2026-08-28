@@ -66,7 +66,15 @@ def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
 
     Not repo-scoped: one organization ruleset applies to many repositories and must be ONE node
     that many repositories point at, or the question "what does this ruleset protect" becomes a
-    string comparison across duplicates.
+    string comparison across duplicates. Measured on the fixture org: 3 organization rulesets
+    reported by 19 repositories = 57 attachments over 3 nodes.
+
+    The owner prefix is belt-and-braces. GitHub's ruleset `databaseId` was measured to be
+    PLATFORM-global rather than per-account — org- and repo-sourced ids interleave when
+    sorted, id order is exactly creation order, and an org owning six rulesets holds ids near
+    20.6 million rather than 1-6 — so the bare id would also have keyed correctly. Recorded so
+    nobody re-derives it: the prefix costs nothing and a natural key cannot be changed once
+    nodes exist.
     """
     return _id("github_core__github_ruleset", f"{owner}#{ruleset_id_int}")
 

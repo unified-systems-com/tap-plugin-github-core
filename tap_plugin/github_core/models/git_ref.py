@@ -36,6 +36,7 @@ class GitRef(BaseModel):
     )
     ENTITY_ICON: ClassVar[str] = "git-ref"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
+        "github.observation": "declaration",
         "github.platform": "github.com",
         "github.surface": "git",
     }
