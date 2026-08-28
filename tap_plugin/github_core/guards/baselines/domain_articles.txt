@@ -1,0 +1,10 @@
+# Domain-article debt for github_core — specs/spec-domain-articles.md (req-domain-articles-coverage).
+#
+# One line per unmet obligation: a missing article, a missing section, an unpinned
+# authoritative source, or a FIELD_CRUD_SCHEMA key with no paragraph. This file only
+# shrinks. A new finding fails the ratchet, and so does an entry that no longer occurs,
+# so a written article cannot linger here as a permanent exception.
+#
+# Seeded at 17 (every node and edge type, no articles) on 2026-08-27 and drained to
+# zero in the same change. It is empty on purpose: adding a model or a field without
+# its paragraph reds the build rather than landing here.

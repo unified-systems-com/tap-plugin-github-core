@@ -17,7 +17,10 @@ class GithubRepository(BaseModel):
     ENTITY_NAME: ClassVar[str] = "GitHub Repository"
     ENTITY_DESCRIPTION: ClassVar[str] = "A repository hosted on GitHub."
     ENTITY_ICON: ClassVar[str] = "github-repository"
-    DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {"github.platform": "github.com"}
+    DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
+        "github.platform": "github.com",
+        "github.observation": "declaration",
+    }
     # Inner level of the GitHub nesting palette — deeper accent blue; the white
     # workflow leaf cards sit on this bed. See github_platform for the scheme.
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

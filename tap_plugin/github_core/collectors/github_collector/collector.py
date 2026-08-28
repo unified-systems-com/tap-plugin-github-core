@@ -42,6 +42,7 @@ from .identity import (
     platform_id,
     repository_id,
     run_id,
+    ruleset_id,
     runner_id,
     workflow_id,
 )
@@ -319,6 +320,10 @@ class GithubCollector(CollectorBase):
         # github_app nodes are singletons shared across repos; dedupe the node
         # emission across the whole run (the ENABLED_ON edges still fan in).
         self._emitted_app_ids: set[str] = set()
+        # Rulesets are singletons too, and far more fan-in than apps: an
+        # organization-sourced ruleset is reported by every repository it governs
+        # (measured: 6 rulesets across 60 attachments on a 19-repo org).
+        self._emitted_ruleset_ids: set[str] = set()
 
         # --- secret resolution (unrecoverable on failure) ---
         try:
@@ -735,6 +740,9 @@ class GithubCollector(CollectorBase):
         )
         edges.append(self._edge("OWNS_REPO__github_core", account_uuid, repo_uuid, repo_dims))
 
+        # rulesets — the gate. Already present in the config layer, previously discarded.
+        self._emit_rulesets(gql, repo_dims, nodes)
+
         # The Actions OIDC issuer (synthesized once as a platform singleton) is
         # enabled for every repo's workflows to mint identity tokens — mirror the
         # github_app ENABLED_ON pattern so it connects into the repo it serves.
@@ -915,6 +923,66 @@ class GithubCollector(CollectorBase):
                     edges.append(self._edge("EXECUTED_ON__github_core", j_uuid, rn_uuid, observation_dims))
 
     # ---------- helpers ----------
+
+    def _emit_rulesets(
+        self,
+        gql: dict[str, Any] | None,
+        repo_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+    ) -> None:
+        """Emit one node per ruleset governing this repository (req-github-core-ruleset).
+
+        Deduped by GitHub's ruleset `databaseId` across the whole run: an
+        organization-sourced ruleset is a single rule set projected onto every repo in
+        scope, so nineteen repositories reporting it must collapse to one node rather
+        than nineteen copies that can drift apart.
+
+        The `databaseId` is why this exists at all. Every other ruleset surface — the
+        bypass-actor list, rule suites (bypass *events*), and version history — is keyed
+        by it, and the config query returned rulesets without it, so none of them were
+        reachable.
+
+        Source: the GraphQL config layer only. A repos-only scope with no GraphQL
+        enumeration emits no rulesets rather than falling back to REST, because the
+        REST road costs one call per repository for data already in hand when the
+        config layer ran.
+        """
+        if not gql:
+            return
+        ruleset_dims = {**repo_dims, "github.surface": "rules"}
+        for rs in (gql.get("rulesets") or {}).get("nodes") or []:
+            db_id = rs.get("databaseId")
+            if db_id is None:
+                # No id means no route to bypass actors, rule suites or history. Skip
+                # rather than land a node that cannot be followed.
+                continue
+            if str(db_id) in self._emitted_ruleset_ids:
+                continue
+            self._emitted_ruleset_ids.add(str(db_id))
+            source = rs.get("source") or {}
+            source_type = str(source.get("__typename") or "")
+            nodes.append(
+                node_envelope(
+                    entity_id=ruleset_id(db_id),
+                    entity_type="github_core__github_ruleset",
+                    name=str(rs.get("name") or db_id),
+                    dimensions=ruleset_dims,
+                    fields={
+                        "ruleset_id": db_id,
+                        # Fall back to the id, matching the entity name above: `name` is
+                        # minLength-1 validated, so an unnamed ruleset would otherwise fail
+                        # validation and be dropped — the exact "degraded field discards the
+                        # whole ruleset" failure req-github-core-ruleset-6 forbids.
+                        "name": str(rs.get("name") or db_id),
+                        "enforcement": str(rs.get("enforcement") or ""),
+                        "target": str(rs.get("target") or ""),
+                        "source_type": source_type,
+                        "source_name": str(source.get("login") or source.get("nameWithOwner") or ""),
+                        "configuration": {},
+                        "tags": {},
+                    },
+                )
+            )
 
     def _emit_github_app(
         self,

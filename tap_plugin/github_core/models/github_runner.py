@@ -25,6 +25,7 @@ class GithubRunner(BaseModel):
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.platform": "github.com",
         "github.surface": "actions",
+        "github.observation": "declaration",
     }
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {

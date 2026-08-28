@@ -6,6 +6,7 @@ from tap_plugin.github_core.models.github_actions_run import GithubActionsRun
 from tap_plugin.github_core.models.github_app import GithubApp
 from tap_plugin.github_core.models.github_platform import GithubPlatform
 from tap_plugin.github_core.models.github_repository import GithubRepository
+from tap_plugin.github_core.models.github_ruleset import GithubRuleset
 from tap_plugin.github_core.models.github_runner import GithubRunner
 from tap_plugin.github_core.models.github_workflow import GithubWorkflow
 
@@ -16,6 +17,7 @@ __all__ = [
     "GithubApp",
     "GithubPlatform",
     "GithubRepository",
+    "GithubRuleset",
     "GithubRunner",
     "GithubWorkflow",
 ]

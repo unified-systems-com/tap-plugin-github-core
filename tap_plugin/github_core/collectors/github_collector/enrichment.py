@@ -107,6 +107,11 @@ def resolve_links(
             result.skipped_rules.append(SkippedRule(rule["name"], missing))
             continue
         source_nodes = _fetch_source_nodes(rule["source_entity_type"], repos)
+        # Link edges span observation layers: a workflow source is a declaration, a
+        # run/job source is an execution. The edge type therefore declares no default
+        # observation; it is derived here from the source model's own default so the
+        # layer is stated positively on every emitted edge (req-github-core-dimensions-6).
+        rule_dimensions = _dimensions_for_rule(edge_default_dimensions, rule["source_entity_type"])
         near_match_pattern = rule.get("near_match_pattern")
         for source_node in source_nodes:
             source_data = source_node.get("data") or {}
@@ -124,7 +129,7 @@ def resolve_links(
                             edge_type=rule["edge_type"],
                             source_id=source_uuid,
                             target_id=tgt_uuid,
-                            dimensions=edge_default_dimensions,
+                            dimensions=rule_dimensions,
                             properties={"link_rule": rule["name"], "matched_value": value},
                         )
                     )
@@ -171,6 +176,23 @@ def resolve_links(
                                 )
                             )
     return result
+
+
+def _dimensions_for_rule(base_dimensions: dict[str, str], source_entity_type: str) -> dict[str, str]:
+    """Return the edge dimensions for a link rule, carrying the source's observation layer.
+
+    A cross-type link edge inherits `github.observation` from the model on its
+    source end — the one derivation of "which DCOM layer is this observation",
+    read from the model that already declares it rather than from a second map
+    kept in step (req-github-core-dimensions-6). Non-github_core sources simply
+    declare no observation and none is added.
+    """
+    from tap_grid.registry import get_model_class
+
+    observation = getattr(get_model_class(source_entity_type), "DEFAULT_DIMENSIONS", {}).get("github.observation")
+    if observation is None:
+        return base_dimensions
+    return {**base_dimensions, "github.observation": observation}
 
 
 # ---------------------------------------------------------------------------

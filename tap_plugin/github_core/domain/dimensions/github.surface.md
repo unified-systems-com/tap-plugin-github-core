@@ -1,0 +1,65 @@
+# `github.surface`
+
+## Blurb
+
+Names which part of GitHub an observation came from — and, because GitHub's surfaces have different permissions and different APIs, which credential could see it.
+
+## Purpose
+
+GitHub is not one API. Actions, Apps and rules are separate product surfaces with separate endpoints, separate fine-grained permissions, and — as this plugin learned by executing calls rather than reading documentation — genuinely different reachability. Actions data is REST-only and reads at `repository:actions:read`. App installations are GitHub-App-only and return 404 to any personal access token. Ruleset detail strips its bypass-actor list unless the caller has *write* access.
+
+`github.surface` records which of those worlds a node or edge came from. That makes it more than a tidy label: it is the closest thing the grid has to a machine-legible statement of *why a set of nodes might be empty*, because emptiness on a surface almost always traces to the credential that surface demanded.
+
+## Goals
+
+- Partition observations by product surface, so a query can scope to one API's world.
+- Keep the "which permission produced this" question answerable at the dimension level.
+- Use GitHub's own vocabulary for its own surfaces rather than inventing parallel words.
+
+## Identity
+
+The key is `github.surface`, in the `github.` namespace this plugin owns; effectively immutable, as every dimension key is.
+
+**Values follow GitHub's own subcategory names for the endpoints they cover** — `actions`, `apps`, `rules` — rather than a taxonomy of our own. That is the corpus's Naming rule applied to dimensions: where the source system already has a word, use its word. It also means a reader who knows GitHub's API docs can predict the value without consulting this article.
+
+## Boundaries
+
+- **Not the tenant.** Which GitHub instance is [`github.platform`](github.platform.md).
+- **Not declared-versus-executed.** That is [`github.observation`](github.observation.md), and the two are orthogonal: `actions` covers both a workflow definition and a run.
+- **Not carried by everything.** The containment spine deliberately omits it. A platform, an account, a repository and the `HOSTS_ACCOUNT` / `OWNS_REPO` edges are not facts about any one surface, so stamping them would assert a scope they do not have.
+- **Not a permission record.** The surface *implies* the permission that reads it, and this article names those implications, but the dimension does not encode a credential, a grant, or whether the read succeeded.
+- **Not exhaustive.** The value set grows as the plugin reaches new surfaces; secrets, environments and runner groups are corpus concepts whose surfaces are not yet collected.
+
+## Neutrality
+
+**Vendor-specific, and unusually so.** Both the key and every value name GitHub's own product structure. Another forge would not have `actions`, `apps` and `rules`; it would have its own surfaces. When neutral types are extracted this dimension does not travel with them — it is precisely the part that stays behind.
+
+## Observability
+
+**Declared, never fetched**, and applied at creation from type and edge-type defaults, so the stamp itself is never ambiguous.
+
+What the *values* imply about observability is the useful part, and each was established by executing a call:
+
+- `actions` — reads at `repository:actions:read`, except workflow YAML, which needs `repository:contents:read`. **REST only: GitHub's GraphQL API exposes no Actions runs or jobs at all**, so there is no batched alternative. A credential with `actions:read` but not `contents:read` yields workflow nodes that are real and nearly empty.
+- `apps` — installed Apps come from an endpoint that is **GitHub-App-only and returns 404 to any PAT**, whatever its permissions. A PAT-based collection produces an apps population of first-party services only, and it looks complete, because a 404 is not an error the way a 403 is.
+- `rules` — the ruleset list and detail read at `administration: read`, but the detail **silently strips `bypass_actors`** unless the caller has write access to the ruleset, and version history for an organization-sourced ruleset is unreachable by the repository path.
+
+The pattern across all three: an empty surface is ambiguous, and the ambiguity resolves in the reassuring direction. Any view built per-surface owes its reader three states — none, some, and not-observable — not two.
+
+## Authoritative Source
+
+- **Source:** `specs/spec-github-core-v0.md` `req-github-core-dimensions` (surface on Actions models); GitHub REST API subcategory names for Actions, Apps and Rules; the fine-grained personal-access-token permissions reference
+- **Version:** REST API version `2022-11-28`; declarations as of commit `46a34b8` plus the in-flight ruleset work
+- **Retrieved:** 2026-08-27 (the App-only 404, the `bypass_actors` strip and the GraphQL absence all verified by execution, not read from documentation)
+
+## Prior Art
+
+- `specs/spec-github-core-v0.md` `req-github-core-dimensions` (2026-08-27) — the dimension strategy.
+- `git-serious-tap/docs/doc-git-serious-cicd-security-prior-art.md` §3.9 (2026-08-27) — the verified per-endpoint permission table these implications are drawn from.
+- `specs/spec-github-core-vocabulary.md` (2026-08-27) — the Naming rule: use the source's own word where one exists, which is why the values are GitHub's subcategory names.
+
+## Values
+
+- `actions` — the GitHub Actions surface: workflow definitions, runs, jobs and self-hosted runners, plus the edges among them. The plugin's largest surface by both node count and analytical weight.
+- `apps` — the GitHub Apps surface: registered applications and their reach onto repositories. Also carries the Actions OIDC issuer, which is not an App but reaches a repository through the same "enabled here" relationship.
+- `rules` — the rulesets surface: the enforcement gates on a repository's refs. GitHub's own subcategory name for these endpoints, chosen over inventing a parallel word for the same thing.

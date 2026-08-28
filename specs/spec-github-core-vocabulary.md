@@ -208,8 +208,24 @@ readable catalogue, a collector can land it on the grid so "what changed" become
 2. ~~Where `package_version` lives.~~ **Settled:** `supply_chain_core` (see decisions above).
 3. ~~**`BYPASSES` observability.**~~ **SETTLED EMPIRICALLY 2026-08-27, and the answer is worse than
    expected.** GitHub returns `bypass_actors` only to a caller with **write access to the ruleset**.
-   Measured against our own org: an owner-minted fine-grained PAT sees it; a **GitHub App with
-   `administration: read` does not** (`bypass_actors` absent from the ruleset detail, HTTP 200).
+   Measured against our own org, and **read the next paragraph before relying on the comparison**:
+   an owner-minted fine-grained PAT sees it; a **GitHub App with `administration: read` does not**
+   (`bypass_actors` absent from the ruleset detail, HTTP 200).
+
+   **The comparison was admin-versus-read, not read-versus-read (corrected 2026-08-27).** The PAT
+   used for every early probe carries an envelope description reading *"Read-only fine-grained
+   GitHub PAT"* that was authored by hand and never verified; it reports `{"admin": true,
+   "maintain": true, "push": true, ...}` on `unified-systems-com/tap`. A fine-grained PAT inherits
+   its user's repository role, and a GitHub App has no user to inherit from — which is the actual
+   mechanism behind the asymmetry recorded here.
+
+   **What the measurement established, and what it did not.** Every ruleset in the org has
+   *genuinely zero* bypass actors, so for the most part "empty" and "withheld" are the same bytes
+   and no credential could have discriminated them. One thing *was* discriminating: the PAT
+   received `bypass_actors: []` while the App received **no key at all**, and absent-key versus
+   present-and-empty does establish that gating exists. What has never been observed is **what the
+   App receives when the list is populated** — no populated list existed until a probe ruleset was
+   built on 2026-08-27, and the App half of that probe is still unmeasured.
 
    Three consequences that are now facts rather than precautions:
 
@@ -224,10 +240,73 @@ readable catalogue, a collector can land it on the grid so "what changed" become
      access to the thing being audited. We do not request write. This is a limitation to publish,
      not to engineer around.
 
-   Partial signals worth testing before accepting the gap: `current_user_can_bypass` is returned on
-   the ruleset detail (answers "can *this* credential bypass", not "who else can"), and the
-   rule-suite / rule-insights endpoints may expose actual bypass *events* even where the actor list
-   is withheld — detection instead of enumeration.
+   **Both leads were run to ground 2026-08-27, and the answer splits cleanly:**
+
+   - **Enumeration has a hard ceiling.** A read-only App is refused the actor list by *every* road:
+     current state (field absent, HTTP 200), org-level ruleset endpoints (403), and ruleset version
+     history (403). GitHub is consistent rather than leaky, so there is no back door and no
+     disclosure inconsistency to report. Note the App *was* granted `organization_administration:
+     read` and still received 403. **Two distinct facts live here and only one is understood:**
+
+     *Understood — the stripped field is deliberate.* GitHub documents the rationale for the
+     detail endpoint verbatim: *"To prevent leaking sensitive information, the `bypass_actors`
+     property is only returned if the user making the API request has write access to the
+     ruleset."* Design, not accident.
+
+     *Explained — one rule accounts for every observation (corrected 2026-08-27).* The earlier
+     entry recorded the 403s as an upstream over-restriction contradicting GitHub's published
+     read-level permission table, citing two sibling 200s as the receipt. **That framing does not
+     survive.** The sibling 200s are not a contradiction: `rule-suites` and the plain ruleset list
+     *cannot carry* `bypass_actors` in their returned shape, so they were never subject to the gate.
+     A single rule fits everything measured:
+
+     > **Any response that can carry `bypass_actors` requires write access to the ruleset.**
+     > repo list (field not returned) → 200 · detail (field returned) → 200 with the field stripped ·
+     > history (full prior state, field returned) → 403 · org list → 403.
+
+     The App holds `read` everywhere and is therefore refused everywhere the field could appear.
+     This is consistent behaviour, not a defect, and **there is nothing here worth reporting to
+     GitHub** beyond a documentation-completeness nit: the permission reference states the endpoint
+     level without mentioning the field-driven escalation, and the mechanism is inconsistent
+     (strip in one place, refuse in another) even where the intent is not.
+
+     *Still open — the rule rests on one unobserved premise.* It requires that `GET /orgs/{org}/rulesets`
+     returns `bypass_actors` in its response shape. **Nobody has ever seen a successful response from
+     that endpoint** — the App gets 403 and a `read:org` token gets 404 — so "the org list carries the
+     field" is inferred from the OpenAPI schema, not measured. Note the repo list shares that same
+     declared schema and yet omits the field in practice, so the schema is not reliable evidence of
+     the returned shape. If the org list behaves like the repo list, the rule predicts 200 and we
+     observed 403, and the org-scope 403 is unexplained again. One successful org-list read settles
+     it. Recorded as an open premise deliberately: adopting an appealing unifying rule ahead of its
+     discriminating measurement is the specific error made twice on 2026-08-27.
+
+     *Do not resolve any of this by requesting write access.* The read-only posture is the product
+     claim; publish the limitation instead.
+
+   - **Detection has no ceiling.** `/repos/{o}/{r}/rulesets/rule-suites` works on the read-only App
+     (HTTP 200), returning per-push evaluations with `actor_id`, `actor_name`, `result`
+     (`pass|fail|bypass`) and `rule_evaluations` on the detail. **`time_period` silently defaults to
+     `day`** — omit it and an empty list reads as "nobody has ever bypassed"; max is `month`.
+
+   **So the operating model is: a privileged baseline once, read-only drift thereafter.** History is
+   part of the baseline, not the drift — and the baseline needs `admin:org`, because the repo-path
+   history road serves only `source_type: Repository` rulesets (57 of 60 attachments on our own org
+   are org-sourced).
+
+   **Why the baseline must be stored, not inferred from events:** the `repository_ruleset` webhook's
+   `changes` covers `name`, `enforcement`, `conditions` and `rules` — **not `bypass_actors`**. GitHub
+   will not tell a subscriber the actor list changed; a subscriber must diff against stored state.
+
+   **What this bought, and it is the case for the whole product.** Ruleset version history on
+   `main-required-checks` shows `RepositoryRole 5` (admin) with `bypass_mode: always` from
+   2026-08-09 13:11 until 2026-08-21 09:13, and 28 pushes went through it. The ruleset reads
+   `bypass_actors: []` today. **Current-state enumeration erases twelve days during which the gate
+   was not a gate**; only history recovers it. No snapshot tool at any price finds that.
+
+   Field corrections for the model: `bypass_mode` is `always | pull_request | exempt`;
+   `current_user_can_bypass` is `always | pull_requests_only | never | exempt` and is returned only
+   from the repository-level endpoint; `actor_type` is
+   `Integration | OrganizationAdmin | RepositoryRole | Team | DeployKey | User`.
 4. **When the neutral substrate is extracted.** 11 concepts are marked neutral and the kernel test
    confirms they populate from a non-forge project. Extraction while a slug change is still a
    re-collect is cheaper than a migration later.

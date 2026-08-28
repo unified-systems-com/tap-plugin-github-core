@@ -5,6 +5,7 @@
   "sources": ["github_core__github_account"],
   "targets": ["github_core__github_repository"],
   "default_dimensions": {
-    "github.platform": "github.com"
+    "github.platform": "github.com",
+    "github.observation": "declaration"
   }
 }
