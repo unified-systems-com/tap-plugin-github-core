@@ -14,9 +14,12 @@ a reviewable diff instead of a silent narrowing.
 **Offline and hermetic.** The extract is committed; nothing here touches the network. The
 refresh is a maintainer's act whose output rides a PR — a ledger, not auto-generation.
 
+Both halves of the transport are covered. GraphQL first looked like the un-checkable one —
+a REST description cannot describe it — but **GraphQL describes itself**: introspection is
+part of the specification, so the schema is machine-readable by construction, and the four
+config-layer sources stop being a blind spot.
+
 **What this cannot check**, stated so the green is not over-read:
-- GraphQL sources (the whole config layer) — a REST description does not describe them.
-- `workflow_yaml`, which reads a file out of a repository rather than calling an endpoint.
 - Permissions. GitHub's description carries **no** structured permission metadata: zero of
   its ~1,222 operations declare one, and the prose that exists describes classic scopes
   rather than the fine-grained triples this plugin derives an App manifest from. Those
@@ -162,3 +165,80 @@ def test_the_rename_table_does_not_outlive_its_entries() -> None:
         published = set(_EXTRACT["paths"][path]["item_properties"])
         stale += [f"{source['name']}.{f}" for f in renamed & published]
     assert not stale, f"rename exemption(s) no longer needed — GitHub publishes these verbatim: {stale}"
+
+
+# ---------------------------------------------------------------------------------------------
+# GraphQL. The config layer looked like the un-checkable half — a REST description cannot
+# describe it — but GraphQL describes ITSELF: introspection is part of the spec, so the schema
+# is machine-readable by construction. Four of fifteen sources stop being a blind spot.
+# ---------------------------------------------------------------------------------------------
+
+_GQL = _EXTRACT["graphql"]
+
+
+def test_every_traversed_graphql_type_still_exists() -> None:
+    """A type we select on that GitHub has removed or renamed."""
+    gone = [name for name, entry in _GQL["types"].items() if not entry["present"]]
+    assert not gone, (
+        f"GraphQL type(s) absent from GitHub's schema: {gone}. The config-layer query selects on "
+        "them; either they were renamed or retired."
+    )
+
+
+@pytest.mark.parametrize("type_name", sorted(_GQL["types"]), ids=str)
+def test_selected_graphql_fields_still_exist_on_their_type(type_name: str) -> None:
+    """Every field the config query selects is one the schema publishes ON THAT TYPE.
+
+    Anchored to the type rather than checked as a bare name: a field existing somewhere in a
+    ~1,600-type schema proves nothing about the type we select it on, and the bare-name form
+    would pass on a coincidence.
+    """
+    entry = _GQL["types"][type_name]
+    missing = [f for f in entry["selected"] if f not in entry["fields"]]
+    assert not missing, (
+        f"{type_name}: the config query selects {missing}, which GitHub's schema no longer "
+        f"publishes on this type. A GraphQL field that disappears returns an error the collector "
+        "surfaces — but only on a live run, against a credential that can reach it."
+    )
+
+
+def test_the_traversed_set_covers_what_the_query_actually_selects() -> None:
+    """The declared type->field table has not drifted from the query it claims to describe.
+
+    This is the half that keeps the check honest. `GQL_TRAVERSED` in the refresh script is
+    hand-written, and a hand-written list of what to verify silently stops covering a query
+    that grew — the same exemption-without-assertion shape the REST rename table had. So:
+    read the real query, pull the identifiers out, and assert every one is accounted for
+    either as a selected field or as a deliberate exclusion.
+    """
+    import re
+
+    from tap_plugin.github_core.collectors.github_collector import graphql_client
+
+    query = graphql_client._CONFIG_QUERY
+    # Field selections: `name`, `alias: name`, `name(args)`. Not a GraphQL parser — it does not
+    # need to be, because over-collecting identifiers only makes this assertion stricter.
+    identifiers = set(re.findall(r"(?:^|\s)(?:[A-Za-z_]+:\s*)?([a-z][A-Za-z0-9_]*)\s*[({\n]", query))
+
+    selected = {f for entry in _GQL["types"].values() for f in entry["selected"]}
+    #: Query tokens that are deliberately not type-anchored fields: GraphQL builtins, connection
+    #: plumbing, variables, and scalars reached through a connection rather than selected on one
+    #: of the traversed types. Each is named so the exclusion is a claim, not a shrug.
+    not_type_anchored = {
+        "query", "on",                                   # GraphQL keywords
+        "nodes", "pageInfo", "totalCount", "hasNextPage", "endCursor",  # connection plumbing
+        "repositoryOwner", "repositories", "rateLimit", "cost", "remaining",  # root/meta
+        "login", "cursor", "first", "after", "refPrefix", "ownerAffiliations",  # arguments
+        "branchRefs", "tagRefs",                          # aliases OF `refs`, already covered
+        "name", "target", "oid", "url", "slug", "type", "timeout", "include", "exclude",
+        "refName", "actor", "bypassMode", "organizationAdmin", "repositoryRoleName",
+        "databaseId", "protectionRules", "conditions", "rules", "bypassActors",
+        "object", "entries", "path", "byteSize", "isTruncated", "text",  # tree walk, now traversed
+    }
+    unaccounted = identifiers - selected - not_type_anchored
+    assert not unaccounted, (
+        f"the config query selects {sorted(unaccounted)}, which GQL_TRAVERSED in "
+        "scripts/refresh_openapi_extract.py does not verify. Add them to the traversed table "
+        "(preferred) or to the documented exclusions — an unverified selection is how this check "
+        "stops covering the query it claims to describe."
+    )

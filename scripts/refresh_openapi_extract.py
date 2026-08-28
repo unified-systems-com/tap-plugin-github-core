@@ -38,6 +38,30 @@ from pathlib import Path
 SPEC_REPO = "github/rest-api-description"
 SPEC_PATH = "descriptions/api.github.com/api.github.com.json"
 SPEC_BRANCH = "main"
+
+#: GraphQL describes itself — introspection is part of the spec, so the config layer is not
+#: the un-checkable half it first appears to be. GitHub does not publish the introspection
+#: result in its own repo, but octokit generates it from the live API and keeps it current.
+GQL_REPO = "octokit/graphql-schema"
+GQL_PATH = "schema.json"
+GQL_BRANCH = "main"
+
+#: The GraphQL types this collector actually traverses, and the fields it selects on each.
+#: Anchored to the TYPE rather than checked as bare names, because a field existing somewhere
+#: in a 1,600-type schema proves nothing about the type we select it on.
+GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
+    "Repository": ("nameWithOwner", "databaseId", "isArchived", "isFork", "visibility",
+                   "defaultBranchRef", "rulesets", "environments", "refs", "object"),
+    "RepositoryRuleset": ("databaseId", "name", "enforcement", "target", "conditions",
+                          "rules", "bypassActors"),
+    "RepositoryRulesetBypassActor": ("bypassMode", "organizationAdmin", "repositoryRoleName", "actor"),
+    "Environment": ("databaseId", "name", "protectionRules"),
+    "Ref": ("name", "target"),
+    "Tree": ("entries",),
+    "TreeEntry": ("name", "path", "object"),
+    "Blob": ("byteSize", "isTruncated", "text"),
+    "Tag": ("target",),
+}
 _HERE = Path(__file__).resolve().parent
 MANIFEST = _HERE.parent / "tap_plugin/github_core/collectors/github_collector/github_collection_manifest.json"
 EXTRACT = _HERE.parent / "tap_plugin/github_core/collectors/github_collector/github_openapi_extract.json"
@@ -105,16 +129,49 @@ def _item_properties(op: dict, spec: dict, item_path: str | None) -> list[str]:
     return sorted((schema.get("properties") or {}).keys())
 
 
-def _resolve_commit() -> str:
-    """The commit `main` points at right now, so the fetch below is reproducible."""
-    url = f"https://api.github.com/repos/{SPEC_REPO}/commits/{SPEC_BRANCH}"
+def _resolve_commit(repo: str, branch: str) -> str:
+    """The commit `branch` points at right now, so the fetch below is reproducible."""
+    url = f"https://api.github.com/repos/{repo}/commits/{branch}"
     request = urllib.request.Request(url, headers={"Accept": "application/vnd.github.sha"})
     with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 — constant https URL
         return response.read().decode("utf-8").strip()
 
 
+def _graphql_extract() -> dict:
+    """Fields the schema publishes on each type we traverse, pinned to a commit.
+
+    Same shape and same discipline as the REST half: pin, extract only what we depend on,
+    commit the extract so the tests stay offline.
+    """
+    commit = _resolve_commit(GQL_REPO, GQL_BRANCH)
+    url = f"https://raw.githubusercontent.com/{GQL_REPO}/{commit}/{GQL_PATH}"
+    with urllib.request.urlopen(url, timeout=180) as response:  # nosec B310 — constant https host
+        raw = response.read()
+    document = json.loads(raw.decode("utf-8"))
+    schema = document.get("data", document).get("__schema", {})
+    by_name = {t["name"]: t for t in schema.get("types", [])}
+
+    types: dict[str, dict] = {}
+    for type_name, selected in GQL_TRAVERSED.items():
+        entry = by_name.get(type_name)
+        if entry is None:
+            types[type_name] = {"present": False, "fields": [], "selected": sorted(selected)}
+            continue
+        types[type_name] = {
+            "present": True,
+            "fields": sorted(f["name"] for f in (entry.get("fields") or [])),
+            "selected": sorted(selected),
+        }
+    return {
+        "commit": commit,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "url": url,
+        "types": types,
+    }
+
+
 def build() -> dict:
-    commit = _resolve_commit()
+    commit = _resolve_commit(SPEC_REPO, SPEC_BRANCH)
     url = f"https://raw.githubusercontent.com/{SPEC_REPO}/{commit}/{SPEC_PATH}"
     with urllib.request.urlopen(url, timeout=120) as response:  # nosec B310 — constant https host
         raw = response.read()
@@ -157,6 +214,7 @@ def build() -> dict:
         "spec_sha256": digest,
         "spec_url": f"https://raw.githubusercontent.com/{SPEC_REPO}/{commit}/{SPEC_PATH}",
         "paths": out,
+        "graphql": _graphql_extract(),
     }
 
 
