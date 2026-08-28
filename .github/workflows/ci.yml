@@ -8,9 +8,14 @@
 # Since 2026-08-08 core is PUBLIC on the unified-systems-com org, which removed both of
 # the old silent-failure prerequisites: public reusable workflows are callable from any
 # repo (no Actions access_level sharing needed), and core can be checked out with no
-# credential at all. `harness_pat` is still plumbed through for now — retiring
-# TAP_CORE_RO_PAT is a separate, deliberate step — but a missing/expired value is no
-# longer fatal to checkout.
+# credential at all. This caller therefore passes NO secrets: `harness_pat` was only ever
+# for reading core while core was private, and the reusable workflow falls back to
+# `github.token`, which reads a public repo anonymously.
+#
+# The CAPABILITY is untouched upstream and stays supported: plugin-ci.yml still declares
+# `harness_pat` (read a private core) and `plugins_ro_pat` (git-install PRIVATE sibling
+# plugins during boot), both optional. A plugin that needs either adds a `secrets:` block
+# back. Retiring the TAP_CORE_RO_PAT secret org-wide is still a separate, deliberate step.
 #
 # `boot_profile` is intentionally omitted: the Django-free conformance job (structure +
 # requires_tap compatibility floor) is the gate here. A plugin that needs a real stack
