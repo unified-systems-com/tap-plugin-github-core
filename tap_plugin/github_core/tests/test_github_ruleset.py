@@ -73,8 +73,15 @@ class TestGithubRuleset:
 class TestGithubRulesetIdentity:
     """req-github-core-ruleset-2: the key is the bare databaseId."""
 
-    def test_deterministic(self):
-        assert ruleset_id(20613528) == ruleset_id(20613528)
+    def test_derivation_is_pinned(self):
+        """The derived id is pinned to a literal, not compared against itself.
+
+        `ruleset_id(x) == ruleset_id(x)` cannot fail for a pure function — it asserts
+        nothing. The real risk is a change to the derivation (its namespace or its input
+        string) silently re-keying every ruleset node on every existing grid, which is
+        invisible to a self-comparison and caught by a pinned value.
+        """
+        assert str(ruleset_id(20613528)) == "cebdca2c-cf87-5863-8809-415f6a51af83"
 
     def test_int_and_str_agree(self):
         assert ruleset_id(20613528) == ruleset_id("20613528")
@@ -86,7 +93,16 @@ class TestGithubRulesetIdentity:
         three organization-sourced rulesets are reported by all nineteen repositories
         (57 of 60 attachments). A repo-scoped key would mint 57 nodes for 3 rulesets.
         """
-        assert ruleset_id(21242695) == ruleset_id(21242695)
+        # Asserted as a pinned literal keyed on the ruleset id ALONE. The previous form
+        # compared the call against itself, which cannot detect a repo-scoped key — the
+        # very thing this test is named for — because it never varies a repository.
+        # The collapse itself is asserted at the emitter, in
+        # `test_org_ruleset_seen_from_many_repos_emits_once`.
+        assert str(ruleset_id(21242695)) == "59636923-85bb-5534-be53-e08721c5210f"
+        assert ruleset_id.__code__.co_argcount == 1, (
+            "ruleset_id takes the databaseId and nothing else; a second parameter would "
+            "let a caller scope the key by repository and mint 57 nodes for 3 rulesets"
+        )
 
     def test_distinct_from_other_types_on_the_same_key(self):
         assert ruleset_id("dependabot") != github_app_id("dependabot")
