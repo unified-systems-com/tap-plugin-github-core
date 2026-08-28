@@ -32,7 +32,7 @@ The value is a property of *the observation*, not of the thing observed. The sam
 - **Not confidence or provenance.** Whether a link was observed or inferred is a separate question, carried by edge properties (`link_rule` / `matched_value` on the derived cross-grid edges). A declared fact can be inferred and an executed fact can be exact.
 - **Not a claim that the declaration produced the execution.** That join is [`EXECUTES_WORKFLOW`](../EXECUTES_WORKFLOW.md); this dimension only labels which side each end sits on.
 - **Not yet applied to `github_ruleset`.** The ruleset carries `github.surface: rules` and no observation value. Defensible — a ruleset is a gate, neither a pipeline declaration nor a pipeline run — but it is an open question rather than a settled one, and it is recorded here so the next reader knows it was noticed.
-- **`REFERENCES_RESOURCE` carries no observation value either**, and that is unresolved rather than deliberate: its source union spans a workflow, a run and a job, so a single value would be wrong for two thirds of its instances. Worth confirming with whoever set the dimension across the vocabulary.
+- **`REFERENCES_RESOURCE` carries no observation value either, and that one is deliberate.** Its source union spans a workflow, a run and a job, so no single value is true for more than a third of the edges it emits. The layer belongs to the *source endpoint*, not to the edge type; enrichment should stamp each emitted edge from its source's own default. Confirmed by the session that ran the dimension sweep.
 
 ## Neutrality
 
