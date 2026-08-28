@@ -1,4 +1,4 @@
-# EVALUATED_ON
+# EVALUATED_ON_REF
 
 ## Blurb
 
@@ -15,7 +15,7 @@ A bypass matters differently depending on where it landed. Going around required
 
 ## Identity
 
-Derived: `uuid5(ns, "EVALUATED_ON__github_core:<suite_uuid>:<ref_uuid>")`. A suite evaluates exactly one ref.
+Derived: `uuid5(ns, "EVALUATED_ON_REF__github_core:<suite_uuid>:<ref_uuid>")`. A suite evaluates exactly one ref.
 
 ## Boundaries
 

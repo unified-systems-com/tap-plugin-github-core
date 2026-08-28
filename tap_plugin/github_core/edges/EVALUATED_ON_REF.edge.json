@@ -1,6 +1,6 @@
 {
-  "slug": "EVALUATED_ON__github_core",
-  "name": "Evaluated On",
+  "slug": "EVALUATED_ON_REF__github_core",
+  "name": "Evaluated On Ref",
   "description": "The ref a rule suite evaluated a push against. Resolved to a git_ref node when that ref was collected; a suite naming a ref that has since been deleted simply carries no edge, and its `ref` field remains the record.",
   "sources": [
     "github_core__rule_suite"

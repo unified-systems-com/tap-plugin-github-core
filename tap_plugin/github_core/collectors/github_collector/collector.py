@@ -1800,7 +1800,7 @@ class GithubCollector(CollectorBase):
             if ref_uuid is not None:
                 edges.append(
                     self._edge(
-                        "EVALUATED_ON__github_core", suite_uuid, ref_uuid, dims,
+                        "EVALUATED_ON_REF__github_core", suite_uuid, ref_uuid, dims,
                         properties={
                             "before_sha": str(suite.get("before_sha") or ""),
                             "after_sha": str(suite.get("after_sha") or ""),

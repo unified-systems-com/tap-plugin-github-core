@@ -239,13 +239,13 @@ class TestRefResolution:
     def test_evaluated_on_edge_only_when_the_ref_was_collected(self) -> None:
         """A suite naming a since-deleted branch carries no edge; its `ref` field is the record."""
         _, edges, _, _ = _collect(_FakeClient())
-        assert not _edges_of(edges, "EVALUATED_ON__github_core")
+        assert not _edges_of(edges, "EVALUATED_ON_REF__github_core")
 
         import uuid as _uuid
 
         ref = _FIXTURE["list_bypass"][0]["ref"]
         known = _uuid.uuid4()
         _, edges2, _, _ = _collect(_FakeClient(), ref_uuids={ref: known})
-        on_ref = _edges_of(edges2, "EVALUATED_ON__github_core")
+        on_ref = _edges_of(edges2, "EVALUATED_ON_REF__github_core")
         assert on_ref and on_ref[0]["edge"]["to_entity_id"] == str(known)
         assert on_ref[0]["edge"]["properties"]["after_sha"] == _FIXTURE["list_bypass"][0]["after_sha"]
