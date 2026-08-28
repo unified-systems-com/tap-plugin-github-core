@@ -107,7 +107,14 @@ def build() -> dict:
     with urllib.request.urlopen(SPEC_URL, timeout=120) as response:  # nosec B310 — constant https URL
         spec = json.loads(response.read().decode("utf-8"))
 
-    normalized = {re.sub(r"\{[a-zA-Z_]+\}", "{}", p): p for p in spec["paths"]}
+    # Map normalized-path -> the OPERATION ITSELF, not the path string. Re-indexing
+    # `spec["paths"][name]` with a name derived from the manifest reads as path construction
+    # from external input (SonarCloud flagged it); carrying the resolved object removes the
+    # pattern rather than annotating it, and is a lookup fewer besides.
+    normalized = {
+        re.sub(r"\{[a-zA-Z_]+\}", "{}", name): operations.get("get", {})
+        for name, operations in spec["paths"].items()
+    }
     manifest = json.loads(MANIFEST.read_text())
 
     out: dict[str, dict] = {}
@@ -115,11 +122,10 @@ def build() -> dict:
         path = source.get("path") or source.get("path_pattern")
         if not path or not path.startswith("/"):
             continue  # GraphQL sources and repo file paths are not in a REST description
-        real = normalized.get(re.sub(r"\{[a-zA-Z_]+\}", "{}", path))
-        if real is None:
+        op = normalized.get(re.sub(r"\{[a-zA-Z_]+\}", "{}", path))
+        if op is None:
             out[path] = {"source": source["name"], "present": False, "item_properties": []}
             continue
-        op = spec["paths"][real].get("get", {})
         out[path] = {
             "source": source["name"],
             "present": True,
