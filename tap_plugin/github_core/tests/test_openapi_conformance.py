@@ -76,10 +76,20 @@ def test_declared_fields_exist_in_the_response_schema(source: dict) -> None:
     """
     path = source.get("path") or source.get("path_pattern")
     entry = _EXTRACT["paths"][path]
-    published = set(entry["item_properties"])
-    if not published:
-        pytest.skip(f"{source['name']}: no item schema in the description to check against")
     declared = set(source.get("fields") or [])
+    published = set(entry["item_properties"])
+    # FAIL CLOSED. An earlier version skipped here, which turned every extractor limitation
+    # into a silently-passing check — and it was already happening: GitHub describes
+    # /users/{username} as a `oneOf` over public-user and private-user, the resolver did not
+    # understand composition, and so the `account` source's fields went unverified while the
+    # suite stayed green. That is the exact defect this file exists to catch, committed inside
+    # the catcher. If a source declares fields and we extracted no schema, the extractor is
+    # behind GitHub's spec and the answer is to fix it, not to shrug.
+    assert published or not declared, (
+        f"{source['name']}: {path} is published but no item schema was extracted, while the "
+        f"manifest declares {len(declared)} field(s). The refresh script cannot read this "
+        "response shape — extend it rather than letting the check pass on nothing."
+    )
     # Manifest field names are the names WE give the node; the collector maps some of them.
     # Only assert on the ones claiming to be verbatim response keys.
     unknown = {f for f in declared if f not in published} - _RENAMED_BY_THE_COLLECTOR.get(source["name"], set())
@@ -103,6 +113,8 @@ def test_declared_fields_exist_in_the_response_schema(source: dict) -> None:
 #: name that says what it is the id OF, because `id` on a node shared across four types is
 #: unreadable. That is a good decision the manifest simply cannot express yet.
 _RENAMED_BY_THE_COLLECTOR: dict[str, set[str]] = {
+    "account": {"github_id", "account_type"},             # id; type (renamed — `type` is unusable
+                                                         # as a column name on a typed node)
     "repository": {"github_id", "owner_login"},          # id; owner.login flattened
     "workflows": {"workflow_id"},                        # id
     "runs": {"run_id", "completed_at"},                  # id; updated_at read as completion

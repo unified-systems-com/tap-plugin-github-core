@@ -57,6 +57,27 @@ def _resolve(node: dict, spec: dict, depth: int = 0) -> dict:
     return node if isinstance(node, dict) else {}
 
 
+def _compose(schema: dict, spec: dict) -> dict:
+    """Flatten `allOf` / `oneOf` / `anyOf` into one property bag.
+
+    GitHub uses composition freely — `/users/{username}` is a `oneOf` over private-user and
+    public-user with a discriminator. A resolver that only understands `$ref` and `properties`
+    returns nothing for those, and "nothing" is indistinguishable from "no schema" downstream.
+
+    The UNION is the right answer for our purpose: we are asking "is this field name one GitHub
+    can return here", and under a discriminated union any variant's field qualifies.
+    """
+    merged: dict = {"properties": dict(schema.get("properties") or {})}
+    for keyword in ("allOf", "oneOf", "anyOf"):
+        for member in schema.get(keyword) or []:
+            resolved = _compose(_resolve(member, spec), spec)
+            merged["properties"].update(resolved.get("properties") or {})
+    for passthrough in ("type", "items"):
+        if passthrough in schema:
+            merged[passthrough] = schema[passthrough]
+    return merged
+
+
 def _item_properties(op: dict, spec: dict, item_path: str | None) -> list[str]:
     """Property names of ONE collected item, unwrapping the list envelope the manifest names.
 
@@ -64,18 +85,21 @@ def _item_properties(op: dict, spec: dict, item_path: str | None) -> list[str]:
     `runners` key, `[*]` means the response IS the array. Using it rather than guessing
     keeps the two files describing the same thing.
     """
-    schema = _resolve(
-        (((op.get("responses") or {}).get("200") or {}).get("content") or {})
-        .get("application/json", {})
-        .get("schema", {}),
+    schema = _compose(
+        _resolve(
+            (((op.get("responses") or {}).get("200") or {}).get("content") or {})
+            .get("application/json", {})
+            .get("schema", {}),
+            spec,
+        ),
         spec,
     )
     if item_path:
         key = item_path.split("[")[0]
         if key:
-            schema = _resolve((schema.get("properties") or {}).get(key, {}), spec)
+            schema = _compose(_resolve((schema.get("properties") or {}).get(key, {}), spec), spec)
     if schema.get("type") == "array":
-        schema = _resolve(schema.get("items", {}), spec)
+        schema = _compose(_resolve(schema.get("items", {}), spec), spec)
     return sorted((schema.get("properties") or {}).keys())
 
 
@@ -117,7 +141,12 @@ def build() -> dict:
 def main() -> int:
     fresh = build()
     check = "--check" in sys.argv
-    if check and EXTRACT.exists():
+    if check:
+        if not EXTRACT.exists():
+            # Fail closed. Writing the extract under --check would let a nightly "verify"
+            # step report success on a run that verified nothing.
+            print(f"{EXTRACT.name} is MISSING — nothing to check against.")
+            return 1
         if json.loads(EXTRACT.read_text()) == fresh:
             print("extract is current")
             return 0
