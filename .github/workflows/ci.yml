@@ -35,9 +35,13 @@ jobs:
     uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@main
     with:
       plugin_slug: github_core
-      # Pinned deliberately. `main` means "whatever core is today", which turns an
-      # unrelated core change into a surprise red here. Bump this on purpose.
-      harness_ref: main
+      # A full commit SHA, not a branch. The old value was `main` under a comment
+      # claiming it was "pinned deliberately" — which it was not: a branch moves, and
+      # this input selects code that EXECUTES in a job holding TAP_CORE_RO_PAT. That was
+      # tolerable while the job only ran Django-free structure validation; enabling the
+      # boot leg below makes the same mutable ref build an image and stand up a stack.
+      # Bump this on purpose, to a reviewed SHA.
+      harness_ref: 2f0ec95393b73266bb52f8ff6af6f3f09f6889ff # core main 2026-08-28
       # Opt into the boot-and-test leg. Without it this repo's OWN tests never execute
       # in its own gate: the conformance job is Django-free structure validation, so a
       # test importing a core module — or asserting anything about collection — is not
