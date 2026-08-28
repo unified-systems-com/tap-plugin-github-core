@@ -1,0 +1,100 @@
+"""The DCOM observation layer is a positive fact on both sides.
+
+Spec: plugins/github_core/specs/spec-github-core-v0.md
+(req-github-core-dimensions-4, -5, -6)
+
+The property under test is not "runs are executions" — that was already true.
+It is that the *config* layer is stated rather than implied, so a query for it
+reads `observation = "declaration"` and never `NOT observation = "execution"`.
+An object that declares no layer is a defect these tests are here to catch.
+"""
+
+import json
+from pathlib import Path
+
+import tap_plugin.github_core.models as github_models
+
+EDGES_DIR = Path(github_models.__file__).parent.parent / "edges"
+
+EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob"}
+EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "HAS_ACTIONS_JOB", "EXECUTED_ON"}
+# Sources span both layers, so the layer belongs to the endpoint, not the edge
+# type; the collector sets it per emitted edge (req-github-core-dimensions-6).
+LAYER_SPANNING_EDGES = {"REFERENCES_RESOURCE"}
+
+
+def _plugin_models() -> dict[str, type]:
+    return {
+        name: obj
+        for name, obj in vars(github_models).items()
+        if isinstance(obj, type) and hasattr(obj, "DEFAULT_DIMENSIONS") and hasattr(obj, "ENTITY_TYPE")
+    }
+
+
+def _edge_definitions() -> dict[str, dict]:
+    return {p.name.removesuffix(".edge.json"): json.loads(p.read_text()) for p in sorted(EDGES_DIR.glob("*.edge.json"))}
+
+
+class TestModelObservationLayer:
+    def test_every_model_declares_a_layer(self) -> None:
+        """No model may be in neither layer — absence is a defect, not a default."""
+        missing = [
+            name for name, cls in _plugin_models().items() if "github.observation" not in cls.DEFAULT_DIMENSIONS
+        ]
+        assert not missing, f"models with no github.observation layer: {sorted(missing)}"
+
+    def test_layer_matches_what_the_model_records(self) -> None:
+        for name, cls in _plugin_models().items():
+            expected = "execution" if name in EXECUTION_MODELS else "declaration"
+            assert cls.DEFAULT_DIMENSIONS["github.observation"] == expected, name
+
+    def test_both_layers_are_populated(self) -> None:
+        """A one-sided axis is the defect this requirement exists to prevent."""
+        layers = {cls.DEFAULT_DIMENSIONS.get("github.observation") for cls in _plugin_models().values()}
+        assert layers == {"declaration", "execution"}
+
+
+class TestEdgeObservationLayer:
+    def test_every_edge_declares_a_layer_or_is_named_as_spanning(self) -> None:
+        undeclared = {
+            name
+            for name, definition in _edge_definitions().items()
+            if "github.observation" not in definition.get("default_dimensions", {})
+        }
+        assert undeclared == LAYER_SPANNING_EDGES, (
+            "an edge with no default observation must be a deliberate layer-spanning edge "
+            f"named in the spec; unexpected: {sorted(undeclared - LAYER_SPANNING_EDGES)}"
+        )
+
+    def test_layer_matches_what_the_edge_connects(self) -> None:
+        for name, definition in _edge_definitions().items():
+            if name in LAYER_SPANNING_EDGES:
+                continue
+            expected = "execution" if name in EXECUTION_EDGES else "declaration"
+            assert definition["default_dimensions"]["github.observation"] == expected, name
+
+    def test_spanning_edge_really_does_span(self) -> None:
+        """Guards the exemption: it holds only while the sources actually disagree."""
+        models_by_type = {cls.ENTITY_TYPE: cls for cls in _plugin_models().values()}
+        for name in LAYER_SPANNING_EDGES:
+            sources = _edge_definitions()[name]["sources"]
+            layers = {
+                models_by_type[s].DEFAULT_DIMENSIONS.get("github.observation")
+                for s in sources
+                if s in models_by_type
+            }
+            assert len(layers) > 1, f"{name} no longer spans layers — give it a default observation"
+
+
+class TestLinkEdgeDerivation:
+    def test_link_edge_inherits_the_source_layer(self) -> None:
+        """req-github-core-dimensions-6: derived from the source model, not a second map."""
+        from tap_plugin.github_core.collectors.github_collector.enrichment import _dimensions_for_rule
+
+        base = {"github.platform": "github.com"}
+        declaration = _dimensions_for_rule(base, "github_core__github_workflow")
+        execution = _dimensions_for_rule(base, "github_core__github_actions_run")
+
+        assert declaration["github.observation"] == "declaration"
+        assert execution["github.observation"] == "execution"
+        assert base == {"github.platform": "github.com"}, "the base dimensions must not be mutated"
