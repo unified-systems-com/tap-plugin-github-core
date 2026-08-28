@@ -1456,7 +1456,7 @@ class GithubCollector(CollectorBase):
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
-        """Emit one CAN_BYPASS edge per actor we can name, and say what we could not name."""
+        """Emit one CAN_BYPASS_RULE edge per actor we can name, and say what we could not name."""
         for actor in observability["actors"]:
             app_uuid = github_app_id(actor["slug"])
             if str(app_uuid) not in self._emitted_app_ids:
@@ -1481,8 +1481,8 @@ class GithubCollector(CollectorBase):
                 )
             edges.append(
                 edge_envelope(
-                    entity_id=edge_id("CAN_BYPASS__github_core", app_uuid, rs_uuid),
-                    edge_type="CAN_BYPASS__github_core",
+                    entity_id=edge_id("CAN_BYPASS_RULE__github_core", app_uuid, rs_uuid),
+                    edge_type="CAN_BYPASS_RULE__github_core",
                     source_id=app_uuid,
                     target_id=rs_uuid,
                     dimensions=dims,
@@ -1807,7 +1807,7 @@ class GithubCollector(CollectorBase):
                     continue
                 edges.append(
                     self._edge(
-                        "HAS_BYPASSED__github_core",
+                        "HAS_BYPASSED_RULE__github_core",
                         suite_uuid,
                         ruleset_id(_owner_of(full_name), rule["ruleset_id"]),
                         dims,

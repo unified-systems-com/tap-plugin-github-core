@@ -8,7 +8,7 @@ The account whose push a rule suite evaluated. An account observed, never an ide
 
 A bypass event without an actor is a log line. This edge is what makes it a finding: it names the account that went around a control, and joins it to everything else that account touches on the grid — the repositories it owns, the Apps installed under it, other bypasses elsewhere.
 
-It is also the edge that makes "who bypasses gates around here" a graph question rather than a report. One account with `HAS_BYPASSED` edges across nineteen repositories is a different picture from nineteen accounts with one each, and only the graph shows the difference at a glance.
+It is also the edge that makes "who bypasses gates around here" a graph question rather than a report. One account with `HAS_BYPASSED_RULE` edges across nineteen repositories is a different picture from nineteen accounts with one each, and only the graph shows the difference at a glance.
 
 ## Goals
 

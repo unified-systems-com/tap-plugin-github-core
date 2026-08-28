@@ -339,7 +339,7 @@
       "target": "github_core__github_repository"
     },
     {
-      "slug": "CAN_BYPASS__github_core",
+      "slug": "CAN_BYPASS_RULE__github_core",
       "source": "github_core__github_app",
       "target": "github_core__github_ruleset",
       "condition": "an actor GitHub actually disclosed; see req-github-core-rulesets-bypass"

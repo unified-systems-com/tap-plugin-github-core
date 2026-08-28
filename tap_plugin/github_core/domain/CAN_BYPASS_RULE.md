@@ -1,8 +1,8 @@
-# CAN_BYPASS
+# CAN_BYPASS_RULE
 
 ## Blurb
 
-An actor is exempt from a ruleset — permitted to push past a gate that stops everyone else. The standing permission, where `HAS_BYPASSED` is the occurrence.
+An actor is exempt from a ruleset — permitted to push past a gate that stops everyone else. The standing permission, where `HAS_BYPASSED_RULE` is the occurrence.
 
 ## Purpose
 
@@ -14,15 +14,15 @@ This edge exists to make that answerable, and to make its **absence honest**. It
 
 1. Name who is exempt from a gate, where the credential can see it.
 2. Never let "we could not look" render as "nobody is exempt".
-3. Stay separate from `HAS_BYPASSED`, so permission and occurrence cannot be conflated.
+3. Stay separate from `HAS_BYPASSED_RULE`, so permission and occurrence cannot be conflated.
 
 ## Identity
 
-Derived: `uuid5(ns, "CAN_BYPASS__github_core:<actor_uuid>:<ruleset_uuid>")`.
+Derived: `uuid5(ns, "CAN_BYPASS_RULE__github_core:<actor_uuid>:<ruleset_uuid>")`.
 
 ## Boundaries
 
-- **Not `HAS_BYPASSED`.** This is *may*; that is *did*. The names were `BYPASSES` and `BYPASSED` until 2026-08-28 — one letter apart, for the pair whose whole value is the distinction. The modal/perfect forms make the difference visible everywhere the slug appears.
+- **Not `HAS_BYPASSED_RULE`.** This is *may*; that is *did*. The names were `BYPASSES` and `BYPASSED` until 2026-08-28 — one letter apart, for the pair whose whole value is the distinction. The modal/perfect forms carry it in the slug, and the `_RULE` object keeps both inside the `<ACTION>_<OBJECT>` convention: `CAN_`/`HAS_` alone would have been a verb pair with no object, and `HAS_` already means possession here (`HAS_REF`, `HAS_CACHE`), not perfect tense.
 - **Not all exemption kinds are nodes.** Apps have `github_app`; teams and organization-admin roles do not yet, so those are kept as counted data on the ruleset rather than dropped. Understating who can bypass is the one direction that must never happen.
 - **Not authorisation.** That an actor is on the list does not say who put them there or why. Ruleset history carries that, and is refused to every read-only credential.
 
