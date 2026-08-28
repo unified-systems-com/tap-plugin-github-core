@@ -1,0 +1,120 @@
+{
+  "_comment": "CAPTURED from the live GitHub API on 2026-08-28 with a read-only GitHub App installation token (administration:read), against unified-systems-com/tap. Verbatim apart from ordering. GET /repos/{owner}/{repo}/rulesets/rule-suites and .../rule-suites/{id}. These are real bypass events on a public repository; nothing here is sensitive. Re-capture rather than hand-edit \u2014 the point of a fixture taken from the wire is that it is not what we imagined.",
+  "list_bypass": [
+    {
+      "id": 3629230370,
+      "actor_id": 286052,
+      "actor_name": "notgeorge",
+      "before_sha": "847410cace8a4a3af023fc0c25e0c86ac48ef560",
+      "after_sha": "f43bed81c43404e813174783fba34683137bc166",
+      "ref": "refs/heads/main",
+      "repository_id": 1150092195,
+      "repository_name": "tap",
+      "pushed_at": "2026-08-10T22:51:46Z",
+      "result": "bypass"
+    },
+    {
+      "id": 3629168354,
+      "actor_id": 286052,
+      "actor_name": "notgeorge",
+      "before_sha": "757ee0f67f17e6bbe28f87f464cd7e21e25d6c5c",
+      "after_sha": "847410cace8a4a3af023fc0c25e0c86ac48ef560",
+      "ref": "refs/heads/main",
+      "repository_id": 1150092195,
+      "repository_name": "tap",
+      "pushed_at": "2026-08-10T22:44:12Z",
+      "result": "bypass"
+    },
+    {
+      "id": 3626911083,
+      "actor_id": 286052,
+      "actor_name": "notgeorge",
+      "before_sha": "bff439110b5fbad3ea965ae23637b87a7736d1c3",
+      "after_sha": "60d826609011d7454a07a2d73de83a8692e6c423",
+      "ref": "refs/heads/main",
+      "repository_id": 1150092195,
+      "repository_name": "tap",
+      "pushed_at": "2026-08-10T19:14:40Z",
+      "result": "bypass"
+    }
+  ],
+  "list_pass": [
+    {
+      "id": 3861662713,
+      "actor_id": 286052,
+      "actor_name": "notgeorge",
+      "before_sha": "5af9ff5343c29c0fafff1af9df5bf96c27d86893",
+      "after_sha": "b4d2456d40fcd82c6630289c1dccd960a178b7dd",
+      "ref": "refs/heads/main",
+      "repository_id": 1150092195,
+      "repository_name": "tap",
+      "pushed_at": "2026-08-28T19:33:21Z",
+      "result": "pass"
+    },
+    {
+      "id": 3861660571,
+      "actor_id": 315811092,
+      "actor_name": "tap-release-please[bot]",
+      "before_sha": "388ab17928a7599e5ed71538f4d08731904dd609",
+      "after_sha": "864cc2b0a075be33b1d099fffb93e0b853286058",
+      "ref": "refs/heads/release-please--branches--main--components--tap",
+      "repository_id": 1150092195,
+      "repository_name": "tap",
+      "pushed_at": "2026-08-28T19:33:09Z",
+      "result": "pass"
+    }
+  ],
+  "detail": {
+    "id": 3629230370,
+    "actor_id": 286052,
+    "actor_name": "notgeorge",
+    "before_sha": "847410cace8a4a3af023fc0c25e0c86ac48ef560",
+    "after_sha": "f43bed81c43404e813174783fba34683137bc166",
+    "ref": "refs/heads/main",
+    "repository_id": 1150092195,
+    "repository_name": "tap",
+    "pushed_at": "2026-08-10T22:51:46Z",
+    "result": "bypass",
+    "rule_evaluations": [
+      {
+        "rule_source": {
+          "type": "secret_scanning"
+        },
+        "enforcement": "active",
+        "result": "pass",
+        "rule_type": "secret_scanning"
+      },
+      {
+        "rule_source": {
+          "type": "ruleset",
+          "id": 20595566,
+          "name": "protect-default-branches"
+        },
+        "enforcement": "active",
+        "result": "pass",
+        "rule_type": "non_fast_forward"
+      },
+      {
+        "rule_source": {
+          "type": "ruleset",
+          "id": 20595566,
+          "name": "protect-default-branches"
+        },
+        "enforcement": "active",
+        "result": "pass",
+        "rule_type": "deletion"
+      },
+      {
+        "rule_source": {
+          "type": "ruleset",
+          "id": 20613528,
+          "name": "main-required-checks"
+        },
+        "enforcement": "active",
+        "result": "fail",
+        "rule_type": "required_status_checks",
+        "details": "Required status check \"gate\" is expected."
+      }
+    ]
+  }
+}

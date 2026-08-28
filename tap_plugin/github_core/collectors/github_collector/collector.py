@@ -50,6 +50,7 @@ from .identity import (
     platform_id,
     repository_id,
     ruleset_id,
+    rule_suite_id,
     run_id,
     ruleset_id,
     runner_id,
@@ -98,6 +99,8 @@ _SITE_REFS_TRUNCATED = "8334"
 _SITE_RULESET_BYPASS_UNOBSERVABLE = "d75a"
 _SITE_RULESET_DETAIL_DEGRADED = "21d1"
 _SITE_CACHE_DEGRADED = "21fd"
+_SITE_RULE_SUITE_DEGRADED = "3095"
+_SITE_RULE_SUITE_FOUND = "3b60"
 _SITE_CACHES_TRUNCATED = "0f41"
 _SITE_INSTALLATIONS_UNREACHABLE = "1825"
 _SITE_INSTALLATIONS_COLLECTED = "c3d0"
@@ -139,6 +142,13 @@ _TERMINAL_RUN_STATUSES: frozenset[str] = frozenset({"completed"})
 # first, so a cap keeps the freshest — and the collector says how many it left, because a
 # truncated cache list that reads as complete would make "no cache from that ref" a wrong answer.
 _CACHE_LIMIT_PER_REPO = 100
+#: Rule suites collected per repository per run. Bypasses only, so this is a ceiling on
+#: FINDINGS rather than on traffic — a repository with more than this many bypasses in the
+#: window has a bigger problem than truncation.
+_RULE_SUITE_LIMIT_PER_REPO = 100
+#: ALWAYS sent. Omitting `time_period` makes GitHub default to `day`, so a repository with a
+#: month of bypasses reads as a quiet one (req-github-core-rule-suites-5).
+_RULE_SUITE_WINDOW = "month"
 
 # Ruleset condition tokens GitHub uses in place of a ref pattern.
 _REF_TOKEN_DEFAULT_BRANCH = "~DEFAULT_BRANCH"  # nosec B105 — GitHub ref token, not a secret
@@ -162,6 +172,11 @@ _OIDC_ISSUER_URL = "https://token.actions.githubusercontent.com"
 
 class GithubCollectorError(Exception):
     """Unrecoverable error during the github_core collection run."""
+
+
+def _owner_of(full_name: str) -> str:
+    """`owner` from `owner/repo`. Ruleset identity keys on the owner, not the repository."""
+    return full_name.partition("/")[0]
 
 
 class GithubCollector(CollectorBase):
@@ -435,6 +450,9 @@ class GithubCollector(CollectorBase):
         # github_app nodes are singletons shared across repos; dedupe the node
         # emission across the whole run (the ENABLED_ON edges still fan in).
         self._emitted_app_ids: set[str] = set()
+        #: Actor logins already emitted as accounts this run. One person bypassing in
+        #: nineteen repositories is ONE account node, not nineteen.
+        self._emitted_actor_logins: set[str] = set()
         # Rulesets are singletons too, and far more fan-in than apps: an
         # organization-sourced ruleset is reported by every repository it governs
         # (measured: 6 rulesets across 60 attachments on a 19-repo org).
@@ -1101,6 +1119,9 @@ class GithubCollector(CollectorBase):
         # stored cache entries (REST; graceful-degrade like runners). Observation dimensions:
         # a cache entry is something that HAPPENED, not something declared.
         self._collect_caches(client, full_name, repo_uuid, observation_dims, ref_uuid_by_ref, nodes, edges)
+        # Bypass EVENTS. Deliberately after refs: EVALUATED_ON resolves against ref_uuid_by_ref,
+        # and a suite naming a ref we did not collect simply carries no edge.
+        self._collect_rule_suites(client, full_name, observation_dims, ref_uuid_by_ref, nodes, edges)
 
         # EXECUTED_ON edges (only when an observed job runner_id matches a durable runner node).
         # Reuses the job payloads collected above — the runner nodes simply were not known yet
@@ -1672,6 +1693,168 @@ class GithubCollector(CollectorBase):
                     )
                 )
 
+    def _collect_rule_suites(
+        self,
+        client: GithubClient,
+        full_name: str,
+        dims: dict[str, str],
+        ref_uuid_by_ref: dict[str, Any],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """Collect pushes that went AROUND a ruleset rather than satisfying it.
+
+        The complement to `_emit_rulesets` (`req-github-core-rule-suites`). That records who MAY
+        bypass and hits a documented ceiling — GitHub returns `bypass_actors` only to a caller with
+        write access. This records who DID, and answers a read-only App with names.
+
+        Only `bypass` results are requested. A passing suite is a routine push (~47/day on one
+        active repository); landing every one would swamp the grid for no finding.
+        """
+        try:
+            suites = client.get_paginated(
+                f"/repos/{full_name}/rulesets/rule-suites",
+                params={
+                    "rule_suite_result": "bypass",
+                    # Explicit, always. The default is `day` (req-github-core-rule-suites-5).
+                    "time_period": _RULE_SUITE_WINDOW,
+                    "per_page": str(_RULE_SUITE_LIMIT_PER_REPO),
+                },
+            )
+        except GithubAPIError as exc:
+            if exc.status in (403, 404):
+                # Refused is not empty. Landing nothing here would say "no one bypassed anything",
+                # which is the most reassuring reading of a permission failure.
+                self.record_warn(
+                    _SITE_RULE_SUITE_DEGRADED,
+                    f"RULE_SUITES_UNREADABLE_{exc.status}",
+                    f"Rule suites inaccessible for {full_name} — bypass events NOT observed, "
+                    f"which is not the same as none occurring: {exc.body[:120]}",
+                    message_data={"repo": full_name, "status": exc.status},
+                )
+                return
+            raise
+
+        for suite in suites:
+            suite_uuid = rule_suite_id(suite["id"])
+            actor_login = str(suite.get("actor_name") or "")
+            ref = str(suite.get("ref") or "")
+            bypassed = self._bypassed_rules(client, full_name, suite)
+            nodes.append(
+                node_envelope(
+                    entity_id=suite_uuid,
+                    entity_type="github_core__rule_suite",
+                    name=f"{actor_login or 'unknown actor'} bypassed {ref.rsplit('/', 1)[-1] or 'a ref'}",
+                    dimensions=dims,
+                    fields={
+                        "suite_id": suite["id"],
+                        "full_name": full_name,
+                        "result": str(suite.get("result") or ""),
+                        "ref": ref,
+                        "actor_login": actor_login,
+                        "actor_id": suite.get("actor_id"),
+                        "before_sha": str(suite.get("before_sha") or ""),
+                        "after_sha": str(suite.get("after_sha") or ""),
+                        "pushed_at": suite.get("pushed_at"),
+                        "bypassed_rules": bypassed,
+                        "configuration": {},
+                        "tags": {},
+                    },
+                )
+            )
+            if actor_login:
+                # An ACCOUNT, not an identity: GitHub says login and id, never whether the login
+                # belongs to a person, a bot or a machine account (req-github-core-rule-suites-2).
+                actor_uuid = account_id(actor_login)
+                if actor_login not in self._emitted_actor_logins:
+                    self._emitted_actor_logins.add(actor_login)
+                    nodes.append(
+                        node_envelope(
+                            entity_id=actor_uuid,
+                            entity_type="github_core__github_account",
+                            name=actor_login,
+                            dimensions={**dims, "github.surface": "accounts"},
+                            fields={
+                                "login": actor_login,
+                                "github_id": suite.get("actor_id"),
+                                # Unobserved, not "User": this surface does not say which.
+                                "account_type": "",
+                                "html_url": f"https://github.com/{actor_login}",
+                                "configuration": {},
+                                "tags": {},
+                            },
+                        )
+                    )
+                edges.append(
+                    self._edge(
+                        "PUSHED_BY__github_core", suite_uuid, actor_uuid, dims,
+                        properties={"actor_id": suite.get("actor_id")},
+                    )
+                )
+            ref_uuid = ref_uuid_by_ref.get(ref)
+            if ref_uuid is not None:
+                edges.append(
+                    self._edge(
+                        "EVALUATED_ON__github_core", suite_uuid, ref_uuid, dims,
+                        properties={
+                            "before_sha": str(suite.get("before_sha") or ""),
+                            "after_sha": str(suite.get("after_sha") or ""),
+                        },
+                    )
+                )
+            for rule in bypassed:
+                if rule.get("ruleset_id") is None:
+                    continue
+                edges.append(
+                    self._edge(
+                        "BYPASSED__github_core",
+                        suite_uuid,
+                        ruleset_id(_owner_of(full_name), rule["ruleset_id"]),
+                        dims,
+                        properties={
+                            "rule_type": str(rule.get("rule_type") or ""),
+                            "enforcement": str(rule.get("enforcement") or ""),
+                            "details": str(rule.get("details") or ""),
+                        },
+                    )
+                )
+        if suites:
+            self.record_info(
+                _SITE_RULE_SUITE_FOUND,
+                "RULE_SUITES_BYPASS",
+                f"{len(suites)} bypass event(s) on {full_name} in the last {_RULE_SUITE_WINDOW}.",
+                message_data={"repo": full_name, "count": len(suites), "window": _RULE_SUITE_WINDOW},
+            )
+
+    def _bypassed_rules(
+        self, client: GithubClient, full_name: str, suite: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """The rules a suite did not satisfy, from its detail. Degrades to [] with the list intact.
+
+        The list endpoint says a bypass happened; only the detail says WHICH control was gone
+        around, which is what turns the event from a log line into a finding.
+        """
+        try:
+            detail = client.get(f"/repos/{full_name}/rulesets/rule-suites/{suite['id']}")
+        except GithubAPIError:
+            return []
+        out: list[dict[str, Any]] = []
+        for evaluation in detail.get("rule_evaluations") or []:
+            if evaluation.get("result") == "pass":
+                continue
+            source = evaluation.get("rule_source") or {}
+            out.append(
+                {
+                    "rule_type": evaluation.get("rule_type"),
+                    "enforcement": evaluation.get("enforcement"),
+                    "result": evaluation.get("result"),
+                    "ruleset_id": source.get("id") if source.get("type") == "ruleset" else None,
+                    "ruleset_name": source.get("name"),
+                    "details": evaluation.get("details"),
+                }
+            )
+        return out
+
     def _collect_caches(
         self,
         client: GithubClient,
@@ -1920,13 +2103,16 @@ class GithubCollector(CollectorBase):
         source_uuid: Any,
         target_uuid: Any,
         dimensions: dict[str, str],
+        properties: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """One edge envelope. `properties` defaults to empty, which every prior caller wanted."""
         return edge_envelope(
             entity_id=edge_id(edge_type, source_uuid, target_uuid),
             edge_type=edge_type,
             source_id=source_uuid,
             target_id=target_uuid,
             dimensions=dimensions,
+            properties=properties or {},
         )
 
     def _fetch_account(self, client: GithubClient, owner: str) -> dict[str, Any]:

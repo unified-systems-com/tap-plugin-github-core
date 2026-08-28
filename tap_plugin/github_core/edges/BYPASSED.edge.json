@@ -1,0 +1,34 @@
+{
+  "slug": "BYPASSED__github_core",
+  "name": "Bypassed",
+  "description": "A push went around this ruleset rather than satisfying it. Distinct from BYPASSES, and the distinction is the point: BYPASSES is a standing permission (who MAY), this is an occurrence (who DID). Conflating them would make 'is permitted' and 'has actually done it' indistinguishable in a query, which is the whole value of the finding.",
+  "sources": [
+    "github_core__rule_suite"
+  ],
+  "targets": [
+    "github_core__github_ruleset"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "rules",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "rule_type": {
+        "type": "string",
+        "description": "The rule that was not satisfied (`required_status_checks`, `non_fast_forward`). One suite may bypass several rules of one ruleset; the edge carries the first, and the suite's `bypassed_rules` carries them all."
+      },
+      "enforcement": {
+        "type": "string",
+        "description": "The rule's enforcement at evaluation time (`active`, `evaluate`). An `evaluate` rule was never going to stop anything, so bypassing it means less."
+      },
+      "details": {
+        "type": "string",
+        "description": "GitHub's own explanation of the failure, verbatim (`Required status check \"gate\" is expected.`). Preserved rather than re-worded \u2014 it names the specific check."
+      }
+    }
+  }
+}

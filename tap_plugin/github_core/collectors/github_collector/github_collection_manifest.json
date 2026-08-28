@@ -248,6 +248,46 @@
       ],
       "permission_not_applicable": "App-JWT-level endpoint describing THIS App's own installations, not a grant over any account's resources. No fine-grained permission triple exists for it, and inventing one would corrupt the derived least-privilege set. Also the fallback when the account-wide inventory is refused, and how the collector learns which installation it is authenticating as.",
       "description": "Self-identification and fallback. A personal access token gets 404 here too."
+    },
+    {
+      "name": "rule_suites",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/rulesets/rule-suites",
+      "query": {
+        "rule_suite_result": "bypass",
+        "time_period": "month",
+        "per_page": "100"
+      },
+      "item_path": "[*]",
+      "target_entity_type": "github_core__rule_suite",
+      "fields": [
+        "suite_id",
+        "result",
+        "ref",
+        "actor_login",
+        "actor_id",
+        "before_sha",
+        "after_sha",
+        "pushed_at"
+      ],
+      "permission": "repository:administration:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Pushes evaluated against the repo's rulesets, filtered to those that BYPASSED one (req-github-core-rule-suites). Answers a read-only App with actor names, where the ruleset's own bypass_actors list does not. `time_period` is explicit because omitting it silently means `day`."
+    },
+    {
+      "name": "rule_suite_detail",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/rulesets/rule-suites/{rule_suite_id}",
+      "item_path": "rule_evaluations[*]",
+      "fields": [
+        "rule_type",
+        "enforcement",
+        "result",
+        "rule_source"
+      ],
+      "permission": "repository:administration:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Per-rule evaluations for one suite. The list says a bypass happened; only this says WHICH control was gone around, which is what makes the event a finding rather than a log line."
     }
   ],
   "edges": [

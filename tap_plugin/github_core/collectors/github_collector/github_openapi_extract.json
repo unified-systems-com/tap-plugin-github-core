@@ -883,6 +883,34 @@
       "present": true,
       "source": "workflows"
     },
+    "/repos/{owner}/{repo}/rulesets/rule-suites": {
+      "item_properties": [
+        "actor_id",
+        "actor_name",
+        "after_sha",
+        "before_sha",
+        "evaluation_result",
+        "id",
+        "pushed_at",
+        "ref",
+        "repository_id",
+        "repository_name",
+        "result"
+      ],
+      "present": true,
+      "source": "rule_suites"
+    },
+    "/repos/{owner}/{repo}/rulesets/rule-suites/{rule_suite_id}": {
+      "item_properties": [
+        "details",
+        "enforcement",
+        "result",
+        "rule_source",
+        "rule_type"
+      ],
+      "present": true,
+      "source": "rule_suite_detail"
+    },
     "/repos/{owner}/{repo}/rulesets/{ruleset_id}": {
       "item_properties": [
         "_links",

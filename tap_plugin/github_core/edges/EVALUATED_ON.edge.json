@@ -1,0 +1,30 @@
+{
+  "slug": "EVALUATED_ON__github_core",
+  "name": "Evaluated On",
+  "description": "The ref a rule suite evaluated a push against. Resolved to a git_ref node when that ref was collected; a suite naming a ref that has since been deleted simply carries no edge, and its `ref` field remains the record.",
+  "sources": [
+    "github_core__rule_suite"
+  ],
+  "targets": [
+    "github_core__git_ref"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "rules",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "before_sha": {
+        "type": "string",
+        "description": "Ref tip before the push. All zeroes for a branch creation."
+      },
+      "after_sha": {
+        "type": "string",
+        "description": "Ref tip after the push."
+      }
+    }
+  }
+}
