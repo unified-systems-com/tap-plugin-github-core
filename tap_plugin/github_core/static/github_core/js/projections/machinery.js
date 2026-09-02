@@ -37,6 +37,7 @@
 
 import {projectNested, ELEVATION_HIDDEN_CLASS} from "/static/tap_viz/js/runtime/nested-projection.js";
 import {applyStack} from "/static/tap_viz/js/runtime/stack.js";
+import {applyStandardChrome, placeParentLabels, parentLabelInset} from "/static/tap_viz/js/runtime/chrome.js";
 
 const GRYPHON_URL = "/api/v1/gryphon/execute";
 
@@ -103,7 +104,7 @@ const BASE_SIZES = {
     [T.platform]: {width: 480, height: 200},
     [T.account]: {width: 320, height: 120},
     [T.repository]: {width: 320, height: 90},
-    [T.workflow]: {width: 190, height: 44},
+    [T.workflow]: {width: 200, height: 40},
     [T.job]: {width: 150, height: 34},
     [T.ref]: {width: 150, height: 34},
     [T.ruleset]: {width: 170, height: 34},
@@ -164,7 +165,18 @@ export async function execute(context) {
     // ---- Workflows: stage + trigger-class order ------------------------
     cy.nodes(`[entity_type = "${T.workflow}"]`).forEach((wf) => {
         wf.data("_stage", STAGE.pipelines);
-        const conf = (facts.workflows.get(wf.id()) || {}).configuration || {};
+        const wfFact = facts.workflows.get(wf.id()) || {};
+        const conf = wfFact.configuration || {};
+        // GitHub "dynamic" workflows (CodeQL default setup, the Copilot
+        // agents) have no file and therefore no declared jobs: a real
+        // pipeline whose shape GitHub does not publish. Marked, not hidden.
+        const declaredJobs = Array.isArray(conf.jobs) ? conf.jobs.length : 0;
+        const isDynamic = String(wfFact.path || "").startsWith("dynamic/") || declaredJobs === 0;
+        if (isDynamic) {
+            wf.data("_dynamic", true);
+            wf.addClass("machinery-dynamic");
+            if (!String(wf.data("label") || "").endsWith(" · dynamic")) wf.data("label", `${wf.data("label")} · dynamic`);
+        }
         const triggers = Array.isArray(conf.triggers) ? conf.triggers : [];
         const idx = triggers
             .map((t) => TRIGGER_ORDER.indexOf(t))
@@ -196,17 +208,16 @@ export async function execute(context) {
     _hideOrphans(cy, repos, warn);
 
     // ---- Chrome ---------------------------------------------------------
+    // Label sizing and container chrome are the shared conventions
+    // (tap_viz runtime/chrome.js — the org view's numbers), not restated here.
+    const chrome = applyStandardChrome(cy, {
+        leafTypes: [T.job, T.ref, T.ruleset, T.environment, T.app, T.runner, T.issuer, T.workflow],
+        leafMaxWidth: 170,
+    });
+    const labelInset = parentLabelInset(chrome);
     cy.style()
-        .selector("edge")
-        .style({label: "", "z-compound-depth": "top", "z-index": 1})
-        .selector("node")
-        .style({"font-size": "13px"})
-        .selector(".tap-viewport-parent")
-        .style({"font-size": "15px", "font-weight": "600", "text-margin-y": 8})
-        .selector(`node[entity_type = "${T.job}"], node[entity_type = "${T.ref}"], node[entity_type = "${T.ruleset}"], node[entity_type = "${T.environment}"]`)
-        .style({"font-size": "12px", "text-wrap": "ellipsis", "text-max-width": "140px", "text-valign": "center", "text-halign": "center"})
-        .selector(`node[entity_type = "${T.app}"], node[entity_type = "${T.runner}"], node[entity_type = "${T.issuer}"]`)
-        .style({"text-wrap": "ellipsis", "text-max-width": "170px", "text-valign": "center", "text-halign": "center"})
+        .selector(".machinery-dynamic")
+        .style({"border-style": "dashed", "border-color": "#94a3b8", "color": "#64748b", "font-style": "italic"})
         .selector(`node[entity_type = "${T.placeholder}"]`)
         .style({
             "shape": "round-rectangle", "background-color": "#f8fafc", "border-style": "dashed",
@@ -241,7 +252,14 @@ export async function execute(context) {
         ],
         baseSizes: BASE_SIZES,
         padding: 14,
-        paddings: {[T.platform]: 40, [T.account]: 34, [T.repository]: 28, [T.workflow]: 18},
+        // Every container reserves its label's height on top (the label is
+        // anchored upper-left after sizing — placeParentLabels below).
+        paddings: {
+            [T.platform]: {top: 40 + labelInset, right: 40, bottom: 40, left: 40},
+            [T.account]: {top: 24 + labelInset, right: 34, bottom: 34, left: 34},
+            [T.repository]: {top: 18 + labelInset, right: 28, bottom: 28, left: 28},
+            [T.workflow]: {top: 6 + labelInset, right: 14, bottom: 14, left: 14},
+        },
         // github.com is the one root. Third parties on top, the account below;
         // the bottom tier (outputs to humans) is reserved and empty in v0.
         innerLayout: {
@@ -262,6 +280,7 @@ export async function execute(context) {
         },
     });
     warnings.push(...(result.warnings || []));
+    placeParentLabels(cy, {anchor: "upper-left", inset: 8, parentFontSize: chrome.parentFontSize, parentFontWeight: chrome.parentFontWeight});
 
     // The branch deck: the collapsed refs were hidden before measuring so the
     // source column stays one card tall; the deck token draws over the
@@ -311,7 +330,7 @@ async function _fetchFacts(fullNames, warn) {
         {kind: "workflows", into: facts.workflows, query: [
             `MATCH (w:${T.workflow})`,
             "WHERE w.data.full_name = $repo",
-            "RETURN w.entity_id AS entity_id, w.data.workflow_id AS workflow_id, w.data.configuration AS configuration",
+            "RETURN w.entity_id AS entity_id, w.data.workflow_id AS workflow_id, w.data.path AS path, w.data.configuration AS configuration",
         ]},
         {kind: "refs", into: facts.refs, query: [
             `MATCH (r:${T.ref})`,
