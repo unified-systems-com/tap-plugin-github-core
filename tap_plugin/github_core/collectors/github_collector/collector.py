@@ -128,8 +128,8 @@ _SITE_WORKFLOW_TRIGGERS = "3025"
 _SITE_ARTIFACTS_DEGRADED = "eef3"
 _SITE_ARTIFACTS_TRUNCATED = "8e7f"
 _SITE_ARTIFACTS_COLLECTED = "933f"
-_SITE_REQUIRED_CHECKS_UNOBSERVABLE = "d66c 9409 "
-_SITE_STATUS_CHECKS = ""
+_SITE_REQUIRED_CHECKS_UNOBSERVABLE = "d66c"
+_SITE_STATUS_CHECKS = "9409"
 
 #: GitHub Actions' own App id — the integration that produces a workflow job's check run.
 _GITHUB_ACTIONS_INTEGRATION_ID = 15368
@@ -2219,15 +2219,24 @@ class GithubCollector(CollectorBase):
         unproduced: list[str] = []
         for (owner, context), entry in sorted(state["required_checks"].items()):
             check_uuid = status_check_id(owner, context)
+            # Owner-scoped by construction, whatever the first ruleset that named the context
+            # carried: keep the owner, never a repository.
+            node_dims = {k: v for k, v in entry["dims"].items() if k != "github.repo"}
             nodes.append(
                 node_envelope(
                     entity_id=check_uuid,
                     entity_type="github_core__status_check",
                     name=context,
-                    dimensions=entry["dims"],
+                    dimensions=node_dims,
                     fields={"owner_login": owner, "context": context, "name": context, "configuration": {}, "tags": {}},
                 )
             )
+            # A producer edge says "a workflow job produces a check run with this name" — via GitHub
+            # Actions, integration 15368. Whether that satisfies a GIVEN requirement is read off
+            # that requirement's REQUIRES_CHECK.integration_id: with two rulesets naming one
+            # context, one App-only and one Actions, the node carries producers for the second
+            # and the first still requires an App. Compatibility is per requirement, never a
+            # property of the shared node (PR #62 review).
             actions_may_produce = False
             for requirement in entry["requirements"].values():
                 integration = requirement["integration_id"]

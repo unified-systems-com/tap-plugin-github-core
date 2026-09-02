@@ -24,7 +24,7 @@ Edge id is `uuid5(ns, "edge:PRODUCES_CHECK__github_core:<workflow id>:<check id>
 
 Not covered:
 
-- **Checks from Apps.** A requirement whose `integration_id` is neither null nor GitHub Actions (15368) is satisfied by an App's check run. No edge is derived; the corpus's `app → status_check` producer waits on the App's numeric id being on the grid.
+- **Checks from Apps.** A requirement whose `integration_id` is neither null nor GitHub Actions (15368) is satisfied by an App's check run. No edge is derived for it; the corpus's `app → status_check` producer waits on the App's numeric id being on the grid. **Compatibility is per requirement, not per node**: when two rulesets name one context — one App-only, one admitting Actions — the shared node carries the workflow producers the second admits, and a traversal from the App-only ruleset must read *its own* `REQUIRES_CHECK.integration_id` before treating a producer as satisfying it. This edge asserts "produces a check run with this name via GitHub Actions", never "satisfies every inbound requirement" (PR #62 review).
 - **Reusable-workflow checks** (`<caller job> / <callee job>`). Not composed; named as a gap.
 - **Whether the job actually ran and passed.** Execution-side; `github_actions_job` is where that lives.
 - **Sourcing from the job.** The corpus and the bake list name the workflow as the source — the check is what the *workflow* contributes to the gate — and `job_key` / `job_name` on the edge say which job. A job-sourced edge would be the same fact one hop lower.

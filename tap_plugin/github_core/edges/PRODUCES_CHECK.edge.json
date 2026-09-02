@@ -1,7 +1,7 @@
 {
   "slug": "PRODUCES_CHECK__github_core",
   "name": "Produces Check",
-  "description": "A workflow declares a job whose check run carries a context some ruleset requires — the machinery that satisfies the gate. DERIVED from job display names, and honest about it: `confidence` says whether the declared name equals the context or is the template a matrix job expands into. Emitted only toward contexts a rule requires and only when the requirement allows an Actions-produced check (integration null or 15368); a required Actions context with no producer in a repository is visible as a check node with no inbound edge from that repository's workflows.",
+  "description": "A workflow declares a job whose check run carries a context some ruleset requires — the machinery that satisfies the gate. DERIVED from job display names, and honest about it: `confidence` says whether the declared name equals the context or is the template a matrix job expands into. Emitted only toward contexts a rule requires and only when the requirement allows an Actions-produced check (integration null or 15368); a required Actions context with no producer in a repository is visible as a check node with no inbound edge from that repository's workflows. A producer edge means the workflow produces a check run with this name VIA GITHUB ACTIONS (integration 15368); whether that satisfies a particular requirement is read per requirement from REQUIRES_CHECK.integration_id — when two rulesets name one context, one App-only and one Actions, the node carries producers for the second while the first still requires an App. Compatibility is never a property of the shared node.",
   "sources": [
     "github_core__github_workflow"
   ],

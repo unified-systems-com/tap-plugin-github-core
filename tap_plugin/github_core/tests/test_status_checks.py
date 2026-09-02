@@ -156,6 +156,40 @@ class TestProducers:
         assert not [e for e in edges if e["edge"]["edge_type"] == "PRODUCES_CHECK__github_core"]
         assert next(e for e in c.events if e[1] == "STATUS_CHECKS")[2]["unproduced"] == []  # type: ignore[attr-defined]
 
+    def test_mixed_requirements_keep_compatibility_on_the_requirement_edge(self) -> None:
+        """Two rulesets name one context: one App-only, one Actions. The shared node carries
+        the workflow producer the second admits; the first's REQUIRES_CHECK still says 12345,
+        which is what a traversal must read before calling the producer satisfying
+        (PR #62 review)."""
+        c = _collector()
+        c._register_required_checks("acme", ruleset_id("acme", 1), "app-only", [_rule([{"context": "gate", "integration_id": 12345}])], _DIMS)
+        c._register_required_checks("acme", ruleset_id("acme", 2), "actions", [_rule([{"context": "gate", "integration_id": 15368}])], _DIMS)
+        _job(c, "acme/a", 1, "gate")
+        nodes, edges = _emit(c)
+        assert len(nodes) == 1
+        assert sum(1 for e in edges if e["edge"]["edge_type"] == "PRODUCES_CHECK__github_core") == 1
+        by_ruleset = {e["edge"]["from_entity_id"]: e["edge"]["properties"]["integration_id"]
+                      for e in edges if e["edge"]["edge_type"] == "REQUIRES_CHECK__github_core"}
+        assert by_ruleset == {str(ruleset_id("acme", 1)): 12345, str(ruleset_id("acme", 2)): 15368}
+
+    def test_a_repository_ruleset_cannot_make_the_shared_node_repo_scoped(self) -> None:
+        """Owner-scoped by construction, whatever dims the first naming ruleset carried."""
+        c = _collector()
+        c._register_required_checks("acme", ruleset_id("acme", 1), "main", [_rule([{"context": "gate", "integration_id": None}])], {**_DIMS, "github.repo": "a"})
+        nodes, _ = _emit(c)
+        assert "github.repo" not in nodes[0]["entity"]["dimensions"]
+        assert nodes[0]["entity"]["dimensions"]["github.owner"] == "acme"
+
+    def test_the_site_tokens_are_well_formed(self) -> None:
+        """The two sites that carry the unobservability signal (PR #62 review: they were a
+        split-and-empty pair, which no monkeypatched test could see)."""
+        import re
+        from tap_plugin.github_core.collectors.github_collector import collector as mod
+
+        for name in ("_SITE_REQUIRED_CHECKS_UNOBSERVABLE", "_SITE_STATUS_CHECKS"):
+            assert re.fullmatch(r"[0-9a-f]{4}", getattr(mod, name)), name
+        assert mod._SITE_REQUIRED_CHECKS_UNOBSERVABLE != mod._SITE_STATUS_CHECKS
+
     def test_a_producible_context_with_no_producer_is_named_in_the_summary(self) -> None:
         c = _collector()
         c._register_required_checks("acme", ruleset_id("acme", 1), "main", [_rule([{"context": "gate", "integration_id": 15368}])], _DIMS)
