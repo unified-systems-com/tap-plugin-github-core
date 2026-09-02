@@ -173,6 +173,72 @@
           "include"
         ]
       },
+      "Release": {
+        "fields": [
+          "author",
+          "createdAt",
+          "databaseId",
+          "description",
+          "descriptionHTML",
+          "id",
+          "isDraft",
+          "isLatest",
+          "isPrerelease",
+          "mentions",
+          "name",
+          "publishedAt",
+          "reactionGroups",
+          "reactions",
+          "releaseAssets",
+          "repository",
+          "resourcePath",
+          "shortDescriptionHTML",
+          "tag",
+          "tagCommit",
+          "tagName",
+          "updatedAt",
+          "url",
+          "viewerCanReact"
+        ],
+        "present": true,
+        "selected": [
+          "author",
+          "createdAt",
+          "databaseId",
+          "isDraft",
+          "isLatest",
+          "isPrerelease",
+          "name",
+          "publishedAt",
+          "releaseAssets",
+          "tagCommit",
+          "tagName",
+          "url"
+        ]
+      },
+      "ReleaseAsset": {
+        "fields": [
+          "contentType",
+          "createdAt",
+          "downloadCount",
+          "downloadUrl",
+          "id",
+          "name",
+          "release",
+          "size",
+          "updatedAt",
+          "uploadedBy",
+          "url"
+        ],
+        "present": true,
+        "selected": [
+          "contentType",
+          "createdAt",
+          "downloadUrl",
+          "name",
+          "size"
+        ]
+      },
       "Repository": {
         "fields": [
           "allowUpdateBranch",
@@ -318,6 +384,7 @@
           "nameWithOwner",
           "object",
           "refs",
+          "releases",
           "rulesets",
           "url",
           "visibility"
@@ -501,6 +568,108 @@
           "object",
           "path"
         ]
+      },
+      "User": {
+        "fields": [
+          "anyPinnableItems",
+          "avatarUrl",
+          "bio",
+          "bioHTML",
+          "canReceiveOrganizationEmailsWhenNotificationsRestricted",
+          "commitComments",
+          "company",
+          "companyHTML",
+          "contributionsCollection",
+          "copilotEndpoints",
+          "createdAt",
+          "databaseId",
+          "email",
+          "enterprises",
+          "estimatedNextSponsorsPayoutInCents",
+          "followers",
+          "following",
+          "gist",
+          "gistComments",
+          "gists",
+          "hasSponsorsListing",
+          "hovercard",
+          "id",
+          "interactionAbility",
+          "isBountyHunter",
+          "isCampusExpert",
+          "isDeveloperProgramMember",
+          "isEmployee",
+          "isFollowingViewer",
+          "isGitHubStar",
+          "isHireable",
+          "isSiteAdmin",
+          "isSponsoredBy",
+          "isSponsoringViewer",
+          "isViewer",
+          "issueComments",
+          "issues",
+          "itemShowcase",
+          "lifetimeReceivedSponsorshipValues",
+          "lists",
+          "location",
+          "login",
+          "monthlyEstimatedSponsorsIncomeInCents",
+          "name",
+          "organization",
+          "organizationVerifiedDomainEmails",
+          "organizations",
+          "packages",
+          "pinnableItems",
+          "pinnedItems",
+          "pinnedItemsRemaining",
+          "project",
+          "projectV2",
+          "projects",
+          "projectsResourcePath",
+          "projectsUrl",
+          "projectsV2",
+          "pronouns",
+          "publicKeys",
+          "pullRequests",
+          "recentProjects",
+          "repositories",
+          "repositoriesContributedTo",
+          "repository",
+          "repositoryDiscussionComments",
+          "repositoryDiscussions",
+          "resourcePath",
+          "savedReplies",
+          "socialAccounts",
+          "sponsoring",
+          "sponsors",
+          "sponsorsActivities",
+          "sponsorsListing",
+          "sponsorshipForViewerAsSponsor",
+          "sponsorshipForViewerAsSponsorable",
+          "sponsorshipNewsletters",
+          "sponsorshipsAsMaintainer",
+          "sponsorshipsAsSponsor",
+          "starredRepositories",
+          "status",
+          "suggestedListNames",
+          "topRepositories",
+          "totalSponsorshipAmountAsSponsorInCents",
+          "twitterUsername",
+          "updatedAt",
+          "url",
+          "viewerCanChangePinnedItems",
+          "viewerCanCreateProjects",
+          "viewerCanFollow",
+          "viewerCanSponsor",
+          "viewerIsFollowing",
+          "viewerIsSponsoring",
+          "watching",
+          "websiteUrl"
+        ],
+        "present": true,
+        "selected": [
+          "login"
+        ]
       }
     },
     "url": "https://raw.githubusercontent.com/octokit/graphql-schema/82ff2d4780080e6929ebb95608cefa22dfa05ac7/schema.json"
@@ -559,6 +728,40 @@
       ],
       "present": true,
       "source": "app_installations"
+    },
+    "/orgs/{owner}/packages": {
+      "item_properties": [
+        "created_at",
+        "html_url",
+        "id",
+        "name",
+        "owner",
+        "package_type",
+        "repository",
+        "updated_at",
+        "url",
+        "version_count",
+        "visibility"
+      ],
+      "present": true,
+      "source": "packages"
+    },
+    "/orgs/{owner}/packages/{package_type}/{package_name}/versions": {
+      "item_properties": [
+        "created_at",
+        "deleted_at",
+        "description",
+        "html_url",
+        "id",
+        "license",
+        "metadata",
+        "name",
+        "package_html_url",
+        "updated_at",
+        "url"
+      ],
+      "present": true,
+      "source": "package_versions"
     },
     "/orgs/{owner}/repos": {
       "item_properties": [
@@ -766,6 +969,24 @@
       ],
       "present": true,
       "source": "repository"
+    },
+    "/repos/{owner}/{repo}/actions/artifacts": {
+      "item_properties": [
+        "archive_download_url",
+        "created_at",
+        "digest",
+        "expired",
+        "expires_at",
+        "id",
+        "name",
+        "node_id",
+        "size_in_bytes",
+        "updated_at",
+        "url",
+        "workflow_run"
+      ],
+      "present": true,
+      "source": "artifacts"
     },
     "/repos/{owner}/{repo}/actions/caches": {
       "item_properties": [
@@ -981,8 +1202,8 @@
       "source": "account"
     }
   },
-  "spec_commit": "33c2d320fd411e9db6c8b68401e0ad2bdb0243fd",
-  "spec_sha256": "a45de408e21266796d2c6a14f09ca2866bc695aa6952ee970a48f2a48bffbead",
-  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/33c2d320fd411e9db6c8b68401e0ad2bdb0243fd/descriptions/api.github.com/api.github.com.json",
+  "spec_commit": "875b39fae632318533e61d3e5217b340f5ec3ebd",
+  "spec_sha256": "27008e60d890d3d7ab74791bcdf7ef009b5506867a75069408e8ef02eb74fc1e",
+  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/875b39fae632318533e61d3e5217b340f5ec3ebd/descriptions/api.github.com/api.github.com.json",
   "spec_version": "1.1.4"
 }

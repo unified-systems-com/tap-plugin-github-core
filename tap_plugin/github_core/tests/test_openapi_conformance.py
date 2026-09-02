@@ -127,6 +127,9 @@ _RENAMED_FROM: dict[str, dict[str, str]] = {
     "rule_suites": {"suite_id": "id", "actor_login": "actor_name"},
     "app_installations": {"installation_id": "id", "account_login": "account", "suspended": "suspended_at"},
     "app_installation_self": {"installation_id": "id", "account_login": "account"},
+    "artifacts": {"artifact_id": "id"},
+    "packages": {"package_id": "id"},
+    "package_versions": {"version_id": "id"},
 }
 
 

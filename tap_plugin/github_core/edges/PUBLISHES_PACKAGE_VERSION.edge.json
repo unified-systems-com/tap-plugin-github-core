@@ -1,0 +1,16 @@
+{
+  "slug": "PUBLISHES_PACKAGE_VERSION__github_core",
+  "name": "Publishes Package Version",
+  "description": "A package has this published version. Containment: the version's identity is scoped under its package.",
+  "sources": [
+    "github_core__github_package"
+  ],
+  "targets": [
+    "github_core__github_package_version"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "packages",
+    "github.observation": "execution"
+  }
+}

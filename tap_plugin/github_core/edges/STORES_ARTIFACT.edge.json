@@ -1,0 +1,16 @@
+{
+  "slug": "STORES_ARTIFACT__github_core",
+  "name": "Stores Artifact",
+  "description": "A repository is holding this uploaded artifact. Containment for artifacts whose producing run is outside the collected run window \u2014 the artifact still lands, still names its `run_id`, and still belongs somewhere.",
+  "sources": [
+    "github_core__github_repository"
+  ],
+  "targets": [
+    "github_core__actions_artifact"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "declaration"
+  }
+}

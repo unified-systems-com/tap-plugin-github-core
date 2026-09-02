@@ -1,0 +1,31 @@
+{
+  "slug": "PUBLISHES_PACKAGE__github_core",
+  "name": "Publishes Package",
+  "description": "An account owns this package, and \u2014 when GitHub links the package to a repository \u2014 that repository publishes it. Two sources on one edge type: every package has an owner; only some are linked to a repository, and the link is GitHub's, not inferred.",
+  "sources": [
+    "github_core__github_account",
+    "github_core__github_repository"
+  ],
+  "targets": [
+    "github_core__github_package"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "packages",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "link_kind": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "repository"
+        ],
+        "description": "`owner`: the account the package lives under (always present). `repository`: GitHub's own package-to-repository link, present only when the package was pushed with a source label or linked by hand."
+      }
+    }
+  }
+}

@@ -40,6 +40,7 @@ from .enrichment import resolve_links
 from .graphql_client import GithubGraphQLClient, GithubGraphQLError
 from .identity import (
     account_id,
+    actions_artifact_id,
     actions_cache_id,
     app_installation_id,
     edge_id,
@@ -47,12 +48,15 @@ from .identity import (
     git_ref_id,
     github_app_id,
     job_id,
+    package_id,
+    package_purl,
+    package_version_id,
     platform_id,
+    release_id,
     repository_id,
-    ruleset_id,
     rule_suite_id,
-    run_id,
     ruleset_id,
+    run_id,
     runner_id,
     workflow_id,
     workflow_job_id,
@@ -106,6 +110,15 @@ _SITE_INSTALLATIONS_UNREACHABLE = "1825"
 _SITE_INSTALLATIONS_COLLECTED = "c3d0"
 _SITE_BYPASS_ACTOR_UNMODELLED = "5dd2"
 _SITE_AUTH_MODE = "3e4d"
+_SITE_RELEASES_TRUNCATED = "a401"
+_SITE_RELEASES_UNOBSERVABLE = "efd6"
+_SITE_ARTIFACTS_DEGRADED = "5bb0"
+_SITE_ARTIFACTS_TRUNCATED = "879d"
+_SITE_PACKAGES_UNREADABLE = "de95"
+_SITE_PACKAGES_UNOBSERVABLE = "590d"
+_SITE_PACKAGE_VERSIONS_DEGRADED = "ffd2"
+_SITE_PACKAGE_VERSIONS_TRUNCATED = "e9ed"
+_SITE_PACKAGES_COLLECTED = "540a"
 
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
 # list under synthetic ``dynamic/<app>/...`` paths. These are not repo CI
@@ -149,6 +162,24 @@ _RULE_SUITE_LIMIT_PER_REPO = 100
 #: ALWAYS sent. Omitting `time_period` makes GitHub default to `day`, so a repository with a
 #: month of bypasses reads as a quiet one (req-github-core-rule-suites-5).
 _RULE_SUITE_WINDOW = "month"
+
+#: Artifacts collected per repository per run, newest first. Measured 3,636 on one active
+#: repository, so the cap is the rule rather than the exception and the total is always reported.
+_ARTIFACT_LIMIT_PER_REPO = 100
+#: Packages per type and versions per package. Both endpoints are newest-first; GitHub's own
+#: `version_count` says what the version cap left behind (measured 1,973 on one image).
+_PACKAGE_LIMIT_PER_TYPE = 100
+_PACKAGE_VERSION_LIMIT = 100
+#: GitHub's closed set of package types, as the REST `package_type` parameter spells them. One
+#: listing call per type: the endpoint refuses to enumerate without one.
+_PACKAGE_TYPES: tuple[str, ...] = ("container", "npm", "maven", "rubygems", "docker", "nuget")
+#: The image-tag convention `publish-images` uses: `sha-<short commit>`. The only derivation that
+#: joins a registry version to the run that built it; everything else is left unjoined and said so.
+_CONTAINER_TAG_SHA_PREFIX = "sha-"
+#: Output surfaces the repository node qualifies, in the order the machinery view renders them.
+_OUTPUT_SURFACES: tuple[str, ...] = ("releases", "artifacts", "packages")
+_OBSERVED = "observed"
+_UNOBSERVABLE = "unobservable"
 
 # Ruleset condition tokens GitHub uses in place of a ref pattern.
 _REF_TOKEN_DEFAULT_BRANCH = "~DEFAULT_BRANCH"  # nosec B105 — GitHub ref token, not a secret
@@ -520,6 +551,14 @@ class GithubCollector(CollectorBase):
         # purpose: one repository's default is `main` and another's is `master`, and a bare ref
         # path would let the first repo's default mark the second repo's same-named branch.
         self._default_refs: set[str] = set()
+        #: Per-repository index of the runs in this batch — what the OUTPUT edges resolve against
+        #: (`BUILDS_RELEASE`, `UPLOADS_ARTIFACT`, `BUILDS_PACKAGE_VERSION`). Packages are an
+        #: account surface collected after the walk, so the index outlives `_collect_repo`.
+        self._run_index: dict[str, list[dict[str, Any]]] = {}
+        #: Each collected repository's node envelope, so the packages pass can stamp the third
+        #: output state onto it after the walk (github-core#31: three states on the node the
+        #: absence is about).
+        self._repo_envelopes: dict[str, dict[str, Any]] = {}
 
         # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope)
         owner = collection_owner(data)
@@ -597,6 +636,15 @@ class GithubCollector(CollectorBase):
                 )
                 continue
             self.record_info(_SITE_REPO_DONE, "REPO_DONE", f"Collected {full_name}")
+
+        # --- packages: an ACCOUNT surface, collected once after the walk so every repository's
+        # runs are indexed before a registry version looks for the run that built it.
+        packages_state, packages_note = self._collect_packages(client, owner, nodes, edges)
+        for envelope in self._repo_envelopes.values():
+            observability = envelope["node"].setdefault("outputs_observability", {})
+            observability["packages"] = packages_state
+            if packages_note:
+                observability.setdefault("notes", {})["packages"] = packages_note
 
         if failed and len(failed) == len(repos):
             # Everything failed: that is not a transient blip, it is a broken credential or a
@@ -908,25 +956,28 @@ class GithubCollector(CollectorBase):
         gql = self._config.get(full_name)
         repo_payload = self._repo_payload_from_config(gql) if gql else client.get(f"/repos/{full_name}")
         repo_uuid = repository_id(full_name)
-        nodes.append(
-            node_envelope(
-                entity_id=repo_uuid,
-                entity_type="github_core__github_repository",
-                name=full_name,
-                dimensions=repo_dims,
-                fields={
-                    "full_name": full_name,
-                    "owner_login": owner,
-                    "name": full_name,
-                    "github_id": repo_payload.get("id"),
-                    "default_branch": repo_payload.get("default_branch", ""),
-                    "visibility": repo_payload.get("visibility", ""),
-                    "html_url": repo_payload.get("html_url", ""),
-                    "configuration": {},
-                    "tags": {},
-                },
-            )
+        repo_envelope = node_envelope(
+            entity_id=repo_uuid,
+            entity_type="github_core__github_repository",
+            name=full_name,
+            dimensions=repo_dims,
+            fields={
+                "full_name": full_name,
+                "owner_login": owner,
+                "name": full_name,
+                "github_id": repo_payload.get("id"),
+                "default_branch": repo_payload.get("default_branch", ""),
+                "visibility": repo_payload.get("visibility", ""),
+                "html_url": repo_payload.get("html_url", ""),
+                # Filled in below, once the output surfaces have been attempted. `{}` here would
+                # read as "never looked", which is the honest value until then.
+                "outputs_observability": {},
+                "configuration": {},
+                "tags": {},
+            },
         )
+        nodes.append(repo_envelope)
+        self._repo_envelopes[full_name] = repo_envelope
         edges.append(self._edge("OWNS_REPO__github_core", account_uuid, repo_uuid, repo_dims))
 
         # The Actions OIDC issuer (synthesized once as a platform singleton) is
@@ -1115,6 +1166,34 @@ class GithubCollector(CollectorBase):
                     },
                 )
             )
+
+        # The runs in this batch, indexed for the OUTPUT edges below and for the packages pass
+        # after the walk. `run_id` is what an artifact names; `head_sha`/`head_branch`/`event`
+        # are what a release or an image tag can be matched against.
+        run_index = [
+            {
+                "run_id": r["id"],
+                "uuid": run_id(full_name, r["id"]),
+                "head_sha": str(r.get("head_sha") or ""),
+                "head_branch": str(r.get("head_branch") or ""),
+                "event": str(r.get("event") or ""),
+            }
+            for r in run_payloads
+        ]
+        self._run_index[full_name] = run_index
+
+        # --- outputs (github-core#31): what the pipeline PRODUCES. Each surface reports one of
+        # three states onto the repository node — observed, or unobservable with the reason —
+        # because a view that reads only the output nodes cannot tell "none" from "could not look".
+        outputs: dict[str, Any] = {"notes": {}}
+        outputs["releases"] = self._collect_releases(
+            full_name, repo_uuid, {**repo_dims, "github.surface": "releases", "github.observation": "execution"},
+            ref_uuid_by_ref, run_index, nodes, edges, outputs["notes"],
+        )
+        outputs["artifacts"] = self._collect_artifacts(
+            client, full_name, repo_uuid, observation_dims, run_index, nodes, edges, outputs["notes"]
+        )
+        repo_envelope["node"]["outputs_observability"] = outputs
 
         # stored cache entries (REST; graceful-degrade like runners). Observation dimensions:
         # a cache entry is something that HAPPENED, not something declared.
@@ -1928,6 +2007,427 @@ class GithubCollector(CollectorBase):
                 f"accessed first). Absence of an entry in this batch is not evidence it is gone.",
                 message_data={"repo": full_name, "collected": len(entries), "total": total},
             )
+
+
+    # ---------- outputs (github-core#31): releases, artifacts, packages ----------
+
+    def _collect_releases(
+        self,
+        full_name: str,
+        repo_uuid: Any,
+        dims: dict[str, str],
+        ref_uuid_by_ref: dict[str, Any],
+        run_index: list[dict[str, Any]],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        notes: dict[str, str],
+    ) -> str:
+        """Emit the repository's releases from the config layer already in hand.
+
+        Returns the surface's observability state. A release is a product of execution riding
+        the declaration transport (`req-github-core-releases`): it arrives in the same GraphQL
+        response as rulesets and refs at no extra request, but it is stamped `execution` because
+        it exists only because someone published it.
+
+        Three edges. `PUBLISHES_RELEASE` is containment. `TARGETS_REF` joins the tag when we
+        observed it — both ends carry the commit they resolved to, so a re-tag is a query. And
+        `BUILDS_RELEASE` is DERIVED: GitHub records who published a release but never which run,
+        so the run is inferred from its tag ref or its head commit and `match_kind` says which.
+        """
+        gql = self._config.get(full_name)
+        if not gql or "releases" not in gql or gql.get("releases") is None:
+            # A repos-only scope runs no config-layer query, and a degraded GraphQL field leaves
+            # the key absent. Either way we did not look, and the node must say so.
+            reason = (
+                "the config-layer query did not answer the releases field for this repository"
+                if gql
+                else "a repos-only scope runs no config-layer query; releases are config-layer data"
+            )
+            notes["releases"] = reason
+            self.record_warn(
+                _SITE_RELEASES_UNOBSERVABLE,
+                "RELEASES_UNOBSERVABLE",
+                f"Releases NOT observed for {full_name} — {reason}. This is not the same as none existing.",
+                message_data={"repo": full_name},
+            )
+            return _UNOBSERVABLE
+
+        releases, missing = GithubGraphQLClient.releases(gql)
+        for rel in releases:
+            if rel.get("release_id") is None:
+                continue
+            rel_uuid = release_id(full_name, rel["release_id"])
+            tag_name = str(rel.get("tag_name") or "")
+            nodes.append(
+                node_envelope(
+                    entity_id=rel_uuid,
+                    entity_type="github_core__github_release",
+                    name=rel.get("name") or tag_name or str(rel["release_id"]),
+                    dimensions=dims,
+                    fields={
+                        "release_id": rel["release_id"],
+                        "full_name": full_name,
+                        "tag_name": tag_name,
+                        "name": str(rel.get("name") or ""),
+                        "is_draft": rel.get("is_draft"),
+                        "is_prerelease": rel.get("is_prerelease"),
+                        "is_latest": rel.get("is_latest"),
+                        "author_login": str(rel.get("author_login") or ""),
+                        "target_sha": str(rel.get("target_sha") or ""),
+                        "created_at": rel.get("created_at"),
+                        "published_at": rel.get("published_at"),
+                        "html_url": str(rel.get("html_url") or ""),
+                        "asset_count": rel.get("asset_count"),
+                        "assets": list(rel.get("assets") or []),
+                        "configuration": {},
+                        "tags": {},
+                    },
+                )
+            )
+            edges.append(self._edge("PUBLISHES_RELEASE__github_core", repo_uuid, rel_uuid, dims))
+            ref_uuid = ref_uuid_by_ref.get(f"refs/tags/{tag_name}") if tag_name else None
+            if ref_uuid is not None:
+                edges.append(
+                    self._edge("TARGETS_REF__github_core", rel_uuid, ref_uuid, dims, properties={"tag_name": tag_name})
+                )
+            target_sha = str(rel.get("target_sha") or "")
+            for run in run_index:
+                if run["event"] == "release":
+                    # Triggered BY the release — a consumer of it, not its producer.
+                    continue
+                if tag_name and run["head_branch"] == tag_name:
+                    match_kind = "tag_ref"
+                elif target_sha and run["head_sha"] == target_sha:
+                    match_kind = "same_commit"
+                else:
+                    continue
+                edges.append(
+                    self._edge(
+                        "BUILDS_RELEASE__github_core", run["uuid"], rel_uuid, dims,
+                        properties={"match_kind": match_kind, "head_sha": run["head_sha"]},
+                    )
+                )
+        if missing > 0:
+            self.record_warn(
+                _SITE_RELEASES_TRUNCATED,
+                "RELEASES_TRUNCATED",
+                f"{full_name}: collected {len(releases)} of {len(releases) + missing} releases (newest "
+                f"first). Absence of a release in this batch is not evidence it was deleted.",
+                message_data={"repo": full_name, "collected": len(releases), "missing": missing},
+            )
+        return _OBSERVED
+
+    def _collect_artifacts(
+        self,
+        client: GithubClient,
+        full_name: str,
+        repo_uuid: Any,
+        dims: dict[str, str],
+        run_index: list[dict[str, Any]],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        notes: dict[str, str],
+    ) -> str:
+        """Emit the repository's uploaded artifacts, newest first, joined to the runs in this batch.
+
+        REST-only (`req-github-core-artifacts`): GraphQL exposes no artifacts. The listing names
+        the run that uploaded each one — GitHub's own attribution, which is why `UPLOADS_ARTIFACT`
+        is reported where `BUILDS_RELEASE` is derived. An artifact whose run is outside the
+        collected window still lands, still carries its `run_id`, and hangs off the repository.
+        """
+        try:
+            payload = client.get(
+                f"/repos/{full_name}/actions/artifacts", params={"per_page": str(_ARTIFACT_LIMIT_PER_REPO)}
+            )
+        except GithubAPIError as exc:
+            if exc.status in (403, 404):
+                notes["artifacts"] = f"the artifact listing answered {exc.status}"
+                self.record_warn(
+                    _SITE_ARTIFACTS_DEGRADED,
+                    f"ARTIFACTS_UNREADABLE_{exc.status}",
+                    f"Artifacts inaccessible for {full_name} — NOT observed, which is not the same as "
+                    f"none uploaded: {exc.body[:120]}",
+                    message_data={"repo": full_name, "status": exc.status},
+                )
+                return _UNOBSERVABLE
+            raise
+        items = payload.get("artifacts") or []
+        total = int(payload.get("total_count") or len(items))
+        run_uuid_by_id = {run["run_id"]: run["uuid"] for run in run_index}
+        for item in items:
+            art_uuid = actions_artifact_id(full_name, item["id"])
+            producing = item.get("workflow_run") or {}
+            head_sha = str(producing.get("head_sha") or "")
+            head_branch = str(producing.get("head_branch") or "")
+            nodes.append(
+                node_envelope(
+                    entity_id=art_uuid,
+                    entity_type="github_core__actions_artifact",
+                    name=str(item.get("name") or item["id"]),
+                    dimensions=dims,
+                    fields={
+                        "artifact_id": item["id"],
+                        "full_name": full_name,
+                        "name": str(item.get("name") or ""),
+                        "size_in_bytes": item.get("size_in_bytes"),
+                        "digest": str(item.get("digest") or ""),
+                        "expired": item.get("expired"),
+                        "run_id": producing.get("id"),
+                        "head_sha": head_sha,
+                        "head_branch": head_branch,
+                        "created_at": item.get("created_at"),
+                        "updated_at": item.get("updated_at"),
+                        "expires_at": item.get("expires_at"),
+                        "archive_download_url": str(item.get("archive_download_url") or ""),
+                        "configuration": {},
+                        "tags": {},
+                    },
+                )
+            )
+            edges.append(self._edge("STORES_ARTIFACT__github_core", repo_uuid, art_uuid, dims))
+            run_uuid = run_uuid_by_id.get(producing.get("id"))
+            if run_uuid is not None:
+                edges.append(
+                    self._edge(
+                        "UPLOADS_ARTIFACT__github_core", run_uuid, art_uuid, dims,
+                        properties={"head_branch": head_branch, "head_sha": head_sha},
+                    )
+                )
+        if total > len(items):
+            self.record_warn(
+                _SITE_ARTIFACTS_TRUNCATED,
+                "ARTIFACTS_TRUNCATED",
+                f"{full_name}: collected {len(items)} of {total} artifacts (newest first). Absence "
+                f"of an artifact in this batch is not evidence it expired or was deleted.",
+                message_data={"repo": full_name, "collected": len(items), "total": total},
+            )
+        return _OBSERVED
+
+    def _collect_packages(
+        self,
+        client: GithubClient,
+        owner: str | None,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> tuple[str, str]:
+        """Emit the account's packages and their versions; return ``(state, note)``.
+
+        GitHub Packages is REST-only and, per GitHub's own OpenAPI description, its endpoints are
+        `enabledForGitHubApps: false` (`req-github-core-packages`). Measured 2026-09-02 with an App
+        installation token: `package_type=container` answers 400 while the org's ghcr.io images
+        exist; `npm`/`maven`/`docker` answer 200 `[]`. So under an App credential an EMPTY listing
+        proves nothing — the same asymmetry as bypass actors: a filtered answer cannot invent a
+        package, so a non-empty one proves itself and an empty one is unobservable. The token,
+        when placed, is routed here for exactly that reason.
+        """
+        if owner is None:
+            return _UNOBSERVABLE, "packages are an account surface; a repos-only scope names no account"
+        pat_client = self._pat_client
+        listing_client = pat_client or client
+        account_uuid = account_id(owner)
+        dims = {"github.platform": "github.com", "github.owner": owner, "github.surface": "packages",
+                "github.observation": "execution"}
+        unobservable: dict[str, str] = {}
+        collected = 0
+        for package_type in _PACKAGE_TYPES:
+            packages, outcome, scope = self._list_packages(listing_client, owner, package_type)
+            if outcome:
+                unobservable[package_type] = outcome
+            elif not packages and pat_client is None:
+                # 200 [] from a credential the description says cannot use the endpoint.
+                unobservable[package_type] = "empty answer under an App credential, which GitHub does not enable for this endpoint"
+            for pkg in packages:
+                collected += 1
+                self._emit_package(listing_client, owner, scope, account_uuid, package_type, pkg, dims, nodes, edges)
+        if collected:
+            self.record_info(
+                _SITE_PACKAGES_COLLECTED, "PACKAGES_COLLECTED",
+                f"{collected} package(s) under {owner}.",
+                message_data={"owner": owner, "count": collected, "unobservable_types": sorted(unobservable)},
+            )
+        if not unobservable:
+            return _OBSERVED, ""
+        note = "; ".join(f"{t}: {why}" for t, why in unobservable.items())
+        if pat_client is None:
+            note += (". GitHub's OpenAPI description marks the packages endpoints enabledForGitHubApps: false; "
+                     "a classic personal access token with read:packages is the credential GitHub documents")
+        self.record_warn(
+            _SITE_PACKAGES_UNOBSERVABLE, "PACKAGES_UNOBSERVABLE",
+            f"Packages NOT observed for {owner} on {len(unobservable)} of {len(_PACKAGE_TYPES)} package "
+            f"type(s) — which is not the same as none published. {note}",
+            message_data={"owner": owner, "unobservable": unobservable, "collected": collected},
+        )
+        return _UNOBSERVABLE, note
+
+    def _list_packages(
+        self, client: GithubClient, owner: str, package_type: str
+    ) -> tuple[list[dict[str, Any]], str, str]:
+        """One package-type listing: ``(items, reason, scope)``.
+
+        ``reason`` is empty on an answer and names the refusal otherwise; ``scope`` is ``orgs`` or
+        ``users`` — whichever path answered, so the versions call follows the same one. 400 is a
+        refusal alongside 403/404 because it is what the endpoint returns an App installation
+        token for `container` — measured, not assumed.
+        """
+        params = {"package_type": package_type, "per_page": str(_PACKAGE_LIMIT_PER_TYPE)}
+        for scope in ("orgs", "users"):
+            try:
+                return client.get_paginated(f"/{scope}/{owner}/packages", params=params, max_pages=1), "", scope
+            except GithubAPIError as exc:
+                if exc.status == 404 and scope == "orgs":
+                    continue  # a user account: fall through to the user path
+                if exc.status in (400, 403, 404):
+                    self.record_warn(
+                        _SITE_PACKAGES_UNREADABLE, f"PACKAGES_UNREADABLE_{exc.status}",
+                        f"Package listing ({package_type}) refused for {owner}: {exc.status} {exc.body[:120]}",
+                        message_data={"owner": owner, "package_type": package_type, "status": exc.status},
+                    )
+                    return [], f"listing answered {exc.status}", scope
+                raise
+        return [], "listing answered 404 on both the organization and user paths", "users"
+
+    def _emit_package(
+        self,
+        client: GithubClient,
+        owner: str,
+        scope: str,
+        account_uuid: Any,
+        package_type: str,
+        pkg: dict[str, Any],
+        dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """One package node, its owner/repository edges, its versions, and the run joins."""
+        name = str(pkg.get("name") or "")
+        if not name:
+            return
+        pkg_uuid = package_id(owner, package_type, name)
+        linked_repo = str((pkg.get("repository") or {}).get("full_name") or "")
+        version_count = pkg.get("version_count")
+        nodes.append(
+            node_envelope(
+                entity_id=pkg_uuid,
+                entity_type="github_core__github_package",
+                name=f"{owner}/{name}",
+                dimensions=dims,
+                fields={
+                    "package_id": pkg.get("id"),
+                    "owner_login": owner,
+                    "package_type": package_type,
+                    "name": name,
+                    "purl": package_purl(package_type, owner, name),
+                    "visibility": str(pkg.get("visibility") or ""),
+                    "version_count": version_count,
+                    "repository_full_name": linked_repo,
+                    "html_url": str(pkg.get("html_url") or ""),
+                    "created_at": pkg.get("created_at"),
+                    "updated_at": pkg.get("updated_at"),
+                    "configuration": {},
+                    "tags": {},
+                },
+            )
+        )
+        edges.append(
+            self._edge("PUBLISHES_PACKAGE__github_core", account_uuid, pkg_uuid, dims, properties={"link_kind": "owner"})
+        )
+        if linked_repo in self._repo_envelopes:
+            edges.append(
+                self._edge(
+                    "PUBLISHES_PACKAGE__github_core", repository_id(linked_repo), pkg_uuid, dims,
+                    properties={"link_kind": "repository"},
+                )
+            )
+        # Which runs a version may be matched against: the linked repository's when GitHub links
+        # one, otherwise every collected repository's — a `sha-<short>` tag is specific enough.
+        candidate_runs = (
+            self._run_index.get(linked_repo, [])
+            if linked_repo
+            else [run for runs in self._run_index.values() for run in runs]
+        )
+        try:
+            versions = client.get_paginated(
+                f"/{scope}/{owner}/packages/{package_type}/{name}/versions",
+                params={"per_page": str(_PACKAGE_VERSION_LIMIT)},
+                max_pages=1,
+            )
+        except GithubAPIError as exc:
+            if exc.status in (400, 403, 404):
+                self.record_warn(
+                    _SITE_PACKAGE_VERSIONS_DEGRADED, f"PACKAGE_VERSIONS_UNREADABLE_{exc.status}",
+                    f"Versions of {owner}/{name} ({package_type}) refused: {exc.status} {exc.body[:120]}",
+                    message_data={"owner": owner, "package": name, "package_type": package_type, "status": exc.status},
+                )
+                return
+            raise
+        for version in versions:
+            self._emit_package_version(owner, package_type, name, pkg_uuid, version, candidate_runs, dims, nodes, edges)
+        if version_count is not None and int(version_count) > len(versions):
+            self.record_warn(
+                _SITE_PACKAGE_VERSIONS_TRUNCATED, "PACKAGE_VERSIONS_TRUNCATED",
+                f"{owner}/{name}: collected {len(versions)} of {version_count} versions (newest first). "
+                f"Absence of a version in this batch is not evidence it was deleted.",
+                message_data={"owner": owner, "package": name, "collected": len(versions), "total": version_count},
+            )
+
+    def _emit_package_version(
+        self,
+        owner: str,
+        package_type: str,
+        name: str,
+        pkg_uuid: Any,
+        version: dict[str, Any],
+        candidate_runs: list[dict[str, Any]],
+        dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """One version node, its containment edge, and — when a tag says so — the run that built it."""
+        version_name = str(version.get("name") or "")
+        ver_uuid = package_version_id(owner, package_type, name, version["id"])
+        container_tags = list(((version.get("metadata") or {}).get("container") or {}).get("tags") or [])
+        nodes.append(
+            node_envelope(
+                entity_id=ver_uuid,
+                entity_type="github_core__github_package_version",
+                name=f"{name}@{version_name[:19] if version_name.startswith('sha256:') else version_name}",
+                dimensions=dims,
+                fields={
+                    "version_id": version["id"],
+                    "owner_login": owner,
+                    "package_type": package_type,
+                    "package_name": name,
+                    "version": version_name,
+                    "purl": package_purl(package_type, owner, name, version_name),
+                    "container_tags": container_tags,
+                    "html_url": str(version.get("html_url") or ""),
+                    "created_at": version.get("created_at"),
+                    "updated_at": version.get("updated_at"),
+                    "configuration": {},
+                    "tags": {},
+                },
+            )
+        )
+        edges.append(self._edge("PUBLISHES_PACKAGE_VERSION__github_core", pkg_uuid, ver_uuid, dims))
+        # BUILDS_PACKAGE_VERSION, derived from the `sha-<short>` tag convention. Its ABSENCE is the
+        # corpus's finding — but only once `match_kind` has been read, because a version tagged any
+        # other way carries no edge for a reason that is a limit of this derivation, not evidence.
+        shas = {
+            tag[len(_CONTAINER_TAG_SHA_PREFIX):].lower()
+            for tag in container_tags
+            if tag.startswith(_CONTAINER_TAG_SHA_PREFIX) and len(tag) > len(_CONTAINER_TAG_SHA_PREFIX) + 6
+        }
+        if not shas:
+            return
+        for run in candidate_runs:
+            head_sha = run["head_sha"].lower()
+            if head_sha and any(head_sha.startswith(short) for short in shas):
+                edges.append(
+                    self._edge(
+                        "BUILDS_PACKAGE_VERSION__github_core", run["uuid"], ver_uuid, dims,
+                        properties={"match_kind": "tag_sha", "attested": None},
+                    )
+                )
 
     def _collect_app_installations(
         self,

@@ -154,6 +154,12 @@ or the product's docs — rather than leaving them in a terminal.
 - **A probe returns 403 on a permission the table shows as granted** — the permission was added to
   the App *after* installation. Existing installations must accept new permissions; the operator
   gets a prompt in the account's settings.
+- **Packages read as `unobservable` after re-accepting `organization_packages: read`** — expected
+  until proven otherwise. GitHub's OpenAPI description marks every packages endpoint
+  `enabledForGitHubApps: false`, and an App token was measured (2026-09-02) getting a 400 on the
+  container listing. The collector records the surface as not observable rather than empty; a
+  classic personal access token with `read:packages` is the credential GitHub documents for it
+  (`req-github-core-packages`).
 - **`404` on the PAT-grants endpoint** — either the `organization:personal_access_tokens:read`
   permission was not requested, or the observed account is a personal account, where the concept
   does not exist.

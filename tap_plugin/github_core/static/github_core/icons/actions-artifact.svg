@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. A zipped file with an upload arrow — an artifact a run uploaded. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>Actions Artifact</title>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linejoin="round"
+    d="M6 3.5h7.5L18 8v11.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" d="M13.5 3.5V8H18"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+    d="M11.5 17v-5.5m-2.5 2.5 2.5-2.5 2.5 2.5"/>
+</svg>

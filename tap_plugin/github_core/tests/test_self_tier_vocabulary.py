@@ -887,7 +887,9 @@ class TestVocabularyIsDeclared:
             "contents": "read",
             "administration": "read",
         }
-        assert org_perms == {"administration": "read"}
+        # `packages` arrived with the outputs (github-core#31) and is the one permission an
+        # existing installation must re-accept; every other surface reads under the prior set.
+        assert org_perms == {"administration": "read", "packages": "read"}
         assert all(level == "read" for level in {**repo_perms, **org_perms}.values()), (
             "the collector never asks for write"
         )
@@ -1021,6 +1023,8 @@ def _walk_one_repo(monkeypatch, runs: list[dict] | None = None) -> tuple[list[di
     # one whose blank cell must not read as "nobody can bypass".
     collector._pat_client = None
     collector._pat_ruleset_status = "untried"
+    collector._run_index = {}
+    collector._repo_envelopes = {}
 
     class _AppOnlyAuth:
         has_app = True

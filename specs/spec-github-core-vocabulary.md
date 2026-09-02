@@ -83,7 +83,7 @@ neutral substrate when one is extracted, not in `github_core`.
 | `app_installation` | no | self | proposed | 7 sources. **Splits the existing `github_app`**: the registered application and the grant are different objects |
 | `pull_request` | yes | self | proposed | 10 sources |
 | `github_environment` | neutral-capable | self-lite | proposed | 10 sources; 7 standards |
-| `github_release` | **yes** | self-lite | proposed | 6 sources |
+| `github_release` | **yes** | self-lite | **In Development** (2026-09-02, github-core#31) | 6 sources. Keyed on the release id, not the tag — a re-cut and a re-tag must read as what they are |
 | `github_runner` | no | self | exists | 9 sources |
 | `github_app` | no | self | exists | keeps the *application*; the grant moves to `app_installation` |
 | `identity_core__oidc_issuer` | yes | self | exists | we are ahead here — the published GitHub graph has no OIDC issuer at all |
@@ -91,9 +91,9 @@ neutral substrate when one is extracted, not in `github_core`.
 | `github_team` | no | friends | proposed | 10 sources |
 | `credential_grant` → `identity_core` | **yes** | friends | **new** | **9 standards + 15 incidents.** One node with a `kind` enum, not four thin types — otherwise the one query the standards ask for verbatim requires a UNION |
 | `runner_group` | no | friends | **new** | the published graph is ahead of us on runner scope |
-| `actions_artifact` | neutral-capable | friends | **new** | 11 sources (as *artifact*) |
+| `actions_artifact` | neutral-capable | friends | **In Development** (2026-09-02, github-core#31) | 11 sources (as *artifact*). The execution side; GitHub attributes each upload to its run |
 | `webhook` | neutral-capable | friends | proposed | 4 standards |
-| `package` / `package_version` | **yes** | friends | **new** | **14 incidents, 10 sources.** Identity is a **purl** (the strongest convergence in the whole sweep) |
+| `package` / `package_version` | **yes** | friends | **new** — collected via `github_package` / `github_package_version` (In Development 2026-09-02, decision 5) | **14 incidents, 10 sources.** Identity is a **purl** (the strongest convergence in the whole sweep). Decision 4 stands for identity; github_core owns the COLLECTION seam and carries the purl |
 | `identity_core__principal` | **yes** | later | **new** | the *robot / non-human actor* concept clears the 3-source bar |
 | `deployment` | neutral-capable | later | **new** | one incident |
 
@@ -135,10 +135,12 @@ properties must justify why it needs none.
 | `REPRESENTS_CREDENTIAL` | actions_secret → credential_grant | friends | new | `{match_kind, confidence}` |
 | `HOLDS_CREDENTIAL` / `GRANTS_ACCESS_TO` | principal → grant → repository | friends | new | `{permission, granted_at, last_used_at}` — grant timestamps are a standardised property |
 | `REGISTERED_ON` / `MEMBER_OF_RUNNER_GROUP` | runner → repo\|account, runner → group | friends | new | `{first_seen, scope}` — "a runner appeared where none had been" |
-| `BUILDS_PACKAGE_VERSION` | run → package_version | friends | new | `{attested}` — **its absence is the finding**: a registry version with no run behind it is how five incidents read |
+| `BUILDS_PACKAGE_VERSION` | run → package_version | friends | **In Development** (2026-09-02) | `{attested, match_kind}` — **its absence is the finding**: a registry version with no run behind it is how five incidents read. Built as run → `github_package_version`, derived from the `sha-<short>` tag convention; `match_kind` names the derivation so an absence outside it is read as a limit first |
 | `POINTS_AT` | git_ref → git_commit | friends | new | `{observed_at}` |
 | `FETCHES_FROM` | workflow_job → web_host | friends | new | `{url_pattern, piped_to_shell, digest_pinned}` |
-| `UPLOADS_ARTIFACT` / `DOWNLOADS_ARTIFACT` | workflow_job → artifact | friends | new | `{cross_workflow}` |
+| `UPLOADS_ARTIFACT` / `DOWNLOADS_ARTIFACT` | workflow_job → artifact | friends | `UPLOADS_ARTIFACT` **In Development** (2026-09-02) as run → artifact; `DOWNLOADS_ARTIFACT` new | `{cross_workflow}` — the declared-job form. The built form is the EXECUTION side (run → artifact, `{head_branch, head_sha}`, GitHub's own attribution); the declared side needs the step parser and stays open |
+| **`PUBLISHES_RELEASE`** / **`BUILDS_RELEASE`** / **`TARGETS_REF`** | repo → release; run → release; release → git_ref | self-lite | **In Development** (2026-09-02, github-core#31) | `BUILDS_RELEASE {match_kind, head_sha}` — DERIVED (GitHub records the author, never the run) and labelled; `TARGETS_REF {tag_name}` — both ends carry the commit they resolved to, so a tag moved under a release is a query |
+| **`STORES_ARTIFACT`** / **`PUBLISHES_PACKAGE`** / **`PUBLISHES_PACKAGE_VERSION`** | repo → artifact; account\|repo → package; package → version | friends | **In Development** (2026-09-02) | containment; `PUBLISHES_PACKAGE {link_kind}` distinguishes the unconditional owner edge from GitHub's optional repository link |
 | `LINKED_IDENTITY` | account → principal | later | new | `{confidence, evidence}` |
 
 ### Naming
@@ -198,6 +200,7 @@ readable catalogue, a collector can land it on the grid so "what changed" become
 | 2 | `git_ref` replacing `git_branch`? | **Yes** (2026-08-27). One type, `ref_type` ∈ `branch` \| `tag`. Tag movement is the detection for three incidents, and a ruleset's target is one enum spanning `branch\|tag\|push`, so a split type would fan the ruleset join out across two types and two edges. The slug is a modelling name: views render "Branches" and "Tags", and the word *ref* need never reach a reader |
 | 3 | Where `credential_grant` lives | **`identity_core`** — neutral, sits beside `principal`, and both a non-forge and a registry collector populate it |
 | 4 | Where `package` / `package_version` live | **A new `supply_chain_core`.** Supply chain is the next domain after this one, so the substrate is created there rather than borrowed. Identity remains a purl |
+| 5 | (2026-09-02) Who COLLECTS GitHub Packages, given decision 4 | **github_core, as the collection seam.** GitHub Packages is a GitHub surface — its API, its permission, its `enabledForGitHubApps: false`, its container-registry quirks — so the collector lives here and emits github_core-owned `github_package` / `github_package_version` carrying a `purl` field. Decision 4 **stands for identity**: `supply_chain_core` claims or aliases these nodes by purl when it exists; nothing here pretends to be the neutral type. Ruled by George 2026-09-02 (GraphQL where offered, REST where not, `packages: read` accepted); recorded in `req-github-core-packages` |
 
 ## Open questions
 
@@ -205,7 +208,7 @@ readable catalogue, a collector can land it on the grid so "what changed" become
    nothing points at one — the node test says field. But six platform sources model it, and a
    variable can be *half a credential* (an app ID beside a private key held as a secret). **Default
    to a field at `self`; revisit at `friends`** if anything needs to point at one.
-2. ~~Where `package_version` lives.~~ **Settled:** `supply_chain_core` (see decisions above).
+2. ~~Where `package_version` lives.~~ **Settled:** `supply_chain_core` (see decisions above). **Collection seam settled 2026-09-02 (decision 5):** github_core collects and carries the purl; identity stays with decision 4. **Still open:** the packages surface is unobservable with the App credential (`enabledForGitHubApps: false`, measured as a 400) — whether re-accepting `organization_packages: read` changes that is unmeasured, and a classic PAT with `read:packages` is the only credential GitHub documents.
 3. ~~**`BYPASSES` observability.**~~ **SETTLED EMPIRICALLY 2026-08-27, and the answer is worse than
    expected.** GitHub returns `bypass_actors` only to a caller with **write access to the ruleset**.
    Measured against our own org, and **read the next paragraph before relying on the comparison**:

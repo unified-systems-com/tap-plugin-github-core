@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. A tag label with a hole — a release cut on a tag. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>GitHub Release</title>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linejoin="round"
+    d="M3.5 4.5v7.2l9.3 9.3 8.2-8.2-9.3-9.3H4.5a1 1 0 0 0-1 1Z"/>
+  <circle cx="7.6" cy="8.6" r="1.4" fill="none" stroke="#1f2328" stroke-width="1.4"/>
+</svg>

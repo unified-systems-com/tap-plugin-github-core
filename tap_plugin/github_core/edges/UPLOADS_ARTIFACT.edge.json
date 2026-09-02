@@ -1,0 +1,30 @@
+{
+  "slug": "UPLOADS_ARTIFACT__github_core",
+  "name": "Uploads Artifact",
+  "description": "A workflow run uploaded this artifact \u2014 GitHub's own attribution (`workflow_run.id` on the artifact), not a derivation. The vocabulary corpus sources this edge on the DECLARED job (`workflow_job`, from `actions/upload-artifact` steps); this is the EXECUTION side, sourced on the run, because that is what the artifact listing records. The declared side is still open (see the article).",
+  "sources": [
+    "github_core__github_actions_run"
+  ],
+  "targets": [
+    "github_core__actions_artifact"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "head_branch": {
+        "type": "string",
+        "description": "The ref the producing run was on. The trust-boundary question: an artifact uploaded from a fork's pull request and downloaded by a privileged workflow is the ArtiPACKED shape."
+      },
+      "head_sha": {
+        "type": "string",
+        "description": "The commit the producing run built."
+      }
+    }
+  }
+}

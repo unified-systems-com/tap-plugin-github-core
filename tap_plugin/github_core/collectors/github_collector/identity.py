@@ -116,6 +116,92 @@ def runner_id(full_name: str, runner_id_int: int | str) -> UUID:
     return _id("github_core__github_runner", f"{full_name}#{runner_id_int}")
 
 
+def release_id(full_name: str, release_id_int: int | str) -> UUID:
+    """A release, keyed on `owner/repo` + GitHub's release id (github-core#31).
+
+    The id rather than the tag name: a release can be deleted and re-cut on the same tag, and
+    a tag can be moved under a release, and both must read as what they are — a different
+    object, or the same object whose `target_sha` changed — rather than being folded together.
+    """
+    return _id("github_core__github_release", f"{full_name}#{release_id_int}")
+
+
+def actions_artifact_id(full_name: str, artifact_id_int: int | str) -> UUID:
+    return _id("github_core__actions_artifact", f"{full_name}#{artifact_id_int}")
+
+
+def package_id(owner: str, package_type: str, name: str) -> UUID:
+    """A package, keyed on owner + type + name — GitHub's own path to it.
+
+    Not on the numeric id: the REST path `/orgs/{owner}/packages/{type}/{name}` is how every
+    later surface reaches the package, and a deleted-and-republished package of the same name
+    IS the same thing to every consumer that pulls it by name.
+    """
+    return _id("github_core__github_package", f"{owner}#{package_type}#{name}")
+
+
+def package_version_id(owner: str, package_type: str, name: str, version_id_int: int | str) -> UUID:
+    """A version, scoped under its package and keyed on GitHub's version id.
+
+    GitHub's id rather than the version name: for a container the name is a digest, which is
+    content-addressed and would key correctly, but for npm/maven a version string can be
+    unpublished and re-published as different bytes, and the id is what tells them apart.
+    """
+    return _id("github_core__github_package_version", f"{owner}#{package_type}#{name}#{version_id_int}")
+
+
+#: GitHub Packages registry host per package type — the `repository_url` a purl needs to say
+#: that this npm package lives on GitHub's registry rather than npmjs.org.
+_REGISTRY_HOST_BY_TYPE = {
+    "npm": "npm.pkg.github.com",
+    "maven": "maven.pkg.github.com",
+    "rubygems": "rubygems.pkg.github.com",
+    "nuget": "nuget.pkg.github.com",
+}
+#: purl type per GitHub package type where the purl spec has one of its own.
+_PURL_TYPE_BY_TYPE = {"npm": "npm", "maven": "maven", "rubygems": "gem", "nuget": "nuget"}
+
+
+def package_purl(package_type: str, owner: str, name: str, version: str = "") -> str:
+    """Package-URL for a GitHub Packages package, per the purl spec's type registry.
+
+    The vocabulary corpus (decision 4) keys `package` / `package_version` on a purl and homes them
+    in a future `supply_chain_core`. This is the seam: github_core mints the purl from what the
+    GitHub surface knows, so the substrate can claim these nodes by identity later.
+
+    * `container` (ghcr.io) -> `pkg:docker/ghcr.io/<owner>/<name>@<digest>` — the purl spec's
+      docker type with the registry in the namespace, as its own examples do for gcr.io.
+    * `docker` (the retired docker.pkg.github.com registry) -> `pkg:docker/docker.pkg.github.com/...`.
+    * npm / maven / rubygems / nuget -> that ecosystem's purl type with
+      `?repository_url=<host>.pkg.github.com`, because the bare purl would name the public registry.
+    * anything else -> `pkg:github/<owner>/<name>@<version>`, the spec's GitHub-hosted type.
+
+    Owner and name are lowercased for the docker forms only — OCI references are case-sensitive
+    and always lowercase, and GitHub lowercases them on push. Every other form keeps the case
+    GitHub returned.
+    """
+    ptype = package_type.lower()
+    at = f"@{version}" if version else ""
+    if ptype == "container":
+        return f"pkg:docker/ghcr.io/{owner.lower()}/{name.lower()}{at}"
+    if ptype == "docker":
+        return f"pkg:docker/docker.pkg.github.com/{owner.lower()}/{name.lower()}{at}"
+    purl_type = _PURL_TYPE_BY_TYPE.get(ptype)
+    if purl_type is not None:
+        host = _REGISTRY_HOST_BY_TYPE[ptype]
+        if ptype == "npm":
+            # GitHub-hosted npm packages are always scoped by owner: `@owner/name`. The purl spec
+            # percent-encodes the `@` of a scope in the namespace.
+            return f"pkg:npm/%40{owner}/{name}{at}?repository_url={host}"
+        if ptype == "maven":
+            # GitHub reports a Maven package as `group.artifact` in one string; the last dotted
+            # segment is the artifact and the rest the group, which is the spec's namespace.
+            group, _, artifact = name.rpartition(".")
+            return f"pkg:maven/{group or owner}/{artifact}{at}?repository_url={host}"
+        return f"pkg:{purl_type}/{name}{at}?repository_url={host}"
+    return f"pkg:github/{owner}/{name}{at}"
+
+
 def edge_id(edge_type: str, source: UUID, target: UUID) -> UUID:
     """Deterministic UUIDv5 for an edge by (type, source, target)."""
     return uuid5(GITHUB_CORE_NAMESPACE, f"edge:{edge_type}:{source}:{target}")
