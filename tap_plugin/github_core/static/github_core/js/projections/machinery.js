@@ -109,6 +109,11 @@ const BASE_SIZES = {
 };
 
 const DEFAULTS = {flow: "rtl", column_gap: 48, row_gap: 12, stack_refs_over: 3};
+
+// Grid edges reach the client with their type in `label` (panel-graph.js
+// copies edge_type onto label only); the scene-local synthetic edges carry
+// both. Match either, as nesting.js does.
+const edgeSel = (type) => `edge[edge_type = "${type}"], edge[label = "${type}"]`;
 const KNOWN_KEYS = new Set(Object.keys(DEFAULTS));
 
 export async function execute(context) {
@@ -203,9 +208,9 @@ export async function execute(context) {
         .style({"border-color": "#b45309", "border-width": 2, "border-style": "dotted"})
         .selector(".machinery-unresolved")
         .style({"border-color": "#dc2626", "border-style": "dashed", "border-width": 2})
-        .selector(`edge[edge_type = "${E.dependsOnJob}"]`)
+        .selector(edgeSel(E.dependsOnJob))
         .style({"line-color": "#94a3b8", "target-arrow-color": "#94a3b8", "target-arrow-shape": "triangle", "width": 1.5, "curve-style": "bezier"})
-        .selector(`edge[edge_type = "${E.protects}"]`)
+        .selector(edgeSel(E.protects))
         .style({"line-color": "#b45309", "line-style": "dashed", "width": 1.5})
         .update();
 
@@ -239,7 +244,9 @@ export async function execute(context) {
         },
         innerLayouts: {
             [T.account]: {name: "flow", aspect: 2.0, gap: 24, sort: "area-desc"},
-            [T.repository]: ranked("order"),
+            // The pipelines stage holds every workflow; flowed columns keep it a
+            // block (rows in trigger-class order) instead of a seventeen-box tower.
+            [T.repository]: {...ranked("order"), columnLayout: "flow", flowAspect: 1.1},
             [T.workflow]: ranked("label"),
         },
     });
@@ -345,7 +352,7 @@ function _stampJobs(cy, facts, warn) {
     const jobsByWorkflow = new Map();
     cy.nodes(`[entity_type = "${T.job}"]`).forEach((job) => {
         const fact = facts.jobs.get(job.id()) || {};
-        const definer = job.incomers(`edge[edge_type = "${E.definesJob}"]`).sources().first();
+        const definer = job.incomers(edgeSel(E.definesJob)).sources().first();
         const wfKey = definer.nonempty() ? definer.id() : `wf:${fact.workflow_id}`;
         if (!jobsByWorkflow.has(wfKey)) jobsByWorkflow.set(wfKey, []);
         jobsByWorkflow.get(wfKey).push({node: job, fact, wfNode: definer});
@@ -439,7 +446,7 @@ function _planRefs(cy, facts, stackOver) {
         const isDefault = fact.is_default === true;
         const isTag = fact.ref_type === "tag";
         ref.data("_order", isDefault ? 0 : (isTag ? 1 : 2));
-        const owner = ref.incomers(`edge[edge_type = "${E.hasRef}"]`).sources().first();
+        const owner = ref.incomers(edgeSel(E.hasRef)).sources().first();
         const repoId = owner.nonempty() ? owner.id() : "";
         if (!byRepo.has(repoId)) byRepo.set(repoId, {kept: [], branches: []});
         if (isDefault || isTag) byRepo.get(repoId).kept.push(ref);
@@ -502,7 +509,7 @@ function _hideOrphans(cy, repos, warn) {
     const repoIds = new Set(repos.map((r) => r.id()));
     const hidden = [];
     const attachedTo = (node, edgeType, dir) => {
-        const edges = node.connectedEdges(`[edge_type = "${edgeType}"]`);
+        const edges = node.connectedEdges(edgeSel(edgeType));
         return edges.some((e) => repoIds.has(dir === "in" ? e.source().id() : e.target().id()));
     };
     cy.nodes(`[entity_type = "${T.ruleset}"]`).forEach((n) => { if (!attachedTo(n, E.protects, "out")) hidden.push(n); });
