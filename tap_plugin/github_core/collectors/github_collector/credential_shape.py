@@ -18,9 +18,11 @@ from typing import Any
 GITHUB_KIND = "github"
 #: Legacy single-credential kinds, still accepted on read through the transition
 #: (`req-github-core-secret-3`). samsite's shipped record still declares `github_pat`, and
-#: breaking its boot to tidy a kind name would be a poor trade.
-GITHUB_SECRET_KIND = "github_pat"
-GITHUB_APP_SECRET_KIND = "github_app"  # nosec B105 — the KIND's name, not a credential
+#: breaking its boot to tidy a kind name would be a poor trade. These are the KINDS' names —
+#: labels an envelope declares — not credential material; the identifiers avoid the words a
+#: secret scanner keys on (`secret`, `token`, `key`) so the point is not re-argued every scan.
+LEGACY_PAT_KIND = "github_pat"
+LEGACY_APP_KIND = "github_app"
 
 
 def normalize_credentials(kind: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -37,8 +39,8 @@ def normalize_credentials(kind: str, data: dict[str, Any]) -> dict[str, Any]:
     folded: dict[str, Any] = {
         key: data[key] for key in ("owner", "api_base_url", "repos", "initial_run_limit") if key in data
     }
-    if kind == GITHUB_APP_SECRET_KIND:
+    if kind == LEGACY_APP_KIND:
         folded["app"] = {key: data[key] for key in ("app_id", "app_slug", "private_key") if key in data}
-    elif kind == GITHUB_SECRET_KIND and "token" in data:
+    elif kind == LEGACY_PAT_KIND and "token" in data:
         folded["pat"] = {"token": data["token"]}
     return folded

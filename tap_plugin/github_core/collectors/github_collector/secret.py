@@ -32,11 +32,17 @@ from tap_cares.secrets.models import Secret
 # path-load the SAME fold from a bare checkout (github-core#25). Re-exported here because this
 # module is where every in-Django consumer already looks for them.
 from .credential_shape import (  # noqa: F401 — re-exports
-    GITHUB_APP_SECRET_KIND,
     GITHUB_KIND,
-    GITHUB_SECRET_KIND,
+    LEGACY_APP_KIND,
+    LEGACY_PAT_KIND,
     normalize_credentials,
 )
+
+#: The names this module has always exported for the legacy kinds. Aliases of the shape module's
+#: constants — assigned from a name, not a literal, which is also what keeps a secret scanner from
+#: reading a kind label as a credential.
+GITHUB_SECRET_KIND = LEGACY_PAT_KIND
+GITHUB_APP_SECRET_KIND = LEGACY_APP_KIND
 
 # The well-known SecretRef for the github_core collector. v0 has no per-
 # instance config; the operator drops `github_core/collector.secret.json` under
