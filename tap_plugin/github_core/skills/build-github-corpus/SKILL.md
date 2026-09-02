@@ -230,6 +230,10 @@ agent, and the answer is a row in `octicons-concepts.json`.
   GitHub's signature-verification record is per repository network, so one node per SHA merged
   verification records that disagree; the key became `<full_name>#<sha>`. Ask, for every
   natural key, *which observer's view is this the identity of?* (github-core#57)
+- **A test that stubs the recorder cannot see a broken site token.** Two log-site constants
+  shipped as `"d66c 9409 "` and `""` — a shell word-split that never happened — and every unit
+  test passed because they monkeypatch `record_warn`. Mint with `scripts/log-site-id`, and keep
+  one test that asserts the shape of every `_SITE_*` constant in the module. (github-core#62)
 - **Done-tests need a running instance that runs the branch.** The dev stack ran the shared
   clone, so none of the five ACIDs could be *observed*; every requirement stays In Development
   until a stack boots the branch. Budget the boot when the bake is more than one concept.
