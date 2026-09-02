@@ -573,7 +573,7 @@ observed, and red reserved for a bypass that *happened*, which is the rule-suite
 the guidance "a credential with write access to the ruleset would name them" rides `absent_note`
 (`req-github-core-app-auth-11`), machine-legible for the third player. `counted` is enough to make
 it work with a read-only credential; gathering and managing the identities under a properly scoped
-credential is the *make-it-right* task (#33 — same collector with a second envelope, or a separate
+credential is the *make-it-right* task (#39 — same collector with a second envelope, or a separate
 collector, is the open question).
 
 **The read-only posture has a hard ceiling here**, and it is published rather than engineered
