@@ -88,8 +88,14 @@ const UNTRIGGERED_ORDER = TRIGGER_ORDER.length;
 const PRODUCER_SCOPES = ["packages", "contents", "id-token"];
 
 // Output kinds the collector does not observe yet; each gets a placeholder
-// per repository until that kind's nodes appear (spec: req-...-honesty-1).
-const UNCOLLECTED_OUTPUT_KINDS = ["releases", "artifacts", "packages"];
+// per repository UNTIL a node of that kind attached to the repository is in
+// the scene (spec: req-...-honesty-1/-3). The entity types are the corpus's
+// names (github-core #31); a placeholder retires the day its type lands.
+const OUTPUT_KINDS = [
+    {kind: "releases", entityTypes: ["github_core__github_release"]},
+    {kind: "artifacts", entityTypes: ["github_core__actions_artifact"]},
+    {kind: "packages", entityTypes: ["supply_chain_core__package_version", "supply_chain_core__package"]},
+];
 
 // Leaf card sizes hold a name, not just an icon; containers take these as
 // floors and grow to their children (spec-viz-nested-projection).
@@ -133,15 +139,20 @@ export async function execute(context) {
         return {warnings};
     }
 
+    // Re-entry on the same cy (a zoom transition, a re-run): forget the last
+    // pass's marks so nothing is derived from a stale state.
+    _clearMarks(cy);
+
     // Repository labels: the box sits inside its owner's box, so "owner/"
     // is redundant and pushes long names past the box. Display only; the
-    // entity name (full_name) is kept for the fact queries below.
+    // full name is remembered on the node so a re-run still queries by it.
     const fullNameOf = new Map();
     repos.forEach((repo) => {
-        const label = repo.data("label") || "";
-        fullNameOf.set(repo.id(), label);
-        const slash = label.indexOf("/");
-        if (slash > 0) repo.data("label", label.slice(slash + 1));
+        const full = repo.data("_full_name") || repo.data("label") || "";
+        repo.data("_full_name", full);
+        fullNameOf.set(repo.id(), full);
+        const slash = full.indexOf("/");
+        if (slash > 0) repo.data("label", full.slice(slash + 1));
     });
 
     // ---- Facts the cy data does not carry -------------------------------
@@ -160,7 +171,7 @@ export async function execute(context) {
             .filter((i) => i >= 0)
             .reduce((m, i) => Math.min(m, i), UNTRIGGERED_ORDER);
         wf.data("_order", idx);
-        wf.data("_trigger_class", idx < UNTRIGGERED_ORDER ? TRIGGER_ORDER[idx] : "untriggered");
+        wf.data("_trigger_class", idx < UNTRIGGERED_ORDER ? TRIGGER_ORDER.at(idx) : "untriggered");
     });
 
     // ---- Sources: refs (default first, tags, then the branch deck) + gates
@@ -275,11 +286,9 @@ export async function execute(context) {
 function _readConfig(projection, warn) {
     const raw = (projection && projection.definition && projection.definition.machinery)
         || (projection && projection.machinery) || {};
-    const cfg = {...DEFAULTS};
-    Object.keys(raw).forEach((k) => {
-        if (KNOWN_KEYS.has(k)) cfg[k] = raw[k];
-        else warn("machinery_unknown_config_key", `ignoring machinery.${k}`);
-    });
+    const entries = Object.entries(raw);
+    entries.filter(([k]) => !KNOWN_KEYS.has(k)).forEach(([k]) => warn("machinery_unknown_config_key", `ignoring machinery.${k}`));
+    const cfg = {...DEFAULTS, ...Object.fromEntries(entries.filter(([k]) => KNOWN_KEYS.has(k)))};
     if (cfg.flow !== "rtl" && cfg.flow !== "ltr") {
         warn("machinery_bad_flow", `machinery.flow must be "rtl" or "ltr", got ${JSON.stringify(cfg.flow)}; using rtl`);
         cfg.flow = "rtl";
@@ -293,29 +302,29 @@ function _readConfig(projection, warn) {
 
 async function _fetchFacts(fullNames, warn) {
     const facts = {jobs: new Map(), workflows: new Map(), refs: new Map()};
-    const queries = {
-        jobs: [
+    const queries = [
+        {kind: "jobs", into: facts.jobs, query: [
             `MATCH (j:${T.job})`,
             "WHERE j.data.full_name = $repo",
             "RETURN j.entity_id AS entity_id, j.data.job_key AS job_key, j.data.name AS name, j.data.needs AS needs, j.data.permissions AS permissions, j.data.environment AS environment, j.data.workflow_id AS workflow_id",
-        ],
-        workflows: [
+        ]},
+        {kind: "workflows", into: facts.workflows, query: [
             `MATCH (w:${T.workflow})`,
             "WHERE w.data.full_name = $repo",
             "RETURN w.entity_id AS entity_id, w.data.workflow_id AS workflow_id, w.data.configuration AS configuration",
-        ],
-        refs: [
+        ]},
+        {kind: "refs", into: facts.refs, query: [
             `MATCH (r:${T.ref})`,
             "WHERE r.data.full_name = $repo",
             "RETURN r.entity_id AS entity_id, r.data.ref_type AS ref_type, r.data.is_default AS is_default, r.data.name AS name",
-        ],
-    };
+        ]},
+    ];
     for (const repo of fullNames) {
-        for (const [kind, query] of Object.entries(queries)) {
+        for (const {kind, into, query} of queries) {
             try {
                 const rows = await _gryphonRows(query, {repo});
                 rows.forEach((row) => {
-                    if (row && row.entity_id) facts[kind].set(String(row.entity_id), row);
+                    if (row && row.entity_id) into.set(String(row.entity_id), row);
                 });
             } catch (err) {
                 warn(`machinery_facts_${kind}`, `${repo}: ${err.message}`);
@@ -417,20 +426,20 @@ function _stampJobs(cy, facts, warn) {
     });
 }
 
+// Effective permissions follow GitHub's own rule: a job-level block, INCLUDING
+// an explicit empty `permissions: {}` (which revokes everything), overrides the
+// workflow block; only an UNDECLARED job block (null) inherits. An undeclared
+// workflow block too means the repository default applies, which is not on
+// the grid — not observable, never "not a producer".
 function _producerState(jobPerms, wfPerms) {
-    const effective = _nonEmpty(jobPerms) ? jobPerms : (_nonEmpty(wfPerms) ? wfPerms : null);
+    const effective = jobPerms != null ? jobPerms : wfPerms;
     if (effective == null) return "not_observable";
     if (effective === "write-all") return "producer";
     if (typeof effective === "object") {
-        return PRODUCER_SCOPES.some((scope) => effective[scope] === "write") ? "producer" : "not_producer";
+        const writes = Object.entries(effective).some(([scope, level]) => PRODUCER_SCOPES.includes(scope) && level === "write");
+        return writes ? "producer" : "not_producer";
     }
     return "not_producer";   // "read-all" or an unrecognised string
-}
-
-function _nonEmpty(v) {
-    if (v == null) return false;
-    if (typeof v === "string") return v.length > 0;
-    return Object.keys(v).length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -456,7 +465,7 @@ function _planRefs(cy, facts, stackOver) {
         if (branches.length <= stackOver) return;
         branches.sort((a, b) => (a.data("label") || "").localeCompare(b.data("label") || ""));
         const representative = branches[0];
-        branches.slice(1).forEach((ref) => ref.addClass(ELEVATION_HIDDEN_CLASS));
+        branches.slice(1).forEach((ref) => { ref.data("_machinery_hidden", true); ref.addClass(ELEVATION_HIDDEN_CLASS); });
         representative.data("_order", 2);
         // v0: one deck per scene (the single-repository case); a later pass
         // generalises applyStack over every repository box.
@@ -472,9 +481,14 @@ function _planRefs(cy, facts, stackOver) {
 function _addPlaceholders(cy, repos) {
     const additions = [];
     repos.forEach((repo) => {
-        UNCOLLECTED_OUTPUT_KINDS.forEach((kind, i) => {
+        OUTPUT_KINDS.forEach(({kind, entityTypes}, i) => {
             const id = `${T.placeholder}:${kind}:${repo.id()}`;
-            if (cy.getElementById(id).nonempty()) return;
+            // Collected for THIS repository: any node of the kind sharing an
+            // edge with the box retires the placeholder (per-box scope).
+            const collected = entityTypes.some((et) => cy.nodes(`[entity_type = "${et}"]`).some((n) => n.edgesWith(repo).nonempty()));
+            const existing = cy.getElementById(id);
+            if (collected) { if (existing.nonempty()) cy.remove(existing.connectedEdges().union(existing)); return; }
+            if (existing.nonempty()) return;
             additions.push({
                 group: "nodes",
                 data: {
@@ -519,6 +533,16 @@ function _hideOrphans(cy, repos, warn) {
         const et = n.data("entity_type") === T.workflow ? E.definesWorkflow : E.hasRef;
         if (!attachedTo(n, et, "in")) hidden.push(n);
     });
-    hidden.forEach((n) => n.addClass(ELEVATION_HIDDEN_CLASS));
+    hidden.forEach((n) => { n.data("_machinery_hidden", true); n.addClass(ELEVATION_HIDDEN_CLASS); });
     if (hidden.length) warn("machinery_hidden_unowned", `${hidden.length} node(s) not attached to a repository in the scene were hidden`);
+}
+
+const MARK_CLASSES = ["machinery-producer", "machinery-producer-not-observable", "machinery-unresolved"];
+
+function _clearMarks(cy) {
+    cy.nodes().forEach((n) => {
+        MARK_CLASSES.forEach((c) => n.removeClass(c));
+        if (n.data("_machinery_hidden")) { n.removeClass(ELEVATION_HIDDEN_CLASS); n.removeData("_machinery_hidden"); }
+        ["_stage", "_order", "_producer", "_trigger_class"].forEach((k) => n.removeData(k));
+    });
 }
