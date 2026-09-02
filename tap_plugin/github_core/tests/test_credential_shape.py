@@ -62,6 +62,11 @@ class TestTheFold:
             "app": APP,
         }
 
+    def test_an_empty_legacy_token_does_not_become_a_pat_block(self) -> None:
+        """Copilot on PR #26: an empty `token` must not read as "a token is present"."""
+        shape = _load(_COLLECTOR / "credential_shape.py", "cs_d")
+        assert shape.normalize_credentials("github_pat", {"token": "", "owner": "acme"}) == {"owner": "acme"}
+
     def test_unknown_kind_folds_to_scope_only(self) -> None:
         """Refusing a kind by name is `resolve_github_secret`'s job; the fold just has no
         credential to offer, so `has_app` / `has_pat` both answer no."""
