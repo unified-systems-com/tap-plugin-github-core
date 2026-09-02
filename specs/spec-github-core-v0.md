@@ -528,20 +528,24 @@ Measured against our own organization on 2026-08-27: an owner-minted fine-graine
 GitHub App with `administration: read` does not — REST omits the `bypass_actors` key entirely
 (HTTP 200), while **GraphQL answers with a truthful `totalCount` and every node redacted to
 `null`** (corrected 2026-09-02 from "an empty connection", which the #11 probe disproved — #22
-item 2). Our own
-rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful zero versus a
-silently filtered connection — is untested and cannot be tested here without adding a bypass actor
-to a live ruleset, which would be a change to our security posture rather than a measurement.
+item 2). Our own rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful
+zero versus a silently filtered connection — could not be measured against them without changing
+our security posture. It was measured instead on **a probe ruleset carrying one bypass actor,
+created on a personal repository, read with every available credential, and deleted** (#11,
+2026-08-27; the domain article `github_ruleset.md` §Observability records the table): the read-only
+App received `totalCount: 0` on the control rulesets and `totalCount: 1` on the probe, with every
+node `null`. That is the evidence behind treating a counted zero as a fact.
 
 The derivation that follows:
 
 ```
-observed = REST detail carried `bypass_actors`  OR  GraphQL returned a NON-EMPTY node list
-counted  = neither, AND GraphQL carried `bypassActors.totalCount` (nodes redacted)
+observed = REST detail carried `bypass_actors`  OR  GraphQL returned AT LEAST ONE NON-NULL node
+counted  = neither, AND GraphQL carried `bypassActors.totalCount` (every node null, or none)
 ```
 
-A non-empty GraphQL answer proves itself — a filtered connection cannot invent actors. A redacted
-one still carries its `totalCount`, and that count is truthful: the #11 probe read `0` on the
+A GraphQL answer with a real actor node in it proves itself — a filtered connection cannot invent
+actors — and `[null]` is not such an answer: a list of redactions is `counted`, never `observed`.
+A redacted one still carries its `totalCount`, and that count is truthful: the #11 probe read `0` on the
 controls and `1` on a ruleset carrying exactly one actor. **False presence is impossible here;
 false absence is the entire risk** — and discarding a known count is a false absence.
 
