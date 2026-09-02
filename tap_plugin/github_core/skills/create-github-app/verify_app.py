@@ -48,6 +48,18 @@ def call(url: str, token: str, *, scheme: str = "Bearer", method: str = "GET") -
         return exc.code, exc.read()[:160].decode("utf-8", "replace")
 
 
+def _folded(envelope: dict) -> dict:
+    """The envelope's data through the collector's fold; a malformed `data` folds as empty.
+
+    This path exists to SAY why verification cannot proceed, so a `data` that is a string or a
+    list must land in the message rather than in a traceback.
+    """
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    return normalize_credentials(str(envelope.get("kind") or ""), dict(data))
+
+
 def app_credentials(envelope: dict) -> dict | None:
     """The folded credential data if the envelope carries a usable App block, else None.
 
@@ -55,9 +67,9 @@ def app_credentials(envelope: dict) -> dict | None:
     `create_app.py` writes) and the legacy `github_app` kind both verify, and a token-only
     envelope is reported as such rather than as an unknown kind.
     """
-    data = normalize_credentials(str(envelope.get("kind") or ""), dict(envelope.get("data") or {}))
-    app = data.get("app") or {}
-    if not app.get("app_id") or not app.get("private_key"):
+    data = _folded(envelope)
+    app = data.get("app")
+    if not isinstance(app, dict) or not app.get("app_id") or not app.get("private_key"):
         return None
     return data
 
@@ -65,7 +77,9 @@ def app_credentials(envelope: dict) -> dict | None:
 def describe_missing_app(envelope: dict) -> str:
     """Why `app_credentials` returned None, in the operator's terms."""
     kind = envelope.get("kind")
-    data = normalize_credentials(str(kind or ""), dict(envelope.get("data") or {}))
+    if not isinstance(envelope.get("data"), dict):
+        return f"envelope kind {kind!r} has no `data` object"
+    data = _folded(envelope)
     if data.get("pat"):
         return f"envelope kind {kind!r} carries a personal access token but no GitHub App"
     return f"envelope kind {kind!r} carries no GitHub App (app_id + private_key)"
@@ -81,6 +95,11 @@ def main() -> int:
     d = app_credentials(envelope)
     if d is None:
         print(f"  {describe_missing_app(envelope)} — nothing to verify")
+        return 1
+    if not d.get("owner"):
+        # A legacy repos-only envelope is valid for collection but cannot be verified: `owner`
+        # is what selects the installation to mint a token for.
+        print("  envelope names no `owner` — verification needs the account whose installation to mint for")
         return 1
     # Same control as create_app.py: the envelope is operator-written, but a mistyped or
     # tampered base URL here would carry a live installation token to it.

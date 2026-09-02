@@ -106,9 +106,30 @@ class TestVerifyAppReadsTheShippedEnvelope:
         assert verify.app_credentials(envelope) is None
         assert "'github_oauth'" in verify.describe_missing_app(envelope)
 
+    @pytest.mark.parametrize(
+        "envelope",
+        [
+            {"kind": "github", "data": "not-an-object"},
+            {"kind": "github", "data": ["owner"]},
+            {"kind": "github", "data": {"owner": "acme", "app": "not-an-object"}},
+            {"kind": "github"},
+        ],
+    )
+    def test_a_malformed_envelope_is_explained_not_raised(self, verify: ModuleType, envelope: dict) -> None:
+        """Copilot on PR #26: this path exists to SAY why verification cannot proceed."""
+        assert verify.app_credentials(envelope) is None
+        assert "github" in verify.describe_missing_app(envelope)
+
     def test_no_private_kind_check_survives(self, verify: ModuleType) -> None:
         text = (_SKILL / "verify_app.py").read_text()
         assert '!= "github_app"' not in text
+
+
+class TestTheLoader:
+    def test_a_missing_collector_module_names_the_broken_checkout(self, skill_on_path) -> None:
+        loader = _load(_SKILL / "collector_modules.py", "collector_modules_under_test")
+        with pytest.raises(SystemExit, match="broken checkout"):
+            loader.load("no_such_module")
 
 
 class TestCreateAppCarriesTheTokenThroughTheFold:

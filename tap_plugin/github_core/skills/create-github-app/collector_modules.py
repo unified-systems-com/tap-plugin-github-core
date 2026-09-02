@@ -19,6 +19,8 @@ _COLLECTOR_DIR = Path(__file__).resolve().parents[2] / "collectors" / "github_co
 def load(name: str) -> ModuleType:
     """Load `collectors/github_collector/<name>.py` and return the module object."""
     path = _COLLECTOR_DIR / f"{name}.py"
+    if not path.is_file():
+        raise SystemExit(f"cannot load the collector module {name!r}: {path} is missing — a broken checkout")
     spec = importlib.util.spec_from_file_location(f"github_core_{name}", path)
     if spec is None or spec.loader is None:  # pragma: no cover - a broken checkout, not a code path
         raise SystemExit(f"cannot load the collector module {name!r} from {path}")
