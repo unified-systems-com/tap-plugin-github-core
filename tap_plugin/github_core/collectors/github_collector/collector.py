@@ -40,6 +40,7 @@ from .enrichment import resolve_links
 from .graphql_client import GithubGraphQLClient, GithubGraphQLError
 from .identity import (
     account_id,
+    actions_artifact_id,
     actions_cache_id,
     app_installation_id,
     edge_id,
@@ -122,6 +123,9 @@ _SITE_WORKFLOW_CALL_UNRESOLVED = "e9e5"
 _SITE_WORKFLOW_CALLS = "b97e"
 _SITE_WORKFLOW_TRIGGER_UNRESOLVED = "8f14"
 _SITE_WORKFLOW_TRIGGERS = "3025"
+_SITE_ARTIFACTS_DEGRADED = "eef3"
+_SITE_ARTIFACTS_TRUNCATED = "8e7f"
+_SITE_ARTIFACTS_COLLECTED = "933f"
 
 #: The dimension keys that scope an envelope to ONE repository. Stripped from a node shared
 #: across the scope (an action, an app), kept on the edges that use it.
@@ -178,6 +182,9 @@ _TERMINAL_RUN_STATUSES: frozenset[str] = frozenset({"completed"})
 # first, so a cap keeps the freshest — and the collector says how many it left, because a
 # truncated cache list that reads as complete would make "no cache from that ref" a wrong answer.
 _CACHE_LIMIT_PER_REPO = 100
+#: Artifacts per repository per run, newest first; the total is reported alongside. One
+#: repository measured 3,831 on 2026-09-02, so a cap is a necessity, not a nicety.
+_ARTIFACT_LIMIT_PER_REPO = 100
 #: Rule suites collected per repository per run. Bypasses only, so this is a ceiling on
 #: FINDINGS rather than on traffic — a repository with more than this many bypasses in the
 #: window has a bigger problem than truncation.
@@ -1194,6 +1201,9 @@ class GithubCollector(CollectorBase):
         # stored cache entries (REST; graceful-degrade like runners). Observation dimensions:
         # a cache entry is something that HAPPENED, not something declared.
         self._collect_caches(client, full_name, repo_uuid, observation_dims, ref_uuid_by_ref, nodes, edges)
+        # Artifacts the repository's runs uploaded. After the run window, because UPLOADS_ARTIFACT
+        # sources from a run in THIS batch and an artifact of an older run is counted, not linked.
+        self._collect_artifacts(client, full_name, observation_dims, {r["id"] for r in run_payloads}, nodes, edges)
         # Bypass EVENTS. Deliberately after refs: EVALUATED_ON resolves against ref_uuid_by_ref,
         # and a suite naming a ref we did not collect simply carries no edge.
         self._collect_rule_suites(client, full_name, observation_dims, ref_uuid_by_ref, nodes, edges)
@@ -2347,6 +2357,108 @@ class GithubCollector(CollectorBase):
                 "CACHES_TRUNCATED",
                 f"{full_name}: collected {len(entries)} of {total} cache entries (most recently "
                 f"accessed first). Absence of an entry in this batch is not evidence it is gone.",
+                message_data={"repo": full_name, "collected": len(entries), "total": total},
+            )
+
+    def _collect_artifacts(
+        self,
+        client: GithubClient,
+        full_name: str,
+        dims: dict[str, str],
+        run_ids_in_batch: set[int],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """Collect the repository's artifacts and join each to the run that uploaded it.
+
+        The repository listing rather than the per-run endpoint: one call per page instead of
+        one per run, and each item names its producing run, so `UPLOADS_ARTIFACT` is exact.
+        The edge is emitted only when that run is in this batch — the dangling-edge guard would
+        otherwise drop it silently — and the rest are COUNTED, because an artifact of a run
+        outside the collected window is a normal thing, not an error and not nothing.
+
+        Expired artifacts stay listed with `expired: true`, which is why expiry is a field and
+        absence from the listing is never read as expiry (github-core#14, shape C).
+        """
+        try:
+            payload = client.get(
+                f"/repos/{full_name}/actions/artifacts", params={"per_page": str(_ARTIFACT_LIMIT_PER_REPO)}
+            )
+        except GithubAPIError as exc:
+            if exc.status in (403, 404):
+                self.record_warn(
+                    _SITE_ARTIFACTS_DEGRADED,
+                    f"ARTIFACTS_UNREADABLE_{exc.status}",
+                    f"Artifact list inaccessible for {full_name}: {exc.body[:120]}. An empty artifact set "
+                    f"for this repository is NOT observable, not empty.",
+                    message_data={"repo": full_name, "status": exc.status},
+                )
+                return
+            raise
+        entries = payload.get("artifacts") or []
+        total = int(payload.get("total_count") or len(entries))
+        linked = 0
+        expired = 0
+        for entry in entries:
+            artifact_uuid = actions_artifact_id(full_name, entry["id"])
+            run = entry.get("workflow_run") or {}
+            run_id_int = run.get("id")
+            is_expired = bool(entry.get("expired", False))
+            expired += int(is_expired)
+            nodes.append(
+                node_envelope(
+                    entity_id=artifact_uuid,
+                    entity_type="github_core__actions_artifact",
+                    name=str(entry.get("name") or entry["id"]),
+                    dimensions=dims,
+                    fields={
+                        "full_name": full_name,
+                        "artifact_id": entry["id"],
+                        "name": str(entry.get("name") or ""),
+                        "size_in_bytes": entry.get("size_in_bytes"),
+                        "digest": str(entry.get("digest") or ""),
+                        "expired": is_expired,
+                        "expires_at": entry.get("expires_at"),
+                        "created_at": entry.get("created_at"),
+                        "updated_at": entry.get("updated_at"),
+                        "run_id": run_id_int,
+                        "head_sha": str(run.get("head_sha") or ""),
+                        "head_branch": str(run.get("head_branch") or ""),
+                        "configuration": {
+                            "workflow_run": run,
+                            # The producing run was in this batch, so the edge exists; or it was
+                            # not, and the join is by `run_id` against whatever is on the grid.
+                            "run_in_batch": run_id_int in run_ids_in_batch,
+                        },
+                        "tags": {},
+                    },
+                )
+            )
+            if run_id_int in run_ids_in_batch:
+                linked += 1
+                edges.append(
+                    self._edge("UPLOADS_ARTIFACT__github_core", run_id(full_name, run_id_int), artifact_uuid, dims)
+                )
+        if entries:
+            self.record_info(
+                _SITE_ARTIFACTS_COLLECTED,
+                "ARTIFACTS_COLLECTED",
+                f"{full_name}: {len(entries)} artifact(s), {linked} linked to a run in this batch, "
+                f"{len(entries) - linked} from runs outside the collected window, {expired} expired.",
+                message_data={
+                    "repo": full_name,
+                    "collected": len(entries),
+                    "linked": linked,
+                    "unlinked": len(entries) - linked,
+                    "expired": expired,
+                },
+            )
+        if total > len(entries):
+            self.record_warn(
+                _SITE_ARTIFACTS_TRUNCATED,
+                "ARTIFACTS_TRUNCATED",
+                f"{full_name}: collected {len(entries)} of {total} artifacts (newest first). Absence of an "
+                f"artifact in this batch is not evidence it is gone or expired.",
                 message_data={"repo": full_name, "collected": len(entries), "total": total},
             )
 

@@ -77,6 +77,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-actions-used | [Actions Used](#actions-used) | In Development | 2026-09-02 (github-core#45, ranked first by `build-github-corpus`): `github_action` node keyed on the action path, shared across the scope, plus `USES_ACTION` carrying the pin. The parser no longer labels every non-SHA ref `tag`; a mutable name is resolved only against an in-scope repository's refs and is otherwise `unresolved` / `unobservable`. |
 | req-github-core-workflow-chains | [Workflow Chains](#workflow-chains) | In Development | 2026-09-02 (github-core#29, #52): `CALLS_WORKFLOW` (job → reusable workflow, the `USES_ACTION` pin grammar + `secrets_inherit`) and `TRIGGERS_WORKFLOW` (completing → triggered, from `on.workflow_run`), both resolved in a post-pass over the whole scope; an unresolved callee or name is recorded on the node, never fabricated. |
+| req-github-core-artifacts | [Artifacts](#artifacts) | In Development | 2026-09-02 (github-core#55): `actions_artifact` from the repository listing (newest first, capped, total reported) joined by `UPLOADS_ARTIFACT` from the producing run when it is in the batch; `expired` observed, never inferred (shape C). Declared upload/download steps on the job; no download edge — GitHub keeps no record of downloads. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -569,6 +570,40 @@ without reusable workflows.
 | req-github-core-workflow-chains-3 | The Call Carries Its Pin And Its Secrets Posture | In Development | The edge states `declared_ref`, `pin_kind` (incl. `local`), `is_pinned`, `resolution`, `same_repository`, `secrets_inherit`, and `resolved_sha` when known; the calling job's configuration lists the named secrets passed. Names only, never values. | Pin grammar shared with `USES_ACTION`. |
 | req-github-core-workflow-chains-4 | Triggers Point The Way The Event Flows | In Development | `on.workflow_run.workflows` on B yields `TRIGGERS_WORKFLOW` A → B for every workflow A in the same repository whose stored display name matches; an unmatched name lands on B's `configuration.trigger_resolution` and warns. | |
 | req-github-core-workflow-chains-5 | Filters As Written Only | In Development | `types`, `branches`, `branches_ignore` appear on the edge only when the file declares them; GitHub's defaults are never written. | |
+
+### Artifacts
+----
+RID: `req-github-core-artifacts`
+Status: `In Development`
+
+The output side of a run. `actions_artifact` is collected from the **repository** listing
+(`GET /repos/{o}/{r}/actions/artifacts`, `actions:read`) rather than per run — one call per page
+instead of one per run, and every item names its producing run — newest first, capped per
+repository with the total reported (github-core#55). `UPLOADS_ARTIFACT` (run → artifact) is emitted
+when that run is in the same batch and is exact; artifacts of runs outside the collected window are
+counted and carry `run_id` for a later join, never dropped silently by the dangling-edge guard.
+
+**Expiry is observed, not inferred.** GitHub keeps an expired artifact listed with `expired: true`.
+An artifact is an immutable event with a retention window (github-core#14, shape C): absence from
+the listing — under the cap, or after retention — is never grounds for a tombstone, and a reconciler
+must refuse this type.
+
+**There is no `DOWNLOADS_ARTIFACT`, and the reason is recorded.** GitHub records who uploaded and
+nothing about who downloaded. A declared download (`actions/download-artifact` with `name:` or
+`pattern:`) names a pattern that matches a different artifact on every run; joining it to a concrete
+node would be the inference `req-github-core-caches-4` refuses for caches. The declared upload and
+download steps land on `workflow_job.configuration.artifact_steps`, and the corpus's
+`cross_workflow` is carried there — a `run-id:` or `repository:` input means the step reaches into
+another run's outputs — so the security-relevant bit survives without a guessed edge.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-artifacts-1 | Artifacts Collected From The Repository Listing | In Development | Each item lands as `actions_artifact` keyed on `owner/repo` + artifact id, with name, size, digest, retention state and the producing run's id, head SHA and branch. | Degrades with a warning on 403/404, like caches. |
+| req-github-core-artifacts-2 | Upload Join Is Exact And Batch-Honest | In Development | `UPLOADS_ARTIFACT` is emitted from `workflow_run.id` only when that run is in the batch; the run records linked and unlinked counts. | |
+| req-github-core-artifacts-3 | Expiry Observed, Never Inferred | In Development | `expired` is stored as GitHub reports it; absence from the listing is stated as non-evidence in the truncation warning. | Shape C. |
+| req-github-core-artifacts-4 | Declared Steps Kept, Not Joined | In Development | `actions/upload-artifact` and `actions/download-artifact` steps land on the job's `configuration.artifact_steps` with mode, name/pattern and `cross_workflow`; no edge is emitted from a declaration to an artifact instance. | The gap is named, not papered over. |
 
 ### Refs
 ----

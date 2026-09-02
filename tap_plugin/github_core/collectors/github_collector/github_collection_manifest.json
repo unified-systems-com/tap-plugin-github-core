@@ -215,6 +215,30 @@
       "description": "Stored cache entries, most-recently-accessed first (req-github-core-caches). The `ref` is the load-bearing field: it says which side of the trust boundary an entry came from. Capped per repository, with the total reported."
     },
     {
+      "name": "artifacts",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/actions/artifacts",
+      "query": {
+        "per_page": "100"
+      },
+      "item_path": "artifacts[*]",
+      "target_entity_type": "github_core__actions_artifact",
+      "fields": [
+        "id",
+        "name",
+        "size_in_bytes",
+        "digest",
+        "expired",
+        "expires_at",
+        "created_at",
+        "updated_at",
+        "workflow_run"
+      ],
+      "permission": "repository:actions:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Artifacts a repository's runs uploaded, newest first, with the producing run on each (req-github-core-artifacts). The REPOSITORY listing rather than the per-run endpoint: one call per page instead of one per run, and it carries `workflow_run.id`, which is the UPLOADS_ARTIFACT source. Expired artifacts stay listed with `expired: true` — an immutable event with a retention window (github-core#14, shape C) — so absence from this listing is never read as expiry or deletion. Capped per repository with the total reported. GitHub keeps no record of who DOWNLOADED an artifact; the declared download steps live on workflow_job.configuration.artifact_steps and no download edge is emitted."
+    },
+    {
       "name": "app_installations",
       "kind": "rest_endpoint",
       "path": "/orgs/{owner}/installations",
@@ -408,6 +432,12 @@
       "source": "github_core__github_workflow",
       "target": "github_core__github_workflow",
       "condition": "the target's `on.workflow_run.workflows` names the source's display name, same repository only; an unmatched name is recorded on the target as `trigger_resolution`"
+    },
+    {
+      "slug": "UPLOADS_ARTIFACT__github_core",
+      "source": "github_core__github_actions_run",
+      "target": "github_core__actions_artifact",
+      "condition": "artifact.workflow_run.id names a run in the same batch; otherwise counted as unlinked"
     }
   ]
 }

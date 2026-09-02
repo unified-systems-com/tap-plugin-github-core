@@ -767,6 +767,24 @@
       "present": true,
       "source": "repository"
     },
+    "/repos/{owner}/{repo}/actions/artifacts": {
+      "item_properties": [
+        "archive_download_url",
+        "created_at",
+        "digest",
+        "expired",
+        "expires_at",
+        "id",
+        "name",
+        "node_id",
+        "size_in_bytes",
+        "updated_at",
+        "url",
+        "workflow_run"
+      ],
+      "present": true,
+      "source": "artifacts"
+    },
     "/repos/{owner}/{repo}/actions/caches": {
       "item_properties": [
         "created_at",
@@ -981,8 +999,8 @@
       "source": "account"
     }
   },
-  "spec_commit": "33c2d320fd411e9db6c8b68401e0ad2bdb0243fd",
-  "spec_sha256": "a45de408e21266796d2c6a14f09ca2866bc695aa6952ee970a48f2a48bffbead",
-  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/33c2d320fd411e9db6c8b68401e0ad2bdb0243fd/descriptions/api.github.com/api.github.com.json",
+  "spec_commit": "875b39fae632318533e61d3e5217b340f5ec3ebd",
+  "spec_sha256": "27008e60d890d3d7ab74791bcdf7ef009b5506867a75069408e8ef02eb74fc1e",
+  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/875b39fae632318533e61d3e5217b340f5ec3ebd/descriptions/api.github.com/api.github.com.json",
   "spec_version": "1.1.4"
 }

@@ -18,12 +18,14 @@ EDGES_DIR = Path(github_models.__file__).parent.parent / "edges"
 
 # ActionsCache is a BYPRODUCT of a run, not configuration someone wrote — it exists
 # because a workflow executed and wrote it.
-EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "RuleSuite"}
+# ActionsArtifact likewise: a run uploaded it (github-core#14 shape C — an immutable event).
+EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "RuleSuite", "ActionsArtifact"}
 # SCOPED_TO is sourced on actions_cache, which is execution — the layer follows the
 # source model rather than a second map (req-github-core-dimensions-6).
 # TRIGGERED_EVALUATION / BYPASSED_RULE / EVALUATED_ON are all sourced on rule_suite, which is execution.
+# UPLOADS_ARTIFACT is sourced on the run: execution.
 EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "HAS_ACTIONS_JOB", "EXECUTED_ON", "SCOPED_TO",
-                   "TRIGGERED_EVALUATION", "BYPASSED_RULE", "EVALUATED_ON_REF"}
+                   "TRIGGERED_EVALUATION", "BYPASSED_RULE", "EVALUATED_ON_REF", "UPLOADS_ARTIFACT"}
 # Sources span both layers, so the layer belongs to the endpoint, not the edge
 # type; the collector sets it per emitted edge (req-github-core-dimensions-6).
 LAYER_SPANNING_EDGES = {"REFERENCES_RESOURCE"}
