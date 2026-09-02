@@ -172,13 +172,20 @@ class TestProducers:
                       for e in edges if e["edge"]["edge_type"] == "REQUIRES_CHECK__github_core"}
         assert by_ruleset == {str(ruleset_id("acme", 1)): 12345, str(ruleset_id("acme", 2)): 15368}
 
-    def test_a_repository_ruleset_cannot_make_the_shared_node_repo_scoped(self) -> None:
-        """Owner-scoped by construction, whatever dims the first naming ruleset carried."""
+    def test_two_rulesets_in_two_repositories_naming_one_context_share_one_owner_scoped_node(self) -> None:
+        """The node's dims come from the type's defaults plus the owner, never from whichever
+        ruleset named the context first (PR #62 review): two repository rulesets in two repos
+        → one node, no `github.repo`, both REQUIRES_CHECK edges."""
         c = _collector()
-        c._register_required_checks("acme", ruleset_id("acme", 1), "main", [_rule([{"context": "gate", "integration_id": None}])], {**_DIMS, "github.repo": "a"})
-        nodes, _ = _emit(c)
-        assert "github.repo" not in nodes[0]["entity"]["dimensions"]
-        assert nodes[0]["entity"]["dimensions"]["github.owner"] == "acme"
+        c._register_required_checks("acme", ruleset_id("acme", 1), "a-main", [_rule([{"context": "gate", "integration_id": None}])], {**_DIMS, "github.repo": "a"})
+        c._register_required_checks("acme", ruleset_id("acme", 2), "b-main", [_rule([{"context": "gate", "integration_id": None}])], {**_DIMS, "github.repo": "b"})
+        nodes, edges = _emit(c)
+        assert len(nodes) == 1
+        dims = nodes[0]["entity"]["dimensions"]
+        assert "github.repo" not in dims
+        assert dims == {"github.observation": "declaration", "github.platform": "github.com",
+                        "github.surface": "rules", "github.owner": "acme"}
+        assert sum(1 for e in edges if e["edge"]["edge_type"] == "REQUIRES_CHECK__github_core") == 2
 
     def test_the_site_tokens_are_well_formed(self) -> None:
         """The two sites that carry the unobservability signal (PR #62 review: they were a

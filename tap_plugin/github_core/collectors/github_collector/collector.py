@@ -12,6 +12,7 @@ import fnmatch
 import logging
 from typing import Any, ClassVar
 
+from tap_plugin.github_core.models.status_check import StatusCheck
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
 
 from tap_cares.collectors import (
@@ -2219,9 +2220,10 @@ class GithubCollector(CollectorBase):
         unproduced: list[str] = []
         for (owner, context), entry in sorted(state["required_checks"].items()):
             check_uuid = status_check_id(owner, context)
-            # Owner-scoped by construction, whatever the first ruleset that named the context
-            # carried: keep the owner, never a repository.
-            node_dims = {k: v for k, v in entry["dims"].items() if k != "github.repo"}
+            # The node's dims are DERIVED from the type's defaults plus the owner — never
+            # copied from whichever ruleset happened to name the context first, so a
+            # repository ruleset's `github.repo` can never leak onto the shared node.
+            node_dims = {**StatusCheck.DEFAULT_DIMENSIONS, "github.owner": owner}
             nodes.append(
                 node_envelope(
                     entity_id=check_uuid,
