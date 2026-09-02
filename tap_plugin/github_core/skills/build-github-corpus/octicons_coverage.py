@@ -36,7 +36,7 @@ def _base_name(filename: str) -> str:
 def _concept(name: str) -> str:
     """Collapse style and feed variants onto their parent concept."""
     if name.startswith("feed-"):
-        return name[len("feed-"):]
+        name = name[len("feed-"):]
     return VARIANT_RE.sub("", name)
 
 
@@ -46,6 +46,8 @@ def load_classification() -> dict:
 
 def fetch_live_names(tag: str) -> set[str]:
     url = f"https://api.github.com/repos/primer/octicons/contents/icons?ref={tag}"
+    if not url.startswith("https://api.github.com/"):  # runtime guarantee, not just construction
+        raise ValueError(f"refusing non-GitHub-API URL: {url}")
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "tap-build-github-corpus"})
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - pinned public GitHub API URL
         listing = json.load(resp)
@@ -55,38 +57,18 @@ def fetch_live_names(tag: str) -> set[str]:
 def plugin_types(plugin_root: Path) -> tuple[list[str], list[str]]:
     nodes: list[str] = []
     for py in sorted((plugin_root / "models").glob("*.py")):
-        m = re.search(r'ENTITY_TYPE\s*:\s*ClassVar\[str\]\s*=\s*"([^"]+)"', py.read_text()) or re.search(
-            r'ENTITY_TYPE\s*=\s*"([^"]+)"', py.read_text()
-        )
+        content = py.read_text()
+        m = re.search(r"""ENTITY_TYPE\s*(?::\s*ClassVar\[str\]\s*)?=\s*['"]([^'"]+)['"]""", content)
         if m:
             nodes.append(m.group(1))
     edges = [p.name[: -len(".edge.json")] for p in sorted((plugin_root / "edges").glob("*.edge.json"))]
     return nodes, edges
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--plugin-root", required=True, help="path to tap_plugin/github_core")
-    ap.add_argument("--tag", default=None, help="primer/octicons tag to list live (default: the JSON's pin)")
-    ap.add_argument("--offline", action="store_true", help="skip the live listing; use the checked-in file only")
-    ap.add_argument("--json", action="store_true", help="emit the machine-readable delta instead of tables")
-    args = ap.parse_args()
-
-    cls = load_classification()
-    glyphs = {g["name"]: g for g in cls["glyphs"]}
-    tag = args.tag or cls.get("octicons_tag", "")
-    nodes, edges = plugin_types(Path(args.plugin_root))
-
-    live: set[str] | None = None
-    if not args.offline:
-        try:
-            live = fetch_live_names(tag)
-        except Exception as exc:  # noqa: BLE001 - report and fall back, never fake a listing
-            print(f"live listing failed ({exc}); continuing offline", file=sys.stderr)
-
+def compute_delta(glyphs: dict[str, dict], nodes: list[str], edges: list[str], tap_types: list[dict], tag: str, live: set[str] | None) -> dict:
+    """The coverage delta as data — testable without the CLI or the network."""
     unknown_live = sorted(live - set(glyphs)) if live is not None else None
     retired = sorted(set(glyphs) - live) if live is not None else None
-
     concepts: dict[str, dict] = {}
     for g in glyphs.values():
         c = _concept(g["name"])
@@ -96,7 +78,7 @@ def main() -> int:
     for c, g in a_concepts.items():
         families[g.get("family") or c].append(c)
 
-    mapped_types = {t["type"]: t for t in cls.get("tap_types", [])}
+    mapped_types = {t["type"]: t for t in tap_types}
     unmapped_nodes = [n for n in nodes if n not in mapped_types]
     unmapped_edges = [e for e in edges if e not in mapped_types]
     nodes_with_glyph = [n for n in nodes if mapped_types.get(n, {}).get("octicon")]
@@ -126,6 +108,33 @@ def main() -> int:
         "unknown_live_glyphs": unknown_live, "retired_glyphs": retired,
         "gaps_by_product_area": dict(gaps_by_area),
     }
+    return delta
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--plugin-root", required=True, help="path to tap_plugin/github_core")
+    ap.add_argument("--tag", default=None, help="primer/octicons tag to list live (default: the JSON's pin)")
+    ap.add_argument("--offline", action="store_true", help="skip the live listing; use the checked-in file only")
+    ap.add_argument("--json", action="store_true", help="emit the machine-readable delta instead of tables")
+    args = ap.parse_args()
+
+    cls = load_classification()
+    glyphs = {g["name"]: g for g in cls["glyphs"]}
+    tag = args.tag or cls.get("octicons_tag", "")
+    nodes, edges = plugin_types(Path(args.plugin_root))
+
+    live: set[str] | None = None
+    if not args.offline:
+        try:
+            live = fetch_live_names(tag)
+        except Exception as exc:  # noqa: BLE001 - report and fall back, never fake a listing
+            print(f"live listing failed ({exc}); continuing offline", file=sys.stderr)
+
+    delta = compute_delta(glyphs, nodes, edges, cls.get("tap_types", []), tag, live)
+    mapped_types = {t["type"]: t for t in cls.get("tap_types", [])}
+    gaps_by_area = delta["gaps_by_product_area"]
+    unknown_live, retired = delta["unknown_live_glyphs"], delta["retired_glyphs"]
     if args.json:
         print(json.dumps(delta, indent=2, sort_keys=True))
         return 0
