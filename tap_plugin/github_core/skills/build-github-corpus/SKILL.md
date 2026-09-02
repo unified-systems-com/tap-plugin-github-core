@@ -210,6 +210,30 @@ agent, and the answer is a row in `octicons-concepts.json`.
 - **Four hand-drawn glyphs had exact Octicons.** Check the set before drawing; check it again at
   each release — `cache` arrived at v19. (git-serious, 2026-09-02)
 
+
+### From the first bake (items 1–5, 2026-09-02)
+
+- **The first bake in a family pays for the rest — rank resolver-sharing concepts adjacent and
+  expect stacked PRs.** The action node's pin resolver, refs cache and post-pass registers were
+  reused by the next four concepts; building them as independent branches would have meant four
+  tagged known-dupes or four conflicts. (github-core#51 → #54 → #56 → #60 → #62)
+- **Check an edge's target is identifiable from some source before it enters the list.** The
+  ranking carried a downloads-artifact edge; the API exposes no observable consumer of an
+  artifact, so it was rejected at bake time with the reason recorded. (github-core#55)
+- **A parser label is a declaration too.** `@v4` had been labelled `tag` for a week when it is
+  merely a non-SHA ref; the fix is `unresolved` until a lookup resolves it — presence is not
+  correctness applies to what the parser *calls* a thing. (github-core#45)
+- **Prefer repository-level listings over per-run walks.** One listing call per repository
+  reached 3,831 artifacts on the primary repo; per-run fetches would have cost thousands of calls
+  for the same rows. (github-core#55)
+- **Content-addressed identity is not observation-scoped identity.** A commit SHA is global, but
+  GitHub's signature-verification record is per repository network, so one node per SHA merged
+  verification records that disagree; the key became `<full_name>#<sha>`. Ask, for every
+  natural key, *which observer's view is this the identity of?* (github-core#57)
+- **Done-tests need a running instance that runs the branch.** The dev stack ran the shared
+  clone, so none of the five ACIDs could be *observed*; every requirement stays In Development
+  until a stack boots the branch. Budget the boot when the bake is more than one concept.
+
 ## References
 
 - [`build-domain-vocabulary`](../../../../../tap_grid/skills/build-domain-vocabulary/SKILL.md) — the method this specialises.
