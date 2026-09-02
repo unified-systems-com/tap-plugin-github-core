@@ -93,6 +93,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 ### Plugin Scope
 ----
 RID: `req-github-core-scope`
+
 Status: `Implemented`
 
 `github_core` models GitHub platform objects that matter to deployment and
@@ -113,6 +114,7 @@ surface; those arrive as further manifest sources behind the same scope.
 ### GitHub App Authentication
 ----
 RID: `req-github-core-app-auth`
+
 Status: `Implemented`
 
 A personal access token is a *person's* power in token form: it inherits their role, expires on
@@ -159,6 +161,7 @@ OpenSSL the FIPS posture validates (`spec-fips.md`); no JWT library is introduce
 ### Account Scope
 ----
 RID: `req-github-core-org-scope`
+
 Status: `Implemented`
 
 Pulled by git-serious (git-serious-tap#17, 2026-08-26): a product that observes an
@@ -197,6 +200,7 @@ Two edges laid while the surface is open:
 ### Model Set
 ----
 RID: `req-github-core-models`
+
 Status: `Implemented`
 
 The v0 model set is intentionally small but node-granular. Values that deserve
@@ -312,6 +316,7 @@ must not conflate the two.
 ### Ruleset Collection
 ----
 RID: `req-github-core-ruleset`
+
 Status: `In Development`
 
 A **ruleset** is GitHub's enforcement gate on a set of refs — required status checks,
@@ -389,6 +394,7 @@ vocabulary corpus; the node stands alone until then.
 ### Edge Vocabulary
 ----
 RID: `req-github-core-edges`
+
 Status: `Implemented`
 
 Edges express the GitHub Actions execution spine and dependency references.
@@ -437,6 +443,7 @@ ownership, or runtime control.
 ### Declared Jobs
 ----
 RID: `req-github-core-declared-jobs`
+
 Status: `Implemented`
 
 A job as **written** and a job as **run** are different objects, and the vocabulary corpus found
@@ -478,6 +485,7 @@ points at a step). Cache usage and action pins are extracted onto the job's `con
 ### Refs
 ----
 RID: `req-github-core-refs`
+
 Status: `Implemented`
 
 A ref is a name and the commit it points at. Branches (`refs/heads/`) and tags (`refs/tags/`) are
@@ -508,6 +516,7 @@ re-tag that swaps only the tag object moves one and not the other.
 ### Rulesets
 ----
 RID: `req-github-core-rulesets`
+
 Status: `Implemented`
 
 A ruleset is the gate: what must be true for a commit to land on a ref. It is a node because many
@@ -564,6 +573,7 @@ request write.
 ### Environments
 ----
 RID: `req-github-core-environments`
+
 Status: `Implemented`
 
 A deployment environment is where protection rules — required reviewers, wait timers, branch
@@ -586,6 +596,7 @@ policy; that field is left `null` (unobserved) rather than defaulted, because de
 ### Caches
 ----
 RID: `req-github-core-caches`
+
 Status: `Implemented`
 
 Five incidents turn on the Actions cache, including the two most recent: an entry written by a job
@@ -612,6 +623,7 @@ The join is a named gap. `WRITES_CACHE` / `RESTORES_CACHE` wait for it.
 ### App Installations
 ----
 RID: `req-github-core-app-installations`
+
 Status: `Implemented`
 
 The registered application and its installation into an account are different objects: one App is
@@ -650,6 +662,7 @@ repositories and then shows you one row about itself. Read-only, like everything
 ### Rule Suites — Who Actually Bypassed
 ----
 RID: `req-github-core-rule-suites`
+
 Status: `In Development`
 
 `req-github-core-ruleset` records **who may bypass** a gate, and hits a documented ceiling: GitHub
@@ -698,6 +711,7 @@ identity, a timestamp, and facts that point at it. Modelling it duplicates nothi
 ### GitHub Apps
 ----
 RID: `req-github-core-app`
+
 Status: `Implemented`
 
 A `github_app` node models a GitHub App or first-party platform app enabled on
@@ -733,6 +747,7 @@ prefix map.
 ### Dimension Strategy
 ----
 RID: `req-github-core-dimensions`
+
 Status: `Implemented`
 
 GitHub is treated as its own platform environment. The plugin uses flat,
@@ -786,6 +801,7 @@ than an invisible member of the config layer.
 ### Collector Secret Kinds
 ----
 RID: `req-github-core-secret`
+
 Status: `Implemented`
 
 The first credential mode is a Personal Access Token. `github_core` owns the
@@ -860,6 +876,7 @@ Do not pre-build it; wait for the trigger.
 ### Collector Runtime
 ----
 RID: `req-github-core-collector`
+
 Status: `Implemented`
 
 The collector is a standard `CollectorBase` subclass registered by
@@ -917,6 +934,7 @@ Collection policy:
 ### Collection And Link Manifests
 ----
 RID: `req-github-core-manifests`
+
 Status: `Implemented`
 
 The collector uses two declarative JSON manifests, both schema-validated at
@@ -948,6 +966,7 @@ installation interprets GitHub data against the grid."
 ### Workflow File Parsing
 ----
 RID: `req-github-core-workflow-parse`
+
 Status: `Implemented`
 
 Workflow parsing is v0 because the demo needs to explain the deployment
@@ -1017,6 +1036,7 @@ flags it as a near-soon implementation target for the next GitHub-focused pass.
 ### Runner Semantics
 ----
 RID: `req-github-core-runner`
+
 Status: `Implemented`
 
 GitHub runners have two relevant shapes:
@@ -1045,6 +1065,7 @@ in v0.
 ### Existing Grid Links
 ----
 RID: `req-github-core-grid-links`
+
 Status: `Implemented`
 
 The collector always attempts to resolve exact links from collected GitHub
@@ -1162,6 +1183,7 @@ future capability deferred with the rest of variable/secret-ref work in
 ### Plugin Python Dependency
 ----
 RID: `req-github-core-python-deps`
+
 Status: `Implemented`
 
 `PyYAML` is approved for this plugin's workflow-file parser and should be
@@ -1185,6 +1207,7 @@ justified by and documented with `github_core`.
 ### Variables And Secret References (Backlog)
 ----
 RID: `req-github-core-backlog-references`
+
 Status: `Backlog`
 
 GitHub Actions variables (`vars.X`) and secret references (`secrets.X`) are
@@ -1324,6 +1347,7 @@ not in API). Future panel work, not part of model shape.
 ### Multi-Attempt Run Observation (Backlog)
 ----
 RID: `req-github-core-backlog-run-attempts`
+
 Status: `Backlog`
 
 GitHub workflow runs can be re-run, producing multiple "attempts" — each
@@ -1429,6 +1453,7 @@ the demo doesn't hit it, and the fix lives here.
 ### Grid-Vocabulary Reference Resolution (Backlog)
 ----
 RID: `req-github-core-backlog-grid-vocab-links`
+
 Status: `Backlog`
 
 The v0 parser (`_categorize_refs` in `parser.py`) extracts grid-link candidates
@@ -1504,6 +1529,7 @@ Invert the pipeline. Instead of shape-classify-then-match:
 ### GitHub App Relationships (Backlog)
 ----
 RID: `req-github-core-backlog-app-relationships`
+
 Status: `Backlog`
 
 `req-github-core-app` models that an app is *enabled on* a repo (`ENABLED_ON`).
@@ -1524,6 +1550,7 @@ These are deferred until there is a concrete graph consumer; v0 stops at presenc
 ### v0 Non-Goals
 ----
 RID: `req-github-core-nongoals`
+
 Status: `Implemented`
 
 Out of scope for v0:
