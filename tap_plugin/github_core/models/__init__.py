@@ -4,6 +4,7 @@ from tap_plugin.github_core.models.actions_cache import ActionsCache
 from tap_plugin.github_core.models.app_installation import AppInstallation
 from tap_plugin.github_core.models.git_ref import GitRef
 from tap_plugin.github_core.models.github_account import GithubAccount
+from tap_plugin.github_core.models.github_action import GithubAction
 from tap_plugin.github_core.models.github_actions_job import GithubActionsJob
 from tap_plugin.github_core.models.github_actions_run import GithubActionsRun
 from tap_plugin.github_core.models.github_app import GithubApp
@@ -21,6 +22,7 @@ __all__ = [
     "AppInstallation",
     "GitRef",
     "GithubAccount",
+    "GithubAction",
     "GithubActionsJob",
     "GithubActionsRun",
     "GithubApp",

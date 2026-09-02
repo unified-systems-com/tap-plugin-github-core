@@ -75,6 +75,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-rule-suites | [Rule Suites — Who Actually Bypassed](#rule-suites--who-actually-bypassed) | In Development | 2026-08-28 (settled empirically): enumeration of bypass ACTORS has a documented write-access ceiling, but rule suites answer the adjacent question — who actually bypassed a gate — and return 200 to a read-only App with actor names. Detection where enumeration is refused. |
 | req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
+| req-github-core-actions-used | [Actions Used](#actions-used) | In Development | 2026-09-02 (github-core#45, ranked first by `build-github-corpus`): `github_action` node keyed on the action path, shared across the scope, plus `USES_ACTION` carrying the pin. The parser no longer labels every non-SHA ref `tag`; a mutable name is resolved only against an in-scope repository's refs and is otherwise `unresolved` / `unobservable`. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -462,8 +463,9 @@ The other half — the trigger — is carried onto the job's `configuration` alo
 own permissions, so the question can be adjudicated at one node instead of by walking up.
 
 Steps remain structured data rather than nodes (`step` was rejected on the node test: nothing
-points at a step). Cache usage and action pins are extracted onto the job's `configuration` now;
-`USES_ACTION` and `WRITES_CACHE`/`RESTORES_CACHE` are a later wave.
+points at a step). Cache usage is extracted onto the job's `configuration` now;
+`WRITES_CACHE`/`RESTORES_CACHE` are a later wave. Action pins became `USES_ACTION` edges in
+`req-github-core-actions-used`.
 
 #### Acceptance Criteria
 
@@ -474,6 +476,54 @@ points at a step). Cache usage and action pins are extracted onto the job's `con
 | req-github-core-declared-jobs-3 | Checkout Ref Is First-Class | Implemented | The ref passed to `actions/checkout` is a queryable column, and the workflow's triggers and permissions ride on the job's `configuration` so a single node answers the `pull_request_target` question. | |
 | req-github-core-declared-jobs-4 | Needs Graph Emitted | Implemented | `needs:` becomes `DEPENDS_ON_JOB` edges carrying the dependent's `if:`. A `needs:` naming a job that does not exist emits no edge and keeps the name visible on the node. | Emitted after all jobs in a file are known, since a job may need one declared below it. |
 | req-github-core-declared-jobs-5 | Runner Declaration Canonicalized | Implemented | `runs-on` is stored as a list whichever of the three written forms was used (string, list, `{group, labels}`); a job that declares none stores `null`, not `[]`. | One query shape for "which jobs run on a self-hosted label". |
+
+### Actions Used
+----
+RID: `req-github-core-actions-used`
+Status: `In Development`
+
+A `uses:` line hands a job's token, its checkout and every secret in scope to code in someone
+else's repository, at whatever commit the written ref resolves to on the day. The corpus's
+tag-repoint compromises are that sentence, and until this wave the action was text inside
+`workflow_job.configuration.action_refs` — parsed, present, and unreachable from any other node
+(github-core#45).
+
+`github_action` is keyed on the **action path** (`owner/repo[/subdir]`, or `docker://image`)
+and is platform-global, like `github_app`: `actions/checkout` is one node that every job in scope
+points at. A subdirectory action is its own node (`actions/cache/restore` is not `actions/cache`).
+The ref is not identity — the same action is pinned differently by different jobs — so the pin
+rides on `USES_ACTION`, one edge per (job, action, declared ref), with every step position that
+shares the ref folded into `step_indexes`.
+
+**The pin is stated in three states, never two.** `pin_kind` is `sha` or `digest` when the string
+proves immutability; `tag` or `branch` only when the action's own repository is inside the observed
+scope and the name was matched against its refs (config layer, `req-github-core-refs`, no extra
+request); otherwise **`unresolved`**, with `resolution: unobservable` when the repository is out of
+scope and `resolution: in_scope` when it was in scope and the name matched nothing. The previous
+parser called every non-SHA ref `tag`, which was a declaration that existed and was false —
+presence is not correctness — and `resolution` exists so a reader can tell "pinned to a tag" from
+"pinned to a name nobody looked up". No call is made to an out-of-scope action repository in this
+wave; the article records what that call would be.
+
+`is_pinned` is carried explicitly (true iff `sha` or `digest`) so the one-bit control every
+action-pinning check asks is not re-derived per view. `resolved_sha` — the SHA itself, or an
+in-scope ref's head commit — has field history, which is the tag-repoint detection, in the same way
+`git_ref.head_sha` history is tag-movement detection.
+
+Absence shapes (github-core#14): the edge is **git-provable** (a commit removing the `uses:` line is
+positive evidence); the node is **derived absence** — relevant while any edge points at it, never
+tombstoned on its own observation. `DEFINED_IN` (action → repository) and `resolves_to_fork` are
+the corpus's next items on this surface and are not built here.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-actions-used-1 | Action Node Is Shared | In Development | Every non-local `uses:` in a collected workflow lands as one `github_action` per action path, platform-global, with no owner/repo dimension. | Same fan-in shape as `github_app`. |
+| req-github-core-actions-used-2 | The Pin Lives On The Edge | In Development | `USES_ACTION` (job → action) carries `declared_ref`, `pin_kind`, `is_pinned`, `resolution`, `step_indexes` and, when known, `resolved_sha`; a job calling the same action at two refs emits two edges. | Edge id includes the declared ref for that reason. |
+| req-github-core-actions-used-3 | A Name Is Never Called A Tag Without Evidence | In Development | A non-SHA ref parses as `unresolved`; it becomes `tag` or `branch` only by matching the in-scope repository's refs, and is `unobservable` when that repository is out of scope. | Asserted at the parser and the collector. |
+| req-github-core-actions-used-4 | Docker Steps Are Actions Too | In Development | `docker://image[:tag|@sha256:digest]` lands as a `kind: docker` node; a digest is `digest` and pinned, an image tag is `tag` and not. | |
+| req-github-core-actions-used-5 | The Run Says What It Saw | In Development | The run records the distinct-action count, the usage count, how many usages were unpinned and how many of those were unobservable, so a zero reads as a count and not a silence. | `ACTIONS_USED`. |
 
 ### Refs
 ----

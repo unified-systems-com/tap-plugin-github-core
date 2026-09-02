@@ -116,6 +116,27 @@ def runner_id(full_name: str, runner_id_int: int | str) -> UUID:
     return _id("github_core__github_runner", f"{full_name}#{runner_id_int}")
 
 
+def github_action_id(action_path: str) -> UUID:
+    """An action, keyed on the `uses:` path with the ref stripped.
+
+    Platform-global rather than repository-scoped, like `github_app`: `actions/checkout` is
+    ONE node every job on every repository points at, or "which jobs use an unpinned checkout"
+    becomes a string comparison across duplicates. The ref is deliberately NOT here — the same
+    action is pinned differently by different jobs, and the pin belongs to the edge.
+    """
+    return _id("github_core__github_action", action_path)
+
+
+def uses_action_edge_id(job_uuid: UUID, action_uuid: UUID, declared_ref: str) -> UUID:
+    """A `USES_ACTION` edge, keyed on the job, the action AND the ref as written.
+
+    Not the generic `edge_id` (type, source, target): a job that calls the same action at two
+    refs — `actions/checkout@v4` in one step and `actions/checkout@<sha>` in another — is two
+    facts, and an id that ignored the ref would keep only the last one after envelope collapse.
+    """
+    return uuid5(GITHUB_CORE_NAMESPACE, f"edge:USES_ACTION__github_core:{job_uuid}:{action_uuid}:{declared_ref}")
+
+
 def edge_id(edge_type: str, source: UUID, target: UUID) -> UUID:
     """Deterministic UUIDv5 for an edge by (type, source, target)."""
     return uuid5(GITHUB_CORE_NAMESPACE, f"edge:{edge_type}:{source}:{target}")

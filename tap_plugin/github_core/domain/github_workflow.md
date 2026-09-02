@@ -31,7 +31,7 @@ Deliberately **not** covered:
 - **The declared job.** This is the largest known gap in the model and it is named as such. The corpus rules `workflow_job` — the job **as written**, carrying its own `permissions:`, `runs-on:`, `if:` and checkout ref — into the *self* tier as "the largest gap": roughly 20 of 35 surveyed incidents need it, and it is the anchor for every conjunction query. Until it exists, that structure lives inside this node's un-schema'd `configuration` blob, which cannot be queried the way a node can.
 - **Steps.** The corpus rejects `step` as a node on the node test: nothing points at a step, it is an ordinal position inside a job. Revisit only if an edge genuinely needs a step as an endpoint.
 - **Triggers.** Rejected as a node — a trigger has no identity across observations. A field on the workflow.
-- **Actions used.** `github_action` and `USES_ACTION` (with `pin_kind`, `pinned_sha`, `declared_ref`, `resolves_to_fork`) are corpus concepts at the *self* tier, not built. Today a `uses:` reference is text inside `configuration`.
+- **Actions used.** Built (2026-09-02): every non-local `uses:` is a [`github_action`](github_action.md) node reached from the declared job by [`USES_ACTION`](USES_ACTION.md), which carries the pin. The workflow's `configuration` still holds the parsed `action_refs` per job; the edge is the queryable form.
 - **Secret references.** `REFERENCES_SECRET` and its adjudication properties are corpus concepts; `req-github-core-backlog-references` is the backlog entry here. Deferred, not forgotten.
 
 ## Neutrality

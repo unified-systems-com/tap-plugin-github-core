@@ -24,6 +24,7 @@ github_core__github_ruleset = "tap_plugin.github_core.models.github_ruleset.Gith
 github_core__rule_suite = "tap_plugin.github_core.models.rule_suite.RuleSuite"
 github_core__github_environment = "tap_plugin.github_core.models.github_environment.GithubEnvironment"
 github_core__actions_cache = "tap_plugin.github_core.models.actions_cache.ActionsCache"
+github_core__github_action = "tap_plugin.github_core.models.github_action.GithubAction"
 
 [edges]
 HOSTS_ACCOUNT__github_core = "edges/HOSTS_ACCOUNT.edge.json"
@@ -49,6 +50,7 @@ HAS_CACHE__github_core = "edges/HAS_CACHE.edge.json"
 SCOPED_TO__github_core = "edges/SCOPED_TO.edge.json"
 HAS_INSTALLATION__github_core = "edges/HAS_INSTALLATION.edge.json"
 INSTALLED_ON__github_core = "edges/INSTALLED_ON.edge.json"
+USES_ACTION__github_core = "edges/USES_ACTION.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"
