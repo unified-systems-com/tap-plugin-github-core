@@ -49,7 +49,7 @@ def fetch_live_names(tag: str) -> set[str]:
     if not url.startswith("https://api.github.com/"):  # runtime guarantee, not just construction
         raise ValueError(f"refusing non-GitHub-API URL: {url}")
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "tap-build-github-corpus"})
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - pinned public GitHub API URL
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310  # nosec B310 - scheme + host asserted above
         listing = json.load(resp)
     return {_base_name(item["name"]) for item in listing if item["name"].endswith(".svg")}
 
