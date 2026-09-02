@@ -111,34 +111,10 @@ def compute_delta(glyphs: dict[str, dict], nodes: list[str], edges: list[str], t
     return delta
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--plugin-root", required=True, help="path to tap_plugin/github_core")
-    ap.add_argument("--tag", default=None, help="primer/octicons tag to list live (default: the JSON's pin)")
-    ap.add_argument("--offline", action="store_true", help="skip the live listing; use the checked-in file only")
-    ap.add_argument("--json", action="store_true", help="emit the machine-readable delta instead of tables")
-    args = ap.parse_args()
-
-    cls = load_classification()
-    glyphs = {g["name"]: g for g in cls["glyphs"]}
-    tag = args.tag or cls.get("octicons_tag", "")
-    nodes, edges = plugin_types(Path(args.plugin_root))
-
-    live: set[str] | None = None
-    if not args.offline:
-        try:
-            live = fetch_live_names(tag)
-        except Exception as exc:  # noqa: BLE001 - report and fall back, never fake a listing
-            print(f"live listing failed ({exc}); continuing offline", file=sys.stderr)
-
-    delta = compute_delta(glyphs, nodes, edges, cls.get("tap_types", []), tag, live)
-    mapped_types = {t["type"]: t for t in cls.get("tap_types", [])}
-    gaps_by_area = delta["gaps_by_product_area"]
+def render_tables(delta: dict, nodes: list[str], edges: list[str], mapped_types: dict[str, dict]) -> None:
+    """Print the human-readable delta (the --json path prints the dict instead)."""
+    tag = delta["octicons_tag"]; gaps_by_area = delta["gaps_by_product_area"]
     unknown_live, retired = delta["unknown_live_glyphs"], delta["retired_glyphs"]
-    if args.json:
-        print(json.dumps(delta, indent=2, sort_keys=True))
-        return 0
-
     print(f"# Octicons coverage delta — github_core vs primer/octicons {tag}\n")
     rows = [
         ("TAP node types", delta["tap_nodes"]), ("TAP edge types", delta["tap_edges"]),
@@ -169,6 +145,35 @@ def main() -> int:
     for t in nodes + edges:
         m = mapped_types.get(t, {})
         print(f"| `{t}` | {m.get('kind', '?')} | {m.get('octicon') or 'none'} | {m.get('note', '')} |")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--plugin-root", required=True, help="path to tap_plugin/github_core")
+    ap.add_argument("--tag", default=None, help="primer/octicons tag to list live (default: the JSON's pin)")
+    ap.add_argument("--offline", action="store_true", help="skip the live listing; use the checked-in file only")
+    ap.add_argument("--json", action="store_true", help="emit the machine-readable delta instead of tables")
+    args = ap.parse_args()
+
+    cls = load_classification()
+    glyphs = {g["name"]: g for g in cls["glyphs"]}
+    tag = args.tag or cls.get("octicons_tag", "")
+    nodes, edges = plugin_types(Path(args.plugin_root))
+
+    live: set[str] | None = None
+    if not args.offline:
+        try:
+            live = fetch_live_names(tag)
+        except Exception as exc:  # noqa: BLE001 - report and fall back, never fake a listing
+            print(f"live listing failed ({exc}); continuing offline", file=sys.stderr)
+
+    delta = compute_delta(glyphs, nodes, edges, cls.get("tap_types", []), tag, live)
+    mapped_types = {t["type"]: t for t in cls.get("tap_types", [])}
+    if args.json:
+        print(json.dumps(delta, indent=2, sort_keys=True))
+        return 0
+
+    render_tables(delta, nodes, edges, mapped_types)
     return 0
 
 
