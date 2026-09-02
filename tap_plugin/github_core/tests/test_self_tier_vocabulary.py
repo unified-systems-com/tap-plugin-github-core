@@ -642,11 +642,16 @@ class TestAuthSeam:
         it, because both load the same module. A second copy is how "verified" and "works" drift."""
         from pathlib import Path
 
-        verify = (
-            Path(__file__).resolve().parents[1] / "skills" / "create-github-app" / "verify_app.py"
-        ).read_text()
-        assert "app_jwt.py" in verify
+        skill = Path(__file__).resolve().parents[1] / "skills" / "create-github-app"
+        verify = (skill / "verify_app.py").read_text()
+        assert 'load("app_jwt")' in verify
         assert "def mint_jwt" not in verify
+        # And the envelope FOLD, for the same reason (github-core#25: a private kind check in
+        # this script refused the very envelope create_app.py writes).
+        for script in ("verify_app.py", "create_app.py"):
+            text = (skill / script).read_text()
+            assert 'load("credential_shape")' in text, script
+            assert "def normalize_credentials" not in text, script
 
 
 # --------------------------------------------------------------------------------------------

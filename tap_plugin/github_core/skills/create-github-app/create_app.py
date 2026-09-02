@@ -41,7 +41,13 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import api_url
+import collector_modules
 import manifest as manifest_lib
+
+# The envelope fold is the collector's, path-loaded (see collector_modules): carrying a token
+# forward from whichever kind sits there today is a READ of the old envelope, and reads go
+# through the one fold — not a second, hand-rolled one (github-core#25).
+normalize_credentials = collector_modules.load("credential_shape").normalize_credentials
 
 _TIMEOUT_SECONDS = 600
 
@@ -188,12 +194,12 @@ def place_envelope(data: dict, *, owner: str, api_base_url: str, secrets_root: P
 
     existing_data = existing.get("data") if isinstance(existing.get("data"), dict) else {}
     carried = {}
-    # Carry a token forward whichever shape it arrived in: the combined envelope's `pat` block,
-    # or a legacy `github_pat` envelope's bare `token`.
-    if isinstance(existing_data.get("pat"), dict):
-        carried["pat"] = existing_data["pat"]
-    elif existing.get("kind") == "github_pat" and existing_data.get("token"):
-        carried["pat"] = {k: v for k, v in existing_data.items() if k in {"token"}}
+    # Carry a token forward whichever shape it arrived in — the combined envelope's `pat` block
+    # or a legacy `github_pat` envelope's bare `token` — by folding the old envelope exactly the
+    # way the collector reads it.
+    folded = normalize_credentials(str(existing.get("kind") or ""), dict(existing_data))
+    if isinstance(folded.get("pat"), dict) and folded["pat"].get("token"):
+        carried["pat"] = folded["pat"]
     if carried:
         print("  carried the existing personal access token forward into this envelope")
 

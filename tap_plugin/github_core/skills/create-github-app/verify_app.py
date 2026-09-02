@@ -13,7 +13,6 @@ Usage:  python verify_app.py [--secrets-root DIR]
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import urllib.error
@@ -21,20 +20,18 @@ import urllib.request
 from pathlib import Path
 
 import api_url
+import collector_modules
 
-# The JWT derivation is NOT duplicated here. It lives in the plugin package beside the collector's
-# auth seam (`collectors/github_collector/app_jwt.py`) and is loaded from its path, because this
-# script runs on the operator's machine from a checkout where nothing is installed. One
-# implementation means the credential this script PROVES works is minted exactly the way the
-# collector will mint it — a second copy is how "verified" and "works" drift apart.
-_APP_JWT_PATH = Path(__file__).resolve().parents[2] / "collectors" / "github_collector" / "app_jwt.py"
-_spec = importlib.util.spec_from_file_location("github_core_app_jwt", _APP_JWT_PATH)
-if _spec is None or _spec.loader is None:  # pragma: no cover - a broken checkout, not a code path
-    raise SystemExit(f"cannot load the App JWT helper from {_APP_JWT_PATH}")
-_app_jwt = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_app_jwt)
-
-mint_jwt = _app_jwt.mint_jwt
+# Neither the JWT derivation nor the envelope fold is duplicated here. Both live in the plugin
+# package beside the collector's auth seam (`collectors/github_collector/app_jwt.py`,
+# `credential_shape.py`) and are loaded from their paths, because this script runs from a checkout
+# where nothing is installed. One implementation means the credential this script PROVES works is
+# read and minted exactly the way the collector will read and mint it — a second copy is how
+# "verified" and "works" drift apart. github-core#25 was that drift: this script kept its own
+# `kind == "github_app"` check after the creation flow moved to the combined `github` kind, so it
+# refused every credential `create_app.py` placed with "nothing to verify".
+mint_jwt = collector_modules.load("app_jwt").mint_jwt
+normalize_credentials = collector_modules.load("credential_shape").normalize_credentials
 
 
 def call(url: str, token: str, *, scheme: str = "Bearer", method: str = "GET") -> tuple[int, object]:
@@ -51,6 +48,29 @@ def call(url: str, token: str, *, scheme: str = "Bearer", method: str = "GET") -
         return exc.code, exc.read()[:160].decode("utf-8", "replace")
 
 
+def app_credentials(envelope: dict) -> dict | None:
+    """The folded credential data if the envelope carries a usable App block, else None.
+
+    Reads the envelope through the collector's own fold, so the combined `github` kind (what
+    `create_app.py` writes) and the legacy `github_app` kind both verify, and a token-only
+    envelope is reported as such rather than as an unknown kind.
+    """
+    data = normalize_credentials(str(envelope.get("kind") or ""), dict(envelope.get("data") or {}))
+    app = data.get("app") or {}
+    if not app.get("app_id") or not app.get("private_key"):
+        return None
+    return data
+
+
+def describe_missing_app(envelope: dict) -> str:
+    """Why `app_credentials` returned None, in the operator's terms."""
+    kind = envelope.get("kind")
+    data = normalize_credentials(str(kind or ""), dict(envelope.get("data") or {}))
+    if data.get("pat"):
+        return f"envelope kind {kind!r} carries a personal access token but no GitHub App"
+    return f"envelope kind {kind!r} carries no GitHub App (app_id + private_key)"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--secrets-root", type=Path,
@@ -58,10 +78,10 @@ def main() -> int:
     args = ap.parse_args()
 
     envelope = json.loads((args.secrets_root / "github_core" / "collector.secret.json").read_text())
-    if envelope.get("kind") != "github_app":
-        print(f"  credential kind is {envelope.get('kind')!r}, not github_app — nothing to verify")
+    d = app_credentials(envelope)
+    if d is None:
+        print(f"  {describe_missing_app(envelope)} — nothing to verify")
         return 1
-    d = envelope["data"]
     # Same control as create_app.py: the envelope is operator-written, but a mistyped or
     # tampered base URL here would carry a live installation token to it.
     try:
@@ -72,7 +92,7 @@ def main() -> int:
     owner = d["owner"]
 
     print("  chain")
-    jwt = mint_jwt(d["app_id"], d["private_key"])
+    jwt = mint_jwt(d["app"]["app_id"], d["app"]["private_key"])
     status, app = call(f"{api}/app", jwt)
     print(f"    JWT -> /app                         {status} {app.get('slug') if status == 200 else app}")
     if status != 200:
