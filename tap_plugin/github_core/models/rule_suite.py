@@ -59,7 +59,8 @@ class RuleSuite(BaseModel):
     #: A rule failed and the push was refused. Collected only if the subset ever widens.
     RESULT_FAIL = "fail"
     #: Every rule was satisfied. Routine; not collected today.
-    RESULT_PASS = "pass"
+    #: nosec B105 — GitHub's rule-suite result vocabulary ("pass"), not a credential.
+    RESULT_PASS = "pass"  # nosec B105
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
         "suite_id": {"type": ["integer", "null"]},
