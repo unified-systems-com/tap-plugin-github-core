@@ -7,10 +7,10 @@
       "level": "read",
       "why": "Workflows, runs, jobs, caches — the execution layer.",
       "sources": [
-        "workflows",
-        "runs",
+        "caches",
         "jobs",
-        "caches"
+        "runs",
+        "workflows"
       ]
     },
     "administration": {
@@ -18,8 +18,10 @@
       "level": "read",
       "why": "Rulesets and repository runners — the gate and where jobs run.",
       "sources": [
-        "runners",
-        "rulesets"
+        "rule_suite_detail",
+        "rule_suites",
+        "rulesets",
+        "runners"
       ]
     },
     "artifact_metadata": {
@@ -54,8 +56,8 @@
       "level": "read",
       "why": "Workflow YAML, refs, and (once #31 lands) releases.",
       "sources": [
-        "workflow_yaml",
-        "refs"
+        "refs",
+        "workflow_yaml"
       ]
     },
     "custom_properties_for_organizations": {
@@ -137,11 +139,11 @@
       "level": "read",
       "why": "Mandatory for any App; repository listing and identity.",
       "sources": [
-        "owner_repos",
         "account",
-        "repository",
         "config_layer",
-        "environments"
+        "environments",
+        "owner_repos",
+        "repository"
       ]
     },
     "organization_administration": {
