@@ -707,10 +707,14 @@ class TestCreateAppSkillIsHostRunnable:
 
         skill = P(__file__).resolve().parents[1] / "skills" / "create-github-app"
         # Sibling modules in the skill directory are part of the host flow, not dependencies.
-        siblings = {"manifest", "api_url"}
-        for name in ("create_app.py", "manifest.py", "api_url.py"):
+        siblings = {"manifest", "api_url", "collector_modules"}
+        for name in ("create_app.py", "manifest.py", "api_url.py", "collector_modules.py"):
             extra = self._imports(skill / name) - siblings
             assert not extra, f"{name} imports non-stdlib modules: {sorted(extra)}"
+        # What the host flow PATH-LOADS runs on the operator's machine too, so it is held to the
+        # same rule: the credential fold must stay stdlib-only (github-core#25).
+        shape = P(__file__).resolve().parents[1] / "collectors" / "github_collector" / "credential_shape.py"
+        assert not self._imports(shape), "credential_shape.py must stay stdlib-only"
 
     def test_api_base_url_must_be_https_and_bare(self) -> None:
         """req-github-core-app-auth-4 / the SonarCloud SSRF finding on PR #3: the API base URL

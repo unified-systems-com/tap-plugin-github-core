@@ -28,19 +28,28 @@ from tap_cares.exceptions import SecretValidationError
 from tap_cares.secrets import SecretRef, require_secret_kind, resolve_secret
 from tap_cares.secrets.models import Secret
 
+# The kinds and the fold live in a stdlib-only sibling so the host-side skill scripts can
+# path-load the SAME fold from a bare checkout (github-core#25). Re-exported here because this
+# module is where every in-Django consumer already looks for them.
+from .credential_shape import (  # noqa: F401 — re-exports
+    GITHUB_KIND,
+    LEGACY_APP_KIND,
+    LEGACY_PAT_KIND,
+    normalize_credentials,
+)
+
+#: The names this module has always exported for the legacy kinds. Aliases of the shape module's
+#: constants — assigned from a name, not a literal, which is also what keeps a secret scanner from
+#: reading a kind label as a credential.
+GITHUB_SECRET_KIND = LEGACY_PAT_KIND
+GITHUB_APP_SECRET_KIND = LEGACY_APP_KIND
+
 # The well-known SecretRef for the github_core collector. v0 has no per-
 # instance config; the operator drops `github_core/collector.secret.json` under
 # TAP_SECRETS_ROOT (no plugin config in core infra — operator-owned, off-grid).
 # `scope` names the consuming plugin's slug, not the credential provider
 # (req-tap-cares-secrets-consumer-scoping).
 GITHUB_SECRET_REF = SecretRef(scope="github_core", key="collector")
-#: The current kind: ONE envelope that may carry an App, a token, or both.
-GITHUB_KIND = "github"
-#: Legacy single-credential kinds, still accepted on read through the transition
-#: (`req-github-core-secret-3`). samsite's shipped record still declares `github_pat`, and
-#: breaking its boot to tidy a kind name would be a poor trade.
-GITHUB_SECRET_KIND = "github_pat"
-GITHUB_APP_SECRET_KIND = "github_app"  # nosec B105 — the KIND's name, not a credential
 
 # github_core owns this schema for the kind's `data` (req-github-core-secret-2).
 # Strict: additionalProperties false. Behavioral knobs beyond `initial_run_limit`
@@ -315,26 +324,6 @@ SCHEMA_BY_KIND: dict[str, dict[str, Any]] = {
     GITHUB_SECRET_KIND: GITHUB_PAT_SCHEMA,
     GITHUB_APP_SECRET_KIND: GITHUB_APP_SCHEMA,
 }
-
-
-def normalize_credentials(kind: str, data: dict[str, Any]) -> dict[str, Any]:
-    """Fold any accepted envelope kind into the current `{owner, api_base_url, app?, pat?, ...}` shape.
-
-    One place converts, so every caller above the auth seam reasons about one shape and the
-    transition off the single-credential kinds is a detail rather than a branch in every consumer.
-    """
-    if kind == GITHUB_KIND:
-        return dict(data)
-    folded: dict[str, Any] = {
-        key: data[key] for key in ("owner", "api_base_url", "repos", "initial_run_limit") if key in data
-    }
-    if kind == GITHUB_APP_SECRET_KIND:
-        folded["app"] = {
-            key: data[key] for key in ("app_id", "app_slug", "private_key") if key in data
-        }
-    elif kind == GITHUB_SECRET_KIND:
-        folded["pat"] = {"token": data["token"]}
-    return folded
 
 
 class GithubCredentialError(Exception):
