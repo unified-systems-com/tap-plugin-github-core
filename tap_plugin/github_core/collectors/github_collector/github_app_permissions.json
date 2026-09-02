@@ -174,10 +174,9 @@
       "why": "Custom organisation roles, same reasoning."
     },
     "organization_custom_properties": {
-      "state": "deferred",
+      "state": "recommended",
       "level": "read",
-      "why": "Custom-property DEFINITION management at the organisation level (read/write/admin). The values ride custom_properties_for_organizations and repository_custom_properties; definitions are only needed to explain a property that has no value yet.",
-      "until": "a property-definition source"
+      "why": "Custom-property DEFINITIONS at the organisation level (the values ride custom_properties_for_organizations and repository_custom_properties). A definition explains a property a repository has not set yet — the difference between 'unset' and 'no such property'. Granted read 2026-09-02; kept."
     },
     "organization_custom_roles": {
       "state": "recommended",
