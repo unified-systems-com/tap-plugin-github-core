@@ -95,7 +95,9 @@ const PRODUCER_SCOPES = ["packages", "contents", "id-token"];
 const OUTPUT_KINDS = [
     {kind: "releases", entityTypes: ["github_core__github_release"]},
     {kind: "artifacts", entityTypes: ["github_core__actions_artifact"]},
-    {kind: "packages", entityTypes: ["supply_chain_core__package_version", "supply_chain_core__package"]},
+    // github_core owns the package COLLECTION seam (vocabulary decision 5, PR #50);
+    // identity stays a purl for supply_chain_core to claim later.
+    {kind: "packages", entityTypes: ["github_core__github_package_version", "github_core__github_package"]},
 ];
 
 // Leaf card sizes hold a name, not just an icon; containers take these as
