@@ -101,11 +101,23 @@ def test_manifest_and_ledger_agree_on_what_is_requested() -> None:
 
 
 @pytest.mark.spec("req-github-core-app-permissions-ledger-5")
-def test_requested_entries_cite_real_sources() -> None:
-    names = {s["name"] for s in _MANIFEST["sources"]}
+def test_requested_entries_cite_exactly_the_sources_that_need_them() -> None:
+    """A requested entry's `sources` must be precisely the manifest sources whose permission
+    triple maps to that key — not merely names that exist somewhere in the manifest. Otherwise
+    the audit trail from permission to consumer is a list that reads as verified and is not."""
+    mod = _skill_manifest_module()
+    needing: dict[str, set[str]] = {}
+    for source in _MANIFEST["sources"]:
+        triple = source.get("permission")
+        if not triple:
+            continue
+        surface, key, _level = triple.split(":")
+        needing.setdefault(mod._manifest_key(surface, key), set()).add(source["name"])
     for key, entry in _entries().items():
         if entry["state"] != "requested":
             continue
         cited = set(entry.get("sources") or [])
-        assert cited, f"{key}: requested without naming the manifest source(s) that need it"
-        assert cited <= names, f"{key}: cites source(s) not in the manifest: {sorted(cited - names)}"
+        assert cited == needing.get(key, set()), (
+            f"{key}: ledger cites {sorted(cited)} but the manifest sources needing it are "
+            f"{sorted(needing.get(key, set()))}"
+        )
