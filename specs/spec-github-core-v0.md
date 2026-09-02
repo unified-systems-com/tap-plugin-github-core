@@ -879,7 +879,9 @@ Collection policy:
 
 - First population per repo collects the latest `initial_run_limit` workflow runs.
 - Later runs collect workflow runs created since the latest
-  `github_actions_run.created_at` already on the grid for that repo.
+  `github_actions_run.run_started_at` already on the grid for that repo
+  (`req-github-core-collector-3`; `created_at` became a column in github-core#47
+  and the boundary deliberately did not move with it).
 - The collector always refreshes previously non-terminal runs/jobs until they
   reach a terminal state.
 - Runner-config collection degrades with a structured warning on permission
