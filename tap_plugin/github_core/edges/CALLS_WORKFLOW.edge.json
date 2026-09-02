@@ -31,7 +31,14 @@
       },
       "pin_kind": {
         "type": "string",
-        "enum": ["sha", "tag", "branch", "unresolved", "unpinned", "local"],
+        "enum": [
+          "sha",
+          "tag",
+          "branch",
+          "unresolved",
+          "unpinned",
+          "local"
+        ],
         "description": "`sha` proves itself. `tag` / `branch` only when resolved against the callee repository's refs (in scope). `unresolved` is a mutable name the collector could not classify. `local` is a same-repository call, which runs at the caller's own commit and cannot be repointed independently. `unpinned` is a cross-repository call with no ref, which GitHub rejects but a file can still contain."
       },
       "is_pinned": {
@@ -44,7 +51,11 @@
       },
       "resolution": {
         "type": "string",
-        "enum": ["literal", "in_scope", "unobservable"],
+        "enum": [
+          "literal",
+          "in_scope",
+          "unobservable"
+        ],
         "description": "How the pin was established: read off the string; matched against refs of the callee's repository already held; or not looked up because that repository is outside the observed scope."
       },
       "same_repository": {
@@ -55,6 +66,98 @@
         "type": "boolean",
         "description": "`secrets: inherit` — the caller passes EVERY secret it holds to the callee. The single property that turns a reusable-workflow call into the untrusted→privileged handoff the incident corpus describes. Named secrets, when passed instead, are listed on the calling job's configuration."
       }
-    }
+    },
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "pin_kind": {
+              "enum": [
+                "sha",
+                "local"
+              ]
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "is_pinned": {
+              "const": true
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "is_pinned": {
+              "const": false
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "pin_kind": {
+              "const": "local"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "same_repository": {
+              "const": true
+            },
+            "declared_ref": {
+              "const": ""
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "pin_kind": {
+              "enum": [
+                "tag",
+                "branch"
+              ]
+            },
+            "resolution": {
+              "const": "in_scope"
+            }
+          },
+          "required": [
+            "resolution"
+          ]
+        },
+        "then": {
+          "required": [
+            "resolved_sha"
+          ]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "resolution": {
+              "const": "unobservable"
+            }
+          }
+        },
+        "then": {
+          "not": {
+            "required": [
+              "resolved_sha"
+            ]
+          },
+          "properties": {
+            "pin_kind": {
+              "const": "unresolved"
+            }
+          }
+        }
+      }
+    ],
+    "description": "The pin and the secrets posture, with their internal consistency enforced as on USES_ACTION: `is_pinned` is derived from `pin_kind` (`sha` or `local`), a `local` call is same-repository with no ref by construction, an `unobservable` resolution can only be `unresolved` with no `resolved_sha`, and an in-scope tag or branch must say what it resolved to."
   }
 }

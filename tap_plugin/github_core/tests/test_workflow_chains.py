@@ -259,6 +259,21 @@ class TestSchemas:
                             "resolution": "unobservable", "same_repository": False, "secrets_inherit": True})
         assert edge.properties["secrets_inherit"] is True
 
+    def test_calls_workflow_cannot_contradict_itself(self) -> None:
+        """Same rule as USES_ACTION (PR #51 review): a writer outside this collector cannot mint
+        an `unresolved` call that reads as pinned, or a `local` call with a ref."""
+        job = _create("github_core__workflow_job", {"full_name": "o/r", "job_key": "tap"})
+        wf = _create("github_core__github_workflow", {"full_name": "o/gate", "workflow_id": 1, "name": "plugin-ci"})
+        base = {"same_repository": False, "secrets_inherit": False}
+        for props in (
+            {**base, "declared_ref": "main", "pin_kind": "unresolved", "is_pinned": True, "resolution": "unobservable"},
+            {**base, "declared_ref": "", "pin_kind": "local", "is_pinned": True, "resolution": "literal"},
+            {**base, "declared_ref": "main", "pin_kind": "branch", "is_pinned": False, "resolution": "unobservable"},
+            {**base, "declared_ref": "v1", "pin_kind": "tag", "is_pinned": False, "resolution": "in_scope"},
+        ):
+            with pytest.raises(EdgePropertyValidationError):
+                create_edge(job.entity, wf.entity, "CALLS_WORKFLOW__github_core", props)
+
     def test_triggers_workflow_refuses_a_guessed_conclusion_filter(self) -> None:
         a = _create("github_core__github_workflow", {"full_name": "o/r", "workflow_id": 1, "name": "capture"})
         b = _create("github_core__github_workflow", {"full_name": "o/r", "workflow_id": 2, "name": "review"})
