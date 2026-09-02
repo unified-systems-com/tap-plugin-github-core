@@ -467,6 +467,59 @@ class TestPackagesLand:
         _, _, _, edges = _collect_packages(collector, _FakeClient())
         assert not _edges_of(edges, "BUILDS_PACKAGE_VERSION__github_core")
 
+    @pytest.mark.spec("req-github-core-packages-4")
+    def test_an_unlinked_package_never_joins_another_repositorys_run(self) -> None:
+        """A seven-hex prefix searched org-wide would let one repository's tag join another's run,
+        and a false producer edge hides the shape the edge exists to reveal (PR #50 review)."""
+        tagged = next(
+            v
+            for v in _VERSIONS
+            if any(t.startswith("sha-") and not t.startswith("sha256-") for t in v["metadata"]["container"]["tags"])
+        )
+        short = next(
+            t for t in tagged["metadata"]["container"]["tags"] if t.startswith("sha-") and not t.startswith("sha256-")
+        )[4:]
+        unlinked = dict(_PACKAGE, repository=None)
+        client = _FakeClient(
+            packages={t: [] for t in ("npm", "maven", "rubygems", "docker", "nuget")} | {"container": [unlinked]}
+        )
+        collector = _collector(pat_client=client)
+        collector._run_index["unified-systems-com/other"] = [_run(12, head_sha=short + "a" * (40 - len(short)))]
+        _, _, nodes, edges = _collect_packages(collector, _FakeClient())
+        assert _of_type(nodes, "github_core__github_package_version"), "the versions still land"
+        assert not _edges_of(edges, "BUILDS_PACKAGE_VERSION__github_core")
+
+    @pytest.mark.spec("req-github-core-packages-4")
+    def test_a_sha_tag_that_is_not_hex_never_matches(self) -> None:
+        version = dict(
+            _VERSIONS[0], metadata={"package_type": "container", "container": {"tags": ["sha-release", "sha-abc"]}}
+        )
+        client = _FakeClient(
+            packages={t: [] for t in ("npm", "maven", "rubygems", "docker", "nuget")} | {"container": [_PACKAGE]}
+        )
+        client.get_paginated = lambda path, params=None, **_: [version] if path.endswith("/versions") else client.__class__.get_paginated(client, path, params)  # type: ignore[method-assign]
+        collector = _collector(pat_client=client)
+        collector._run_index[_PACKAGE["repository"]["full_name"]] = [_run(13, head_sha="abc" + "0" * 37)]
+        _, _, _, edges = _collect_packages(collector, _FakeClient())
+        assert not _edges_of(edges, "BUILDS_PACKAGE_VERSION__github_core")
+
+    @pytest.mark.spec("req-github-core-packages-2")
+    def test_a_repos_filter_omits_packages_not_linked_to_a_collected_repository(self) -> None:
+        """A repo-scoped envelope asked for those repositories' outputs, not the account's inventory."""
+        unlinked = dict(_PACKAGE, name="stray", repository=None)
+        client = _FakeClient(
+            packages={t: [] for t in ("npm", "maven", "rubygems", "docker", "nuget")}
+            | {"container": [_PACKAGE, unlinked]}
+        )
+        collector = _collector(pat_client=client)
+        collector._repo_envelopes[_PACKAGE["repository"]["full_name"]] = {"node": {}}
+        nodes: list[dict] = []
+        edges: list[dict] = []
+        state, note = collector._collect_packages(_FakeClient(), _OWNER, nodes, edges, repo_filtered=True)
+        names = [n["node"]["name"] for n in _of_type(nodes, "github_core__github_package")]
+        assert names == [_PACKAGE["name"]]
+        assert state == "observed" and "1 package(s) not linked" in note
+
     @pytest.mark.spec("req-github-core-packages-5")
     def test_refused_versions_degrade_to_the_package_alone(self) -> None:
         client = _FakeClient(
@@ -502,7 +555,7 @@ class TestIdentity:
 
     def test_a_package_is_keyed_on_its_path_not_its_numeric_id(self) -> None:
         """Deleted-and-republished under the same name IS the same thing to everything that pulls it."""
-        assert package_id("o", "container", "n") == package_id("o", "container", "n")
+        assert str(package_id("o", "container", "n")) == "b9a442da-d5c8-5b8c-8953-8a42d1945f4e"
         assert package_id("o", "container", "n") != package_id("o", "npm", "n")
 
     @pytest.mark.parametrize(

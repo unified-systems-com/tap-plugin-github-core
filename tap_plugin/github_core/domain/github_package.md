@@ -48,6 +48,8 @@ Populated from `GET /orgs/{owner}/packages?package_type=<type>` (user fallback o
 
 The rule the collector applies is the bypass-actor asymmetry: a filtered listing cannot invent a package, so a **non-empty** answer proves itself, and an **empty** answer under an App credential is `unobservable`. Whether granting `organization_packages: read` to the App turns the 400 into a listing is **unmeasured** — the App has not been re-accepted — and the credential GitHub documents for this surface is a classic personal access token with `read:packages`, which the envelope does not model. The token, when placed, is routed to this surface first.
 
+**Scope follows the envelope.** Under a `repos` include-filter only packages GitHub links to a collected repository are emitted; the rest are counted in the note. A repo-scoped envelope asked for those repositories' outputs, not the account's inventory.
+
 **Three states, on every collected repository.** `outputs_observability.packages` is stamped after the walk — `observed` only when every type answered with proof, otherwise `unobservable` with the per-type reasons in `notes.packages`.
 
 ## Authoritative Source

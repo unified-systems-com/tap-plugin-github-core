@@ -395,20 +395,21 @@ class GithubGraphQLClient:
                     "published_at": node.get("publishedAt"),
                     "html_url": str(node.get("url") or ""),
                     "asset_count": assets_conn.get("totalCount"),
-                    "assets": [
-                        {
-                            "name": str(a.get("name") or ""),
-                            "size": a.get("size"),
-                            "content_type": str(a.get("contentType") or ""),
-                            "download_url": str(a.get("downloadUrl") or ""),
-                            "created_at": a.get("createdAt"),
-                        }
-                        for a in (assets_conn.get("nodes") or [])
-                        if a
-                    ],
+                    "assets": [GithubGraphQLClient._release_asset(a) for a in (assets_conn.get("nodes") or []) if a],
                 }
             )
         return out, missing
+
+    @staticmethod
+    def _release_asset(asset: dict[str, Any]) -> dict[str, Any]:
+        """One attached file, flattened to the shape `github_release.assets` stores."""
+        return {
+            "name": str(asset.get("name") or ""),
+            "size": asset.get("size"),
+            "content_type": str(asset.get("contentType") or ""),
+            "download_url": str(asset.get("downloadUrl") or ""),
+            "created_at": asset.get("createdAt"),
+        }
 
     @staticmethod
     def workflow_files(repo: dict[str, Any]) -> dict[str, str]:

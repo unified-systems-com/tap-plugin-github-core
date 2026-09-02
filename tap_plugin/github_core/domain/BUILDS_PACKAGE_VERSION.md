@@ -22,7 +22,9 @@ Derived: `uuid5(ns, "BUILDS_PACKAGE_VERSION__github_core:<run_uuid>:<version_uui
 
 - **Not GitHub's attribution.** Contrast `UPLOADS_ARTIFACT`.
 - **Not an attestation.** `attested: null` is the only value this plugin writes. Reading a SLSA provenance or a cosign attestation from the registry is `sigstore_core` / supply-chain work; when it lands it sets `true` or `false` and this edge stops being the whole story.
-- **One derivation.** `tag_sha`: a container tag `sha-<short>` (as `publish-images` applies) or a full commit sha matching a collected run's `head_sha`. `sha256-<digest>` tags are cosign's signature convention and are excluded by construction. No other convention is guessed at.
+- **One derivation.** `tag_sha`: a container tag `sha-<hex>` (seven to forty hex characters, as `publish-images` and `docker/metadata-action` apply) that is a prefix of a collected run's `head_sha`. `sha256-<digest>` tags are cosign's signature convention and are excluded by construction; a non-hex `sha-…` tag never matches. No other convention is guessed at.
+- **Linked repositories only.** Candidates are the runs of the repository GitHub links the package to. An unlinked package carries no edge at all — a seven-hex prefix searched across every collected repository would let one repository's tag join another's run, and a false producer edge hides exactly the shape this edge exists to reveal (PR #50 review). Unlinked is recorded on the package (`repository_full_name: ""`), not guessed at.
+- **Forgeable by the tagger, and labelled as such.** Anyone with push to the registry can tag a digest `sha-<any commit>`; the edge is therefore a claim by whoever tagged the image, not by GitHub. `match_kind: tag_sha` and `attested: null` say so. An attestation surface (SLSA provenance, cosign) is what turns the claim into a fact, and until one is read this edge must not be presented as provenance.
 
 ## Neutrality
 
@@ -30,7 +32,7 @@ Neutral in concept; the `sha-<short>` convention is this product's, and `docker/
 
 ## Observability
 
-Derived after the packages pass, against the run index of every collected repository — the linked repository's runs when GitHub links one, otherwise all of them, since a seven-plus-hex commit prefix is specific enough. **Absent** for a version older than the run window, a version tagged only with `latest` or a semver, and every version under a credential that cannot list packages. Each of those is a limit before it is a finding, and the surrounding record — `match_kind`, the run window, `outputs_observability.packages` — is what tells them apart from the SolarWinds shape.
+Derived after the packages pass, against the run index of the repository GitHub links the package to — and only that one. **Absent** for an unlinked package, a version older than the run window, a version tagged only with `latest` or a semver, and every version under a credential that cannot list packages. Each of those is a limit before it is a finding, and the surrounding record — `match_kind`, the run window, `outputs_observability.packages` — is what tells them apart from the SolarWinds shape.
 
 ## Authoritative Source
 

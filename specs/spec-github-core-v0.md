@@ -825,17 +825,19 @@ reads "unobservable" as a defect.
 records nothing about which run pushed a version. The edge is derived from the `sha-<short>`
 tag convention `publish-images` (and `docker/metadata-action`'s default) applies, matched
 against the head commit of a collected run; `attested` is null until an attestation surface
-reads it. A version tagged any other way, older than the run window, or under an unobservable
-listing, carries no edge for a reason that is a limit before it is a finding.
+reads it. A version tagged any other way, on an unlinked package, older than the run window, or under an
+unobservable listing, carries no edge for a reason that is a limit before it is a finding. And the
+edge's presence is a claim by the tagger — anyone with registry push can tag a digest
+`sha-<any commit>` — which is why it carries `attested: null` rather than reading as provenance.
 
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-packages-1 | Package And Version Declared With Purls | In Development | `github_package` (keyed owner + type + name) and `github_package_version` (keyed under it on GitHub's version id) each carry a `purl` minted once by `identity.package_purl`; versions carry `container_tags`; joined by `PUBLISHES_PACKAGE_VERSION`. | `tests/test_outputs.py::TestPackagesLand`, `TestIdentity::test_purl_per_package_type`. |
-| req-github-core-packages-2 | Owner Always, Repository When Linked | In Development | `PUBLISHES_PACKAGE` runs from the owner account (`link_kind: owner`) for every package, and from the repository (`link_kind: repository`) only when GitHub links one that was collected. | GitHub's link, never inferred from the name. |
+| req-github-core-packages-2 | Owner Always, Repository When Linked | In Development | `PUBLISHES_PACKAGE` runs from the owner account (`link_kind: owner`) for every package, and from the repository (`link_kind: repository`) only when GitHub links one that was collected. Under a `repos` include-filter, packages not linked to a collected repository are counted in the note and not emitted. | GitHub's link, never inferred from the name. A repo-scoped envelope asked for those repositories' outputs, not the account's inventory (PR #50 review). |
 | req-github-core-packages-3 | Unobservable Is Never Zero | In Development | Every package type is asked for; a 400/403/404, or a 200 `[]` under an App-only credential, records that type as unobservable; `outputs_observability.packages` on every collected repository is `observed` only when every type answered with proof, else `unobservable` with the per-type reasons; a non-empty answer proves itself. | The captured 400 + `[]` shape is the fixture. |
-| req-github-core-packages-4 | Build Join Derived And Labelled | In Development | `BUILDS_PACKAGE_VERSION` is emitted from a collected run whose `head_sha` matches a `sha-<short>` container tag, with `match_kind: tag_sha` and `attested: null`; `sha256-` (cosign) tags never match. | |
+| req-github-core-packages-4 | Build Join Derived And Labelled | In Development | `BUILDS_PACKAGE_VERSION` is emitted only from a run of the repository GitHub links the package to, when a `sha-<7..40 hex>` container tag is a prefix of that run's `head_sha`, with `match_kind: tag_sha` and `attested: null`; an unlinked package carries no edge; `sha256-` (cosign) and non-hex tags never match. | The edge is a claim by whoever tagged the image, forgeable by anyone with registry push, and says so; an attestation surface upgrades it (PR #50 review). |
 | req-github-core-packages-5 | Versions Degrade To The Package | In Development | A refused versions listing lands the package alone and warns; a capped listing warns against GitHub's `version_count`. | 1,973 versions on one image at capture. |
 
 ### GitHub Apps

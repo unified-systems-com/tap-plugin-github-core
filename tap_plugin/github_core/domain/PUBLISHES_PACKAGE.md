@@ -22,6 +22,7 @@ Derived: `uuid5(ns, "PUBLISHES_PACKAGE__github_core:<source_uuid>:<package_uuid>
 
 - **Not an inference from the name.** A package named like a repository is not linked to it; only GitHub's `repository` object on the package produces the repository edge.
 - **Repository edge only for collected repositories.** A link to a repository outside the scope keeps the name in `repository_full_name` and carries no edge, because the endpoint would dangle.
+- **Under a `repos` include-filter, only linked packages land at all.** The packages API is account-scoped, but a repo-scoped envelope asked for those repositories' outputs, not the account's supply-chain inventory; packages not linked to a collected repository are counted in `outputs_observability.notes.packages` and not emitted (PR #50 review).
 
 ## Neutrality
 

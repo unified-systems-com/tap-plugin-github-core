@@ -176,6 +176,9 @@ _PACKAGE_TYPES: tuple[str, ...] = ("container", "npm", "maven", "rubygems", "doc
 #: The image-tag convention `publish-images` uses: `sha-<short commit>`. The only derivation that
 #: joins a registry version to the run that built it; everything else is left unjoined and said so.
 _CONTAINER_TAG_SHA_PREFIX = "sha-"
+#: The shortest abbreviation accepted after `sha-`: git's default `--short` and
+#: docker/metadata-action's default `type=sha` both emit seven. Shorter is not a commit reference.
+_CONTAINER_TAG_SHA_MIN_HEX = 7
 #: Output surfaces the repository node qualifies, in the order the machinery view renders them.
 _OUTPUT_SURFACES: tuple[str, ...] = ("releases", "artifacts", "packages")
 _OBSERVED = "observed"
@@ -639,7 +642,9 @@ class GithubCollector(CollectorBase):
 
         # --- packages: an ACCOUNT surface, collected once after the walk so every repository's
         # runs are indexed before a registry version looks for the run that built it.
-        packages_state, packages_note = self._collect_packages(client, owner, nodes, edges)
+        packages_state, packages_note = self._collect_packages(
+            client, owner, nodes, edges, repo_filtered=bool(explicit_repos(data))
+        )
         for envelope in self._repo_envelopes.values():
             observability = envelope["node"].setdefault("outputs_observability", {})
             observability["packages"] = packages_state
@@ -2092,14 +2097,8 @@ class GithubCollector(CollectorBase):
                 )
             target_sha = str(rel.get("target_sha") or "")
             for run in run_index:
-                if run["event"] == "release":
-                    # Triggered BY the release — a consumer of it, not its producer.
-                    continue
-                if tag_name and run["head_branch"] == tag_name:
-                    match_kind = "tag_ref"
-                elif target_sha and run["head_sha"] == target_sha:
-                    match_kind = "same_commit"
-                else:
+                match_kind = self._release_match_kind(run, tag_name, target_sha)
+                if match_kind is None:
                     continue
                 edges.append(
                     self._edge(
@@ -2116,6 +2115,23 @@ class GithubCollector(CollectorBase):
                 message_data={"repo": full_name, "collected": len(releases), "missing": missing},
             )
         return _OBSERVED
+
+    @staticmethod
+    def _release_match_kind(run: dict[str, Any], tag_name: str, target_sha: str) -> str | None:
+        """How a run relates to a release as its producer, or ``None`` when it does not.
+
+        `tag_ref` — the run's `head_branch` IS the tag: a tag-push build, the strongest signal
+        GitHub offers. `same_commit` — the run built the commit the tag resolves to: co-location,
+        which every workflow that ran on that push shares. A run triggered BY the release
+        (`event: release`) consumed it and is never its producer.
+        """
+        if run["event"] == "release":
+            return None
+        if tag_name and run["head_branch"] == tag_name:
+            return "tag_ref"
+        if target_sha and run["head_sha"] == target_sha:
+            return "same_commit"
+        return None
 
     def _collect_artifacts(
         self,
@@ -2209,8 +2225,16 @@ class GithubCollector(CollectorBase):
         owner: str | None,
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
+        *,
+        repo_filtered: bool = False,
     ) -> tuple[str, str]:
         """Emit the account's packages and their versions; return ``(state, note)``.
+
+        ``repo_filtered`` is true when the envelope names an explicit `repos` include-filter. The
+        packages API is account-scoped, so the listing is still one call per type — but under a
+        filter only packages GitHub links to a COLLECTED repository land, and the rest are counted
+        in the note rather than inventoried. A repo-scoped envelope asked for those repositories'
+        outputs, not the account's supply-chain inventory (PR #50 review).
 
         GitHub Packages is REST-only and, per GitHub's own OpenAPI description, its endpoints are
         `enabledForGitHubApps: false` (`req-github-core-packages`). Measured 2026-09-02 with an App
@@ -2229,6 +2253,7 @@ class GithubCollector(CollectorBase):
                 "github.observation": "execution"}
         unobservable: dict[str, str] = {}
         collected = 0
+        filtered_out = 0
         for package_type in _PACKAGE_TYPES:
             packages, outcome, scope = self._list_packages(listing_client, owner, package_type)
             if outcome:
@@ -2237,6 +2262,10 @@ class GithubCollector(CollectorBase):
                 # 200 [] from a credential the description says cannot use the endpoint.
                 unobservable[package_type] = "empty answer under an App credential, which GitHub does not enable for this endpoint"
             for pkg in packages:
+                linked = str((pkg.get("repository") or {}).get("full_name") or "")
+                if repo_filtered and linked not in self._repo_envelopes:
+                    filtered_out += 1
+                    continue
                 collected += 1
                 self._emit_package(listing_client, owner, scope, account_uuid, package_type, pkg, dims, nodes, edges)
         if collected:
@@ -2245,12 +2274,9 @@ class GithubCollector(CollectorBase):
                 f"{collected} package(s) under {owner}.",
                 message_data={"owner": owner, "count": collected, "unobservable_types": sorted(unobservable)},
             )
+        note = self._packages_note(unobservable, filtered_out, app_only=pat_client is None)
         if not unobservable:
-            return _OBSERVED, ""
-        note = "; ".join(f"{t}: {why}" for t, why in unobservable.items())
-        if pat_client is None:
-            note += (". GitHub's OpenAPI description marks the packages endpoints enabledForGitHubApps: false; "
-                     "a classic personal access token with read:packages is the credential GitHub documents")
+            return _OBSERVED, note
         self.record_warn(
             _SITE_PACKAGES_UNOBSERVABLE, "PACKAGES_UNOBSERVABLE",
             f"Packages NOT observed for {owner} on {len(unobservable)} of {len(_PACKAGE_TYPES)} package "
@@ -2258,6 +2284,22 @@ class GithubCollector(CollectorBase):
             message_data={"owner": owner, "unobservable": unobservable, "collected": collected},
         )
         return _UNOBSERVABLE, note
+
+    @staticmethod
+    def _packages_note(unobservable: dict[str, str], filtered_out: int, *, app_only: bool) -> str:
+        """The operator-facing qualifier for the packages state: what was not seen, and why."""
+        parts = [f"{t}: {why}" for t, why in unobservable.items()]
+        if filtered_out:
+            parts.append(
+                f"{filtered_out} package(s) not linked to a collected repository were omitted under the repos filter"
+            )
+        note = "; ".join(parts)
+        if unobservable and app_only:
+            note += (
+                ". GitHub's OpenAPI description marks the packages endpoints enabledForGitHubApps: false; "
+                "a classic personal access token with read:packages is the credential GitHub documents"
+            )
+        return note
 
     def _list_packages(
         self, client: GithubClient, owner: str, package_type: str
@@ -2338,13 +2380,12 @@ class GithubCollector(CollectorBase):
                     properties={"link_kind": "repository"},
                 )
             )
-        # Which runs a version may be matched against: the linked repository's when GitHub links
-        # one, otherwise every collected repository's — a `sha-<short>` tag is specific enough.
-        candidate_runs = (
-            self._run_index.get(linked_repo, [])
-            if linked_repo
-            else [run for runs in self._run_index.values() for run in runs]
-        )
+        # Which runs a version may be matched against: ONLY the repository GitHub links the package
+        # to. An unlinked package gets no `BUILDS_PACKAGE_VERSION` at all — a seven-hex prefix
+        # searched across every collected repository's runs would let one repository's tag join
+        # another repository's run, and a false producer edge hides exactly the shape the edge
+        # exists to reveal (PR #50 review). Unlinked is recorded on the package, not guessed at.
+        candidate_runs = self._run_index.get(linked_repo, []) if linked_repo else []
         try:
             versions = client.get_paginated(
                 f"/{scope}/{owner}/packages/{package_type}/{name}/versions",
@@ -2412,10 +2453,15 @@ class GithubCollector(CollectorBase):
         # BUILDS_PACKAGE_VERSION, derived from the `sha-<short>` tag convention. Its ABSENCE is the
         # corpus's finding — but only once `match_kind` has been read, because a version tagged any
         # other way carries no edge for a reason that is a limit of this derivation, not evidence.
+        # And its PRESENCE is a claim by whoever tagged the image, not by GitHub: anyone with push
+        # to the registry can tag a digest `sha-<anything>`. The edge says `match_kind: tag_sha`
+        # and `attested: null` so a reader knows that; an attestation surface is what upgrades it.
         shas = {
             tag[len(_CONTAINER_TAG_SHA_PREFIX):].lower()
             for tag in container_tags
-            if tag.startswith(_CONTAINER_TAG_SHA_PREFIX) and len(tag) > len(_CONTAINER_TAG_SHA_PREFIX) + 6
+            if tag.startswith(_CONTAINER_TAG_SHA_PREFIX)
+            and _CONTAINER_TAG_SHA_MIN_HEX <= len(tag) - len(_CONTAINER_TAG_SHA_PREFIX) <= 40
+            and all(c in "0123456789abcdef" for c in tag[len(_CONTAINER_TAG_SHA_PREFIX):].lower())
         }
         if not shas:
             return
