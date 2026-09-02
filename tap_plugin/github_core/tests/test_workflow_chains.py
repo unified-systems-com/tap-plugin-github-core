@@ -202,6 +202,27 @@ class TestCalls:
         assert props["pin_kind"] == "branch" and props["resolved_sha"] == "d" * 40 and props["resolution"] == "in_scope"
 
 
+class TestWalkRegistration:
+    def test_the_production_walk_registers_each_workflow_under_its_own_path(self, monkeypatch) -> None:
+        """Through `_collect_repo`, not by calling `_register_workflow` directly (PR #54 review):
+        the index key must be the workflow's `path` from the listing, or every call resolves to
+        `unresolved_in_scope` and the three-state machinery makes a broken index look like a
+        scope limit."""
+        from tap_plugin.github_core.tests.test_self_tier_vocabulary import _walk_one_repo
+
+        captured: list[tuple] = []
+        monkeypatch.setattr(
+            GithubCollector, "_register_workflow", lambda self, *args, **kw: captured.append(args)
+        )
+        _nodes, _edges, client, _warns = _walk_one_repo(monkeypatch)
+        listed = client.get_paginated("/repos/acme/widget/actions/workflows", item_path="workflows")
+        real = [wf for wf in listed if not str(wf.get("path", "")).startswith("dynamic/")]
+        assert real, "the stub lists no real workflow — the assertion below would be vacuous"
+        assert [(c[0], c[1]) for c in captured] == [("acme/widget", wf["path"]) for wf in real]
+        # And the display name is the stored one, which is what `workflow_run` names resolve against.
+        assert [c[2] for c in captured] == [wf.get("name") or wf.get("path") for wf in real]
+
+
 class TestTriggers:
     def test_the_edge_points_from_the_completing_workflow_to_the_declaring_one(self) -> None:
         c = _collector()

@@ -1051,7 +1051,9 @@ class GithubCollector(CollectorBase):
             )
             nodes.append(wf_envelope)
             edges.append(self._edge("DEFINES_WORKFLOW__github_core", repo_uuid, wf_uuid, actions_dims))
-            self._register_workflow(full_name, path, wf_display_name, wf_uuid, wf_envelope, parsed_config, actions_dims)
+            self._register_workflow(
+                full_name, wf.get("path", ""), wf_display_name, wf_uuid, wf_envelope, parsed_config, actions_dims
+            )
             # The DECLARED jobs inside this file — the level every privilege decision is made at.
             self._emit_declared_jobs(
                 full_name, wf_uuid, wf["id"], wf.get("path", ""), parsed_config, env_uuid_by_name, nodes, edges
@@ -1956,45 +1958,10 @@ class GithubCollector(CollectorBase):
         state = self._walk_state()
         counts = {"resolved": 0, "unresolved_in_scope": 0, "out_of_scope": 0, "secrets_inherit": 0}
         for pending in state["pending_calls"]:
-            call = pending["call"]
-            callee_repo = pending["caller"] if call["same_repository"] else str(call["repository_full_name"])
-            target = state["by_path"].get((callee_repo, str(call["path"])))
-            if target is None:
-                verdict = "unresolved_in_scope" if callee_repo in state["collected_repos"] else "out_of_scope"
-                pending["envelope"]["node"]["configuration"]["call_resolution"] = verdict
-                counts[verdict] += 1
-                if verdict == "unresolved_in_scope":
-                    self.record_warn(
-                        _SITE_WORKFLOW_CALL_UNRESOLVED,
-                        "WORKFLOW_CALL_UNRESOLVED",
-                        f"{pending['caller']} calls {callee_repo}/{call['path']}, whose repository is in scope but "
-                        f"lists no workflow at that path. No edge; the call stays on the job as text.",
-                        message_data={"caller": pending["caller"], "callee_repo": callee_repo, "path": call["path"]},
-                    )
-                continue
-            pending["envelope"]["node"]["configuration"]["call_resolution"] = "resolved"
-            counts["resolved"] += 1
-            if call["pin_kind"] == PIN_LOCAL:
-                pin_kind, resolved_sha, resolution = PIN_LOCAL, "", "literal"
-            else:
-                pin_kind, resolved_sha, resolution = self._resolve_action_pin(
-                    pending["caller"], "repository", callee_repo, str(call["ref"]), str(call["pin_kind"])
-                )
-            properties: dict[str, Any] = {
-                "declared_ref": str(call["ref"]),
-                "pin_kind": pin_kind,
-                "is_pinned": is_pinned(pin_kind),
-                "resolution": resolution,
-                "same_repository": bool(call["same_repository"]),
-                "secrets_inherit": bool(pending["secrets_inherit"]),
-            }
-            if resolved_sha:
-                properties["resolved_sha"] = resolved_sha
-            if properties["secrets_inherit"]:
-                counts["secrets_inherit"] += 1
-            edges.append(
-                self._edge("CALLS_WORKFLOW__github_core", pending["job_uuid"], target, pending["dims"], properties)
-            )
+            verdict = self._resolve_workflow_call(pending, state, edges)
+            pending["envelope"]["node"]["configuration"]["call_resolution"] = verdict
+            counts[verdict] += 1
+            counts["secrets_inherit"] += int(verdict == "resolved" and bool(pending["secrets_inherit"]))
         if state["pending_calls"]:
             self.record_info(
                 _SITE_WORKFLOW_CALLS,
@@ -2005,6 +1972,54 @@ class GithubCollector(CollectorBase):
                 f"{counts['secrets_inherit']} pass every secret with `secrets: inherit`.",
                 message_data=counts,
             )
+
+    def _resolve_workflow_call(self, pending: dict[str, Any], state: dict[str, Any], edges: list[dict[str, Any]]) -> str:
+        """One pending call → its verdict, emitting the edge when the callee is on the grid."""
+        call = pending["call"]
+        callee_repo = pending["caller"] if call["same_repository"] else str(call["repository_full_name"])
+        target = state["by_path"].get((callee_repo, str(call["path"])))
+        if target is None:
+            if callee_repo not in state["collected_repos"]:
+                return "out_of_scope"
+            self.record_warn(
+                _SITE_WORKFLOW_CALL_UNRESOLVED,
+                "WORKFLOW_CALL_UNRESOLVED",
+                f"{pending['caller']} calls {callee_repo}/{call['path']}, whose repository is in scope but "
+                f"lists no workflow at that path. No edge; the call stays on the job as text.",
+                message_data={"caller": pending["caller"], "callee_repo": callee_repo, "path": call["path"]},
+            )
+            return "unresolved_in_scope"
+        edges.append(
+            self._edge(
+                "CALLS_WORKFLOW__github_core",
+                pending["job_uuid"],
+                target,
+                pending["dims"],
+                self._calls_workflow_properties(pending, callee_repo),
+            )
+        )
+        return "resolved"
+
+    def _calls_workflow_properties(self, pending: dict[str, Any], callee_repo: str) -> dict[str, Any]:
+        """The pin (USES_ACTION's grammar; a `./` call is `local`) plus the secrets posture."""
+        call = pending["call"]
+        if call["pin_kind"] == PIN_LOCAL:
+            pin_kind, resolved_sha, resolution = PIN_LOCAL, "", "literal"
+        else:
+            pin_kind, resolved_sha, resolution = self._resolve_action_pin(
+                pending["caller"], "repository", callee_repo, str(call["ref"]), str(call["pin_kind"])
+            )
+        properties: dict[str, Any] = {
+            "declared_ref": str(call["ref"]),
+            "pin_kind": pin_kind,
+            "is_pinned": is_pinned(pin_kind),
+            "resolution": resolution,
+            "same_repository": bool(call["same_repository"]),
+            "secrets_inherit": bool(pending["secrets_inherit"]),
+        }
+        if resolved_sha:
+            properties["resolved_sha"] = resolved_sha
+        return properties
 
     def _emit_workflow_triggers(self, edges: list[dict[str, Any]]) -> None:
         """`TRIGGERS_WORKFLOW`: from each workflow named in `on: workflow_run: workflows:` to the
@@ -2017,34 +2032,13 @@ class GithubCollector(CollectorBase):
         emitted = 0
         unresolved_total = 0
         for pending in state["pending_triggers"]:
-            block = pending["workflow_run"]
-            unresolved: list[str] = []
-            for declared_name in block.get("workflows") or []:
-                sources = state["by_name"].get((pending["repo"], declared_name)) or []
-                if not sources:
-                    unresolved.append(declared_name)
-                    continue
-                properties: dict[str, Any] = {"trigger_event": "workflow_run", "declared_name": declared_name}
-                for key in ("types", "branches", "branches_ignore"):
-                    if key in block:
-                        properties[key] = list(block[key])
-                for source in sources:
-                    edges.append(
-                        self._edge("TRIGGERS_WORKFLOW__github_core", source, pending["wf_uuid"], pending["dims"], properties)
-                    )
-                    emitted += 1
-            resolution = {"resolved": len(block.get("workflows") or []) - len(unresolved), "unresolved": unresolved}
-            pending["envelope"]["node"]["configuration"]["trigger_resolution"] = resolution
-            if unresolved:
-                unresolved_total += len(unresolved)
-                self.record_warn(
-                    _SITE_WORKFLOW_TRIGGER_UNRESOLVED,
-                    "WORKFLOW_TRIGGER_UNRESOLVED",
-                    f"{pending['repo']}: `workflow_run` names {unresolved!r}, which match no workflow in the "
-                    f"repository by display name. No edge; a renamed or deleted upstream workflow, or a "
-                    f"trigger that can never fire.",
-                    message_data={"repo": pending["repo"], "unresolved": unresolved},
-                )
+            matched, unresolved = self._resolve_workflow_trigger(pending, state, edges)
+            emitted += matched
+            unresolved_total += len(unresolved)
+            pending["envelope"]["node"]["configuration"]["trigger_resolution"] = {
+                "resolved": len(pending["workflow_run"].get("workflows") or []) - len(unresolved),
+                "unresolved": unresolved,
+            }
         if state["pending_triggers"]:
             self.record_info(
                 _SITE_WORKFLOW_TRIGGERS,
@@ -2053,6 +2047,44 @@ class GithubCollector(CollectorBase):
                 f"emitted, {unresolved_total} declared name(s) matched nothing.",
                 message_data={"declaring": len(state["pending_triggers"]), "edges": emitted, "unresolved": unresolved_total},
             )
+
+    def _resolve_workflow_trigger(
+        self, pending: dict[str, Any], state: dict[str, Any], edges: list[dict[str, Any]]
+    ) -> tuple[int, list[str]]:
+        """One declaring workflow → ``(edges emitted, names that matched nothing)``."""
+        block = pending["workflow_run"]
+        properties: dict[str, Any] = {"trigger_event": "workflow_run"}
+        for key in ("types", "branches", "branches_ignore"):
+            if key in block:
+                properties[key] = list(block[key])
+        emitted = 0
+        unresolved: list[str] = []
+        for declared_name in block.get("workflows") or []:
+            sources = state["by_name"].get((pending["repo"], declared_name)) or []
+            if not sources:
+                unresolved.append(declared_name)
+                continue
+            for source in sources:
+                edges.append(
+                    self._edge(
+                        "TRIGGERS_WORKFLOW__github_core",
+                        source,
+                        pending["wf_uuid"],
+                        pending["dims"],
+                        {**properties, "declared_name": declared_name},
+                    )
+                )
+                emitted += 1
+        if unresolved:
+            self.record_warn(
+                _SITE_WORKFLOW_TRIGGER_UNRESOLVED,
+                "WORKFLOW_TRIGGER_UNRESOLVED",
+                f"{pending['repo']}: `workflow_run` names {unresolved!r}, which match no workflow in the "
+                f"repository by display name. No edge; a renamed or deleted upstream workflow, or a "
+                f"trigger that can never fire.",
+                message_data={"repo": pending["repo"], "unresolved": unresolved},
+            )
+        return emitted, unresolved
 
     def _usage_tally(self) -> dict[str, Any]:
         """The run's action tally, created on first touch.
