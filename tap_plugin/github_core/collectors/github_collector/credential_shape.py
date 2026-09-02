@@ -41,6 +41,9 @@ def normalize_credentials(kind: str, data: dict[str, Any]) -> dict[str, Any]:
     }
     if kind == LEGACY_APP_KIND:
         folded["app"] = {key: data[key] for key in ("app_id", "app_slug", "private_key") if key in data}
-    elif kind == LEGACY_PAT_KIND and "token" in data:
+    elif kind == LEGACY_PAT_KIND and data.get("token"):
+        # Only a non-empty token becomes a `pat` block: in Django the schema already refuses an
+        # empty one, but the host-side scripts fold envelopes nobody has validated yet, and an
+        # empty block would read as "a token is present" downstream.
         folded["pat"] = {"token": data["token"]}
     return folded
