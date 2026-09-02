@@ -22,7 +22,7 @@ Edge id is `uuid5(ns, "edge:DEFINES_WORKFLOW__github_core:<source id>:<target id
 
 Carries **no properties**, justified: a workflow file is in a repository or it is not. The path is a field on the workflow, not a property of the containment; putting it here would derive the same fact twice and let the two disagree.
 
-Not covered: **reusable workflow calls.** A workflow in repository A calling a workflow in repository B is a real and security-relevant relationship, and it is a different edge — the corpus's `CALLS_WORKFLOW` with `{pin_kind, ref}`, at the *self* tier, not built. A reader should not infer from `DEFINES_WORKFLOW` alone that a repository's CI is confined to that repository. Likewise `TRIGGERS_WORKFLOW` (`workflow_run` chains) is a separate corpus edge.
+Not covered: **reusable workflow calls.** A workflow in repository A calling a workflow in repository B is a real and security-relevant relationship, and it is a different edge — [`CALLS_WORKFLOW`](CALLS_WORKFLOW.md), from the calling job, built 2026-09-02. A reader should not infer from `DEFINES_WORKFLOW` alone that a repository's CI is confined to that repository. Likewise [`TRIGGERS_WORKFLOW`](TRIGGERS_WORKFLOW.md) (`workflow_run` chains) is its own edge.
 
 ## Neutrality
 

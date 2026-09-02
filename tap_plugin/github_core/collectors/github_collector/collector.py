@@ -62,6 +62,7 @@ from .identity import (
 from .manifest import load_collection_manifest, load_link_manifest
 from .parser import (
     PIN_BRANCH,
+    PIN_LOCAL,
     PIN_SHA,
     PIN_TAG,
     PIN_UNRESOLVED,
@@ -117,6 +118,10 @@ _SITE_BYPASS_ACTOR_UNMODELLED = "5dd2"
 _SITE_AUTH_MODE = "3e4d"
 _SITE_ACTION_REF_NOT_FOUND = "de95"
 _SITE_ACTIONS_USED = "13f5"
+_SITE_WORKFLOW_CALL_UNRESOLVED = "e9e5"
+_SITE_WORKFLOW_CALLS = "b97e"
+_SITE_WORKFLOW_TRIGGER_UNRESOLVED = "8f14"
+_SITE_WORKFLOW_TRIGGERS = "3025"
 
 #: The dimension keys that scope an envelope to ONE repository. Stripped from a node shared
 #: across the scope (an action, an app), kept on the edges that use it.
@@ -558,6 +563,15 @@ class GithubCollector(CollectorBase):
         self._refs_by_repo: dict[str, dict[str, str]] = {}
         #: Run-level tally for the actions summary, so a run can say what it saw.
         self._action_usage: dict[str, Any] = {"actions": set(), "edges": 0, "unpinned": 0, "unobservable": 0}
+        # Workflow-to-workflow reach is resolved in a POST-PASS, after every repository in scope
+        # has been walked: a reusable-workflow callee is named by (repo, path) and a
+        # `workflow_run` trigger by (repo, name), and either may live in a repository walked
+        # later — or in none we walked at all, which is the state that must stay visible.
+        self._workflow_uuid_by_path: dict[tuple[str, str], Any] = {}
+        self._workflow_uuids_by_name: dict[tuple[str, str], list[Any]] = {}
+        self._pending_calls: list[dict[str, Any]] = []
+        self._pending_triggers: list[dict[str, Any]] = []
+        self._collected_repos: set[str] = set()
 
         # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope)
         owner = collection_owner(data)
@@ -664,6 +678,10 @@ class GithubCollector(CollectorBase):
         # for duplicate entity ids and NOTHING landed. Deduping is correct rather than
         # defensive: these are the same observation seen from several repos, and identity is
         # deterministic, so the last copy is as good as the first.
+        # Workflow-to-workflow reach, now that every workflow in scope has an id.
+        self._emit_workflow_calls(edges)
+        self._emit_workflow_triggers(edges)
+
         nodes, node_dupes = self._collapse_by_entity_id(nodes)
         edges, edge_dupes = self._collapse_by_entity_id(edges)
         # Every edge in the COLLECTION batch must land on a node in the same batch — cross-grid
@@ -933,6 +951,7 @@ class GithubCollector(CollectorBase):
         }
         actions_dims = {**repo_dims, "github.surface": "actions"}
         observation_dims = {**actions_dims, "github.observation": "execution"}
+        self._walk_state()["collected_repos"].add(full_name)
 
         # account
         account_payload = self._fetch_account(client, owner)
@@ -1014,25 +1033,25 @@ class GithubCollector(CollectorBase):
             wf_uuid = workflow_id(full_name, wf["id"])
             raw_yaml, parsed_config = self._workflow_config(client, full_name, wf.get("path", ""))
             wf_display_name = wf.get("name") or wf.get("path") or str(wf["id"])
-            nodes.append(
-                node_envelope(
-                    entity_id=wf_uuid,
-                    entity_type="github_core__github_workflow",
-                    name=wf_display_name,
-                    dimensions=actions_dims,
-                    fields={
-                        "full_name": full_name,
-                        "workflow_id": wf["id"],
-                        "path": wf.get("path", ""),
-                        "name": wf_display_name,
-                        "state": wf.get("state", ""),
-                        "html_url": wf.get("html_url", ""),
-                        "configuration": parsed_config,
-                        "tags": {},
-                    },
-                )
+            wf_envelope = node_envelope(
+                entity_id=wf_uuid,
+                entity_type="github_core__github_workflow",
+                name=wf_display_name,
+                dimensions=actions_dims,
+                fields={
+                    "full_name": full_name,
+                    "workflow_id": wf["id"],
+                    "path": wf.get("path", ""),
+                    "name": wf_display_name,
+                    "state": wf.get("state", ""),
+                    "html_url": wf.get("html_url", ""),
+                    "configuration": parsed_config,
+                    "tags": {},
+                },
             )
+            nodes.append(wf_envelope)
             edges.append(self._edge("DEFINES_WORKFLOW__github_core", repo_uuid, wf_uuid, actions_dims))
+            self._register_workflow(full_name, path, wf_display_name, wf_uuid, wf_envelope, parsed_config, actions_dims)
             # The DECLARED jobs inside this file — the level every privilege decision is made at.
             self._emit_declared_jobs(
                 full_name, wf_uuid, wf["id"], wf.get("path", ""), parsed_config, env_uuid_by_name, nodes, edges
@@ -1671,8 +1690,7 @@ class GithubCollector(CollectorBase):
                 continue
             job_uuid = workflow_job_id(full_name, workflow_id_int, job_key)
             uuid_by_key[job_key] = job_uuid
-            nodes.append(
-                node_envelope(
+            job_envelope = node_envelope(
                     entity_id=job_uuid,
                     entity_type="github_core__workflow_job",
                     name=str(job.get("name") or job_key),
@@ -1702,11 +1720,27 @@ class GithubCollector(CollectorBase):
                             # it spans both levels.
                             "workflow_triggers": parsed_config.get("triggers") or [],
                             "workflow_permissions": parsed_config.get("permissions"),
+                            # Which secrets cross into a reusable workflow this job calls — every
+                            # one (`inherit`) or the named few. Names only, never material.
+                            "secrets_inherit": bool(job.get("secrets_inherit")),
+                            "secrets_passed": list(job.get("secrets_passed") or []),
                         },
                         "tags": {},
                     },
-                )
             )
+            nodes.append(job_envelope)
+            if job.get("workflow_call"):
+                # Resolved after every repo is walked — the callee may live in a later one.
+                self._walk_state()["pending_calls"].append(
+                    {
+                        "envelope": job_envelope,
+                        "job_uuid": job_uuid,
+                        "caller": full_name,
+                        "call": dict(job["workflow_call"]),
+                        "secrets_inherit": bool(job.get("secrets_inherit")),
+                        "dims": declared_dims,
+                    }
+                )
             edges.append(
                 edge_envelope(
                     entity_id=edge_id("DEFINES_JOB__github_core", wf_uuid, job_uuid),
@@ -1866,6 +1900,159 @@ class GithubCollector(CollectorBase):
             message_data={"repo": full_name, "action_repo": repository_full_name, "ref": declared_ref},
         )
         return PIN_UNRESOLVED, "", "in_scope"
+
+    def _walk_state(self) -> dict[str, Any]:
+        """The run-wide registers the workflow-chain post-pass reads, created on first touch.
+
+        Lazy for the same reason as `_usage_tally`: the per-repo walk is driven directly by
+        tests that never call `run()`.
+        """
+        if getattr(self, "_workflow_uuid_by_path", None) is None:
+            self._workflow_uuid_by_path = {}
+            self._workflow_uuids_by_name = {}
+            self._pending_calls = []
+            self._pending_triggers = []
+            self._collected_repos = set()
+        return {
+            "by_path": self._workflow_uuid_by_path,
+            "by_name": self._workflow_uuids_by_name,
+            "pending_calls": self._pending_calls,
+            "pending_triggers": self._pending_triggers,
+            "collected_repos": self._collected_repos,
+        }
+
+    def _register_workflow(
+        self,
+        full_name: str,
+        path: str,
+        display_name: str,
+        wf_uuid: Any,
+        wf_envelope: dict[str, Any],
+        parsed_config: dict[str, Any],
+        dims: dict[str, str],
+    ) -> None:
+        """Index a workflow by (repo, path) and (repo, name) for the post-pass, and queue its
+        `workflow_run` trigger if it declares one."""
+        state = self._walk_state()
+        state["by_path"][(full_name, path)] = wf_uuid
+        # Several workflows may share a display name; GitHub fires `workflow_run` on all of them.
+        state["by_name"].setdefault((full_name, display_name), []).append(wf_uuid)
+        workflow_run = parsed_config.get("workflow_run")
+        if workflow_run:
+            state["pending_triggers"].append(
+                {"envelope": wf_envelope, "wf_uuid": wf_uuid, "repo": full_name, "workflow_run": workflow_run, "dims": dims}
+            )
+
+    def _emit_workflow_calls(self, edges: list[dict[str, Any]]) -> None:
+        """`CALLS_WORKFLOW`: a declared job to the reusable workflow it calls, when that workflow
+        is on the grid — and a recorded reason on the job when it is not.
+
+        Three states, on the CALLING job's `configuration.call_resolution`, because a property
+        that qualifies an absence belongs on the node the absence is about: `resolved` (edge
+        emitted), `unresolved_in_scope` (the callee's repository was walked and has no workflow
+        at that path — a broken call, or a workflow GitHub does not list), `out_of_scope` (the
+        callee's repository was not walked; nothing is known and no node is invented).
+        """
+        state = self._walk_state()
+        counts = {"resolved": 0, "unresolved_in_scope": 0, "out_of_scope": 0, "secrets_inherit": 0}
+        for pending in state["pending_calls"]:
+            call = pending["call"]
+            callee_repo = pending["caller"] if call["same_repository"] else str(call["repository_full_name"])
+            target = state["by_path"].get((callee_repo, str(call["path"])))
+            if target is None:
+                verdict = "unresolved_in_scope" if callee_repo in state["collected_repos"] else "out_of_scope"
+                pending["envelope"]["node"]["configuration"]["call_resolution"] = verdict
+                counts[verdict] += 1
+                if verdict == "unresolved_in_scope":
+                    self.record_warn(
+                        _SITE_WORKFLOW_CALL_UNRESOLVED,
+                        "WORKFLOW_CALL_UNRESOLVED",
+                        f"{pending['caller']} calls {callee_repo}/{call['path']}, whose repository is in scope but "
+                        f"lists no workflow at that path. No edge; the call stays on the job as text.",
+                        message_data={"caller": pending["caller"], "callee_repo": callee_repo, "path": call["path"]},
+                    )
+                continue
+            pending["envelope"]["node"]["configuration"]["call_resolution"] = "resolved"
+            counts["resolved"] += 1
+            if call["pin_kind"] == PIN_LOCAL:
+                pin_kind, resolved_sha, resolution = PIN_LOCAL, "", "literal"
+            else:
+                pin_kind, resolved_sha, resolution = self._resolve_action_pin(
+                    pending["caller"], "repository", callee_repo, str(call["ref"]), str(call["pin_kind"])
+                )
+            properties: dict[str, Any] = {
+                "declared_ref": str(call["ref"]),
+                "pin_kind": pin_kind,
+                "is_pinned": is_pinned(pin_kind),
+                "resolution": resolution,
+                "same_repository": bool(call["same_repository"]),
+                "secrets_inherit": bool(pending["secrets_inherit"]),
+            }
+            if resolved_sha:
+                properties["resolved_sha"] = resolved_sha
+            if properties["secrets_inherit"]:
+                counts["secrets_inherit"] += 1
+            edges.append(
+                self._edge("CALLS_WORKFLOW__github_core", pending["job_uuid"], target, pending["dims"], properties)
+            )
+        if state["pending_calls"]:
+            self.record_info(
+                _SITE_WORKFLOW_CALLS,
+                "WORKFLOW_CALLS",
+                f"{len(state['pending_calls'])} reusable-workflow call(s): {counts['resolved']} resolved to a workflow on "
+                f"the grid, {counts['unresolved_in_scope']} unresolved inside the scope, {counts['out_of_scope']} "
+                f"calling a repository outside it (not observable — no node was invented); "
+                f"{counts['secrets_inherit']} pass every secret with `secrets: inherit`.",
+                message_data=counts,
+            )
+
+    def _emit_workflow_triggers(self, edges: list[dict[str, Any]]) -> None:
+        """`TRIGGERS_WORKFLOW`: from each workflow named in `on: workflow_run: workflows:` to the
+        workflow that declares it. Names resolve within the same repository only (GitHub's
+        rule), against the stored display name; every workflow sharing the name gets an edge,
+        because GitHub fires on all of them. An unmatched name is recorded on the declaring
+        workflow's `configuration.trigger_resolution` and warned, never guessed.
+        """
+        state = self._walk_state()
+        emitted = 0
+        unresolved_total = 0
+        for pending in state["pending_triggers"]:
+            block = pending["workflow_run"]
+            unresolved: list[str] = []
+            for declared_name in block.get("workflows") or []:
+                sources = state["by_name"].get((pending["repo"], declared_name)) or []
+                if not sources:
+                    unresolved.append(declared_name)
+                    continue
+                properties: dict[str, Any] = {"trigger_event": "workflow_run", "declared_name": declared_name}
+                for key in ("types", "branches", "branches_ignore"):
+                    if key in block:
+                        properties[key] = list(block[key])
+                for source in sources:
+                    edges.append(
+                        self._edge("TRIGGERS_WORKFLOW__github_core", source, pending["wf_uuid"], pending["dims"], properties)
+                    )
+                    emitted += 1
+            resolution = {"resolved": len(block.get("workflows") or []) - len(unresolved), "unresolved": unresolved}
+            pending["envelope"]["node"]["configuration"]["trigger_resolution"] = resolution
+            if unresolved:
+                unresolved_total += len(unresolved)
+                self.record_warn(
+                    _SITE_WORKFLOW_TRIGGER_UNRESOLVED,
+                    "WORKFLOW_TRIGGER_UNRESOLVED",
+                    f"{pending['repo']}: `workflow_run` names {unresolved!r}, which match no workflow in the "
+                    f"repository by display name. No edge; a renamed or deleted upstream workflow, or a "
+                    f"trigger that can never fire.",
+                    message_data={"repo": pending["repo"], "unresolved": unresolved},
+                )
+        if state["pending_triggers"]:
+            self.record_info(
+                _SITE_WORKFLOW_TRIGGERS,
+                "WORKFLOW_TRIGGERS",
+                f"{len(state['pending_triggers'])} workflow(s) declare `workflow_run`; {emitted} trigger edge(s) "
+                f"emitted, {unresolved_total} declared name(s) matched nothing.",
+                message_data={"declaring": len(state["pending_triggers"]), "edges": emitted, "unresolved": unresolved_total},
+            )
 
     def _usage_tally(self) -> dict[str, Any]:
         """The run's action tally, created on first touch.
