@@ -1,0 +1,162 @@
+"""The run's end time is derived from its jobs, never read off `updated_at` (github-core#46).
+
+GitHub's run payload carries no `completed_at`. Its `updated_at` moves on re-run, on
+artifact and log events and on check-suite updates — so the previous mapping
+(`completed_at = updated_at`) made a run that was re-run days later read as having taken
+days. The honest end is `max(job.completed_at)` over the run's collected jobs, and the
+node says which source it came from so a reader can tell a measurement from a bound.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from tap_plugin.github_core.collectors.github_collector.collector import (
+    COMPLETED_AT_FROM_JOBS,
+    COMPLETED_AT_FROM_UPDATED_AT,
+    COMPLETED_AT_IN_FLIGHT,
+    GithubCollector,
+)
+
+_REPO = "unified-systems-com/tap"
+_DIMS = {"github.platform": "github.com", "github.surface": "actions", "github.observation": "execution"}
+
+
+def _run(**overrides: Any) -> dict[str, Any]:
+    """A run payload shaped like `GET /repos/{o}/{r}/actions/runs` returns it."""
+    payload: dict[str, Any] = {
+        "id": 17402911001,
+        "run_number": 431,
+        "workflow_id": 184402,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "c4c4ee75" * 5,
+        "head_branch": "session/sonar-cleanup",
+        "run_started_at": "2026-09-01T18:02:11Z",
+        "created_at": "2026-09-01T18:01:40Z",
+        # Far later than any job finished: a re-run / artifact event touched the run.
+        "updated_at": "2026-09-02T07:45:03Z",
+        "html_url": "https://github.com/unified-systems-com/tap/actions/runs/17402911001",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _job(job_id: int, *, started_at: str | None, completed_at: str | None, status: str = "completed") -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "name": f"job-{job_id}",
+        "status": status,
+        "conclusion": "success" if completed_at else None,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "html_url": f"https://github.com/{_REPO}/actions/runs/17402911001/job/{job_id}",
+        "runner_id": 1,
+        "runner_name": "GitHub Actions 7",
+        "labels": ["ubuntu-latest"],
+        "steps": [],
+    }
+
+
+_JOBS = [
+    _job(1, started_at="2026-09-01T18:02:20Z", completed_at="2026-09-01T18:06:02Z"),
+    # The last job to finish; deliberately not the last in list order.
+    _job(2, started_at="2026-09-01T18:02:25Z", completed_at="2026-09-01T18:11:47Z"),
+    _job(3, started_at="2026-09-01T18:02:21Z", completed_at="2026-09-01T18:04:30Z"),
+]
+
+
+class _FakeClient:
+    """Serves one run's `/jobs` listing; `None` means the endpoint degraded (real 404)."""
+
+    def __init__(self, jobs: list[dict[str, Any]] | None) -> None:
+        self._jobs = jobs
+        self.calls: list[str] = []
+
+    def get_paginated(self, path: str, **_: Any) -> list[dict[str, Any]]:
+        from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+
+        self.calls.append(path)
+        if self._jobs is None:
+            raise GithubAPIError(status=404, url=path, body='{"message":"Not Found"}')
+        return list(self._jobs)
+
+
+def _emit(run: dict[str, Any], jobs: list[dict[str, Any]] | None) -> tuple[dict[str, Any], list[dict[str, Any]], list]:
+    """Drive the run emitter the way `_collect_repo` does; return (run node, job nodes, warns)."""
+    collector = GithubCollector.__new__(GithubCollector)
+    warns: list[tuple] = []
+    collector.record_warn = lambda *a, **k: warns.append((a, k))  # type: ignore[method-assign]
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    collector._emit_run_with_jobs(_FakeClient(jobs), _REPO, run, _DIMS, nodes, edges)
+    runs = [n for n in nodes if n["entity"]["entity_type"] == "github_core__github_actions_run"]
+    job_nodes = [n for n in nodes if n["entity"]["entity_type"] == "github_core__github_actions_job"]
+    assert len(runs) == 1
+    return runs[0], job_nodes, warns
+
+
+class TestTheEndComesFromTheJobs:
+    def test_a_late_updated_at_does_not_inflate_the_run(self) -> None:
+        """updated_at is 13 hours after the last job finished; the run ends when the job did."""
+        run_node, job_nodes, _ = _emit(_run(), _JOBS)
+        fields = run_node["node"]
+        assert fields["completed_at"] == "2026-09-01T18:11:47Z"
+        assert fields["completed_at"] != _run()["updated_at"]
+        assert fields["configuration"]["completed_at_source"] == COMPLETED_AT_FROM_JOBS
+        assert len(job_nodes) == 3
+
+    def test_the_latest_job_wins_regardless_of_list_order(self) -> None:
+        """`max` over parsed timestamps, not the last element and not a string compare."""
+        reordered = [_JOBS[1], _JOBS[0], _JOBS[2]]
+        run_node, _, _ = _emit(_run(), reordered)
+        assert run_node["node"]["completed_at"] == "2026-09-01T18:11:47Z"
+
+    def test_jobs_still_running_do_not_contribute(self) -> None:
+        """A completed run whose listing carries an unfinished job (GitHub's queue is eventually
+        consistent) derives from the jobs that did finish."""
+        jobs = [*_JOBS, _job(4, started_at="2026-09-01T18:02:30Z", completed_at=None, status="in_progress")]
+        run_node, _, _ = _emit(_run(), jobs)
+        assert run_node["node"]["completed_at"] == "2026-09-01T18:11:47Z"
+        assert run_node["node"]["configuration"]["completed_at_source"] == COMPLETED_AT_FROM_JOBS
+
+
+class TestTheOtherTwoStatesAreNamed:
+    """Three states, never two: derived, approximated, or absent with the reason on the node."""
+
+    def test_a_run_in_flight_has_no_end_time_yet(self) -> None:
+        """Two of three jobs are done, the run is not: a partial max would be a lie."""
+        jobs = [_JOBS[0], _JOBS[2], _job(9, started_at="2026-09-01T18:02:30Z", completed_at=None, status="in_progress")]
+        run_node, _, _ = _emit(_run(status="in_progress", conclusion=None), jobs)
+        assert run_node["node"]["completed_at"] is None
+        assert run_node["node"]["configuration"]["completed_at_source"] == COMPLETED_AT_IN_FLIGHT
+
+    def test_unobservable_jobs_fall_back_to_updated_at_and_say_so(self) -> None:
+        """The jobs endpoint degraded (real 404): updated_at is the only bound left, labelled."""
+        run_node, job_nodes, warns = _emit(_run(), None)
+        assert run_node["node"]["completed_at"] == _run()["updated_at"]
+        assert run_node["node"]["configuration"]["completed_at_source"] == COMPLETED_AT_FROM_UPDATED_AT
+        assert job_nodes == []
+        assert any(a[1] == "RUN_JOBS_MISSING" for a, _ in warns)
+
+    def test_a_completed_run_with_no_jobs_falls_back_to_updated_at(self) -> None:
+        """A skipped run has an empty listing (observed, not degraded); the bound is still labelled."""
+        run_node, _, warns = _emit(_run(conclusion="skipped"), [])
+        assert run_node["node"]["completed_at"] == _run()["updated_at"]
+        assert run_node["node"]["configuration"]["completed_at_source"] == COMPLETED_AT_FROM_UPDATED_AT
+        assert warns == []
+
+
+@pytest.mark.parametrize(
+    ("status", "jobs", "expected_source"),
+    [
+        ("completed", _JOBS, COMPLETED_AT_FROM_JOBS),
+        ("completed", None, COMPLETED_AT_FROM_UPDATED_AT),
+        ("queued", None, COMPLETED_AT_IN_FLIGHT),
+    ],
+)
+def test_the_source_label_is_one_of_three(status: str, jobs: list[dict[str, Any]] | None, expected_source: str) -> None:
+    _, source = GithubCollector._run_completed_at(_run(status=status), jobs)
+    assert source == expected_source

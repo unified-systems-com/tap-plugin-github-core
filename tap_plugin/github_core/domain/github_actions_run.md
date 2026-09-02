@@ -40,6 +40,14 @@ Deliberately **not** covered:
 
 Populated from `GET /repos/{o}/{r}/actions/runs` at **`repository:actions:read`**, paginated, with an initial run limit and incremental refresh thereafter (`req-github-core-collector`). Non-terminal runs are refreshed on later collections rather than frozen at first sight.
 
+**The end time is derived, not read.** The run payload carries no `completed_at`, and its `updated_at` is not one: it moves on re-run, on artifact and log events and on check-suite updates, so a run that was re-run a day later would read as having taken a day. The collector fetches the run's jobs first and sets `completed_at` to the latest `completed_at` over them, recording which of three states applied in `configuration.completed_at_source` (github-core#46):
+
+- `jobs` — derived: `max(job.completed_at)` over the collected latest-attempt jobs. A measurement.
+- `updated_at` — approximated: the run is complete but no job end time was observable (the `/jobs` call degraded, or the run has no jobs — a skipped run). An upper bound, labelled as one.
+- `in_flight` — absent: the run has not reached `completed`, so `completed_at` is null. A partial maximum over the jobs that have finished would be a lie.
+
+Because the node is the latest-attempt snapshot (see Identity), a re-run in progress moves the node back to `in_flight` and, once complete, to that attempt's end — the earlier attempt's duration lives in field history, not on the node.
+
 The endpoint yields more than this node keeps as columns — `actor`, `triggering_actor`, `head_repository` (which is how a fork run is recognised), and `referenced_workflows` (the resolved SHAs of reusable workflows a run pulled in, one of the few places GitHub hands over a resolved reference rather than a declared one). Those live in `configuration`.
 
 **REST only.** GitHub's GraphQL API exposes **no** Actions runs or jobs. If a collector needs runs, it needs REST; there is no batching escape via GraphQL. This was verified by execution, and it is the single most useful thing to know before designing a collection strategy for this domain.
@@ -70,7 +78,7 @@ The endpoint yields more than this node keeps as columns — `actor`, `triggerin
 - `head_sha` — the commit that ran. What joins an execution to code, and the anchor for "did the artifact come from the tagged tree".
 - `head_branch` — the ref that ran. With `event`, decides whether the execution crossed a trust boundary.
 - `run_started_at` — when execution began. Distinct from the run's creation, which matters for queue-time and for ordering against other observations.
-- `completed_at` — when it finished; null while running.
+- `completed_at` — when it finished; null while running. Derived from the run's jobs, not from the payload's `updated_at` — see Observability for the three states and the `completed_at_source` label beside it.
 - `html_url` — the browser URL for the run.
-- `configuration` — the rest of the run payload, including `actor`, `triggering_actor`, `head_repository` (fork detection), `referenced_workflows` and `run_attempt`. Fields live here until something needs to query them, at which point they earn a column.
+- `configuration` — the rest of the run payload, including `actor`, `triggering_actor`, `head_repository` (fork detection), `referenced_workflows` and `run_attempt`, plus `completed_at_source` (`jobs` / `updated_at` / `in_flight` — how `completed_at` was established). Fields live here until something needs to query them, at which point they earn a column.
 - `tags` — TAP's tag map.

@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import fnmatch
 import logging
+from datetime import datetime
 from typing import Any, ClassVar
 
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
@@ -137,6 +138,12 @@ _DOCS = (
 # states (`waiting`, `pending`, `requested`, `action_required`, etc.) and
 # anything we don't recognize is safer treated as "keep watching."
 _TERMINAL_RUN_STATUSES: frozenset[str] = frozenset({"completed"})
+
+# `configuration.completed_at_source` on a run node — which of the three states in
+# `GithubCollector._run_completed_at` produced its `completed_at` (github-core#46).
+COMPLETED_AT_FROM_JOBS = "jobs"
+COMPLETED_AT_FROM_UPDATED_AT = "updated_at"
+COMPLETED_AT_IN_FLIGHT = "in_flight"
 
 # How many cache entries to pull per repository. GitHub returns them most-recently-accessed
 # first, so a cap keeps the freshest — and the collector says how many it left, because a
@@ -1008,75 +1015,12 @@ class GithubCollector(CollectorBase):
             client, full_name, already_fetched_run_ids={r["id"] for r in run_payloads}
         )
         run_payloads.extend(refreshed)
+        # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
+        # the same job payloads, and at account scope a second walk is one extra API call per
+        # RUN — the single largest cost in the whole collection.
         jobs_by_run: dict[int, list[dict[str, Any]]] = {}
         for r in run_payloads:
-            run_uuid = run_id(full_name, r["id"])
-            wf_ref_uuid = workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
-            nodes.append(
-                node_envelope(
-                    entity_id=run_uuid,
-                    entity_type="github_core__github_actions_run",
-                    name=f"Run #{r.get('run_number', r['id'])}",
-                    dimensions=observation_dims,
-                    fields={
-                        "full_name": full_name,
-                        "run_id": r["id"],
-                        "run_number": r.get("run_number"),
-                        "event": r.get("event", ""),
-                        "status": r.get("status", ""),
-                        "conclusion": r.get("conclusion") or "",
-                        "head_sha": r.get("head_sha", ""),
-                        "head_branch": r.get("head_branch", ""),
-                        "run_started_at": r.get("run_started_at"),
-                        "completed_at": r.get("updated_at"),
-                        "html_url": r.get("html_url", ""),
-                        "configuration": {
-                            "workflow_id": r.get("workflow_id"),
-                            "raw_payload_keys": sorted(r.keys()),
-                        },
-                        "tags": {},
-                    },
-                )
-            )
-            if wf_ref_uuid is not None:
-                edges.append(self._edge("EXECUTES_WORKFLOW__github_core", run_uuid, wf_ref_uuid, observation_dims))
-
-            # jobs for this run (latest-attempt endpoint per req-github-core-collector-8).
-            # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
-            # the same payloads, and at account scope a second walk is one extra API call per RUN
-            # — the single largest cost in the whole collection.
-            jobs = self._fetch_run_jobs(client, full_name, r["id"])
-            jobs_by_run[r["id"]] = jobs
-            for j in jobs:
-                j_uuid = job_id(full_name, j["id"])
-                j_display_name = j.get("name") or str(j["id"])
-                nodes.append(
-                    node_envelope(
-                        entity_id=j_uuid,
-                        entity_type="github_core__github_actions_job",
-                        name=j_display_name,
-                        dimensions=observation_dims,
-                        fields={
-                            "full_name": full_name,
-                            "job_id": j["id"],
-                            "name": j_display_name,
-                            "status": j.get("status", ""),
-                            "conclusion": j.get("conclusion") or "",
-                            "started_at": j.get("started_at"),
-                            "completed_at": j.get("completed_at"),
-                            "html_url": j.get("html_url", ""),
-                            "configuration": {
-                                "runner_id": j.get("runner_id"),
-                                "runner_name": j.get("runner_name"),
-                                "runner_group_id": j.get("runner_group_id"),
-                                "labels": j.get("labels") or [],
-                                "steps": j.get("steps") or [],
-                            },
-                            "tags": {},
-                        },
-                    )
-                )
-                edges.append(self._edge("HAS_ACTIONS_JOB__github_core", run_uuid, j_uuid, observation_dims))
+            jobs_by_run[r["id"]] = self._emit_run_with_jobs(client, full_name, r, observation_dims, nodes, edges)
 
         # runners (graceful-degrade on 403 per req-github-core-collector-5)
         try:
@@ -1137,6 +1081,136 @@ class GithubCollector(CollectorBase):
     # ---------- helpers ----------
 
     # ---------- configuration-layer emitters ----------
+
+    def _emit_run_with_jobs(
+        self,
+        client: GithubClient,
+        full_name: str,
+        r: dict[str, Any],
+        observation_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Emit one run node, its latest-attempt job nodes, and the edges between them.
+
+        The jobs are fetched FIRST (latest-attempt endpoint per
+        req-github-core-collector-8) because the run's end time is derived from
+        them — see `_run_completed_at` (github-core#46). Returns the job payloads
+        (empty when the endpoint degraded) so the caller can hold them for the
+        EXECUTED_ON pass without a second walk.
+
+        Args:
+            client: The REST client for this collection.
+            full_name: `owner/repo` of the run's repository.
+            r: The run payload as GitHub returned it.
+            observation_dims: Dimensions stamped on every execution node.
+            nodes: Node envelopes to append to.
+            edges: Edge envelopes to append to.
+
+        Returns:
+            The run's job payloads; `[]` when they were not observable.
+        """
+        run_uuid = run_id(full_name, r["id"])
+        wf_ref_uuid = workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
+        jobs = self._fetch_run_jobs(client, full_name, r["id"])
+        completed_at, completed_at_source = self._run_completed_at(r, jobs)
+        nodes.append(
+            node_envelope(
+                entity_id=run_uuid,
+                entity_type="github_core__github_actions_run",
+                name=f"Run #{r.get('run_number', r['id'])}",
+                dimensions=observation_dims,
+                fields={
+                    "full_name": full_name,
+                    "run_id": r["id"],
+                    "run_number": r.get("run_number"),
+                    "event": r.get("event", ""),
+                    "status": r.get("status", ""),
+                    "conclusion": r.get("conclusion") or "",
+                    "head_sha": r.get("head_sha", ""),
+                    "head_branch": r.get("head_branch", ""),
+                    "run_started_at": r.get("run_started_at"),
+                    "completed_at": completed_at,
+                    "html_url": r.get("html_url", ""),
+                    "configuration": {
+                        "workflow_id": r.get("workflow_id"),
+                        "raw_payload_keys": sorted(r.keys()),
+                        "completed_at_source": completed_at_source,
+                    },
+                    "tags": {},
+                },
+            )
+        )
+        if wf_ref_uuid is not None:
+            edges.append(self._edge("EXECUTES_WORKFLOW__github_core", run_uuid, wf_ref_uuid, observation_dims))
+
+        for j in jobs or []:
+            j_uuid = job_id(full_name, j["id"])
+            j_display_name = j.get("name") or str(j["id"])
+            nodes.append(
+                node_envelope(
+                    entity_id=j_uuid,
+                    entity_type="github_core__github_actions_job",
+                    name=j_display_name,
+                    dimensions=observation_dims,
+                    fields={
+                        "full_name": full_name,
+                        "job_id": j["id"],
+                        "name": j_display_name,
+                        "status": j.get("status", ""),
+                        "conclusion": j.get("conclusion") or "",
+                        "started_at": j.get("started_at"),
+                        "completed_at": j.get("completed_at"),
+                        "html_url": j.get("html_url", ""),
+                        "configuration": {
+                            "runner_id": j.get("runner_id"),
+                            "runner_name": j.get("runner_name"),
+                            "runner_group_id": j.get("runner_group_id"),
+                            "labels": j.get("labels") or [],
+                            "steps": j.get("steps") or [],
+                        },
+                        "tags": {},
+                    },
+                )
+            )
+            edges.append(self._edge("HAS_ACTIONS_JOB__github_core", run_uuid, j_uuid, observation_dims))
+        return jobs or []
+
+    @staticmethod
+    def _run_completed_at(r: dict[str, Any], jobs: list[dict[str, Any]] | None) -> tuple[str | None, str]:
+        """Establish a run's end time honestly (github-core#46).
+
+        GitHub's run payload carries no `completed_at`. Its `updated_at` moves on
+        re-run, on artifact and log events and on check-suite updates, so a run
+        that was touched later reads as having taken hours. The end the run
+        actually had is the latest `completed_at` over its jobs.
+
+        Three states, never two — the second element names which one applies:
+
+        - `COMPLETED_AT_FROM_JOBS`: derived, `max(job.completed_at)` over the
+          collected latest-attempt jobs.
+        - `COMPLETED_AT_FROM_UPDATED_AT`: approximated from the payload's
+          `updated_at`, because the run is complete but no job end time was
+          observable (the jobs endpoint degraded, or the run has no jobs — a
+          skipped run, for instance). An upper bound, not a measurement.
+        - `COMPLETED_AT_IN_FLIGHT`: null, because the run has not reached a
+          terminal status. No end time exists yet; a partial `max` over the jobs
+          that have finished would be a lie.
+
+        Args:
+            r: The run payload as GitHub returned it.
+            jobs: The run's job payloads, or `None` when they were not observable.
+
+        Returns:
+            `(completed_at, source)` — the ISO timestamp (or `None`) and the
+            source label recorded beside it in `configuration.completed_at_source`.
+        """
+        if r.get("status") not in _TERMINAL_RUN_STATUSES:
+            return None, COMPLETED_AT_IN_FLIGHT
+        ends = [j["completed_at"] for j in jobs or [] if j.get("completed_at")]
+        if ends:
+            return max(ends, key=datetime.fromisoformat), COMPLETED_AT_FROM_JOBS
+        return r.get("updated_at"), COMPLETED_AT_FROM_UPDATED_AT
 
     def _emit_refs(
         self,
@@ -2217,8 +2291,8 @@ class GithubCollector(CollectorBase):
             refreshed.append(payload)
         return refreshed
 
-    def _fetch_run_jobs(self, client: GithubClient, full_name: str, run_id_int: int) -> list[dict[str, Any]]:
-        """Fetch the jobs list for a specific run.
+    def _fetch_run_jobs(self, client: GithubClient, full_name: str, run_id_int: int) -> list[dict[str, Any]] | None:
+        """Fetch the jobs list for a specific run, or `None` when it was not observable.
 
         Per GitHub docs the endpoint documents only `200 - OK`; no 404
         condition is documented. The HTTP client retries empty-body 404s
@@ -2226,6 +2300,11 @@ class GithubCollector(CollectorBase):
         Real 404s — a JSON body with `{"message": "..."}` — still propagate
         and we graceful-degrade per-run to avoid aborting the whole collection
         on a single quirky run (`req-github-core-collector-5` discipline).
+
+        `None` on that degrade, not `[]`: a run with no jobs (skipped) and a run
+        whose jobs could not be read are different observations, and the run's
+        end time is derived from the jobs (`_run_completed_at`), so the caller
+        has to be able to tell them apart.
         """
         try:
             return client.get_paginated(f"/repos/{full_name}/actions/runs/{run_id_int}/jobs", item_path="jobs")
@@ -2238,7 +2317,7 @@ class GithubCollector(CollectorBase):
                     f"with body: {exc.body[:120] or '(empty)'}. "
                     f"Skipping job collection for this run.",
                 )
-                return []
+                return None
             raise
 
     def _fetch_workflow_config(self, client: GithubClient, full_name: str, path: str) -> tuple[str, dict[str, Any]]:
