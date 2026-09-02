@@ -114,8 +114,10 @@ what answered, including the older status API third parties still post); `pull_r
 workflow's output) and `secret_scanning_alerts` (secret-in-code detection) — both **sensitive reads**
 that the App's review table must name as such; `repository_hooks` and `organization_hooks` (webhooks:
 third parties past the event horizon, and a hook to the wrong host is a finding);
-`repository_custom_properties` and `organization_custom_properties` (rulesets target by property —
-without the values, which rulesets apply cannot be resolved); `organization_custom_roles` and
+`repository_custom_properties` and `custom_properties_for_organizations` (rulesets target by property —
+without the values, which rulesets apply cannot be resolved; the organisation key is the one the UI's
+'Custom properties' control grants, observed 2026-09-02 — `organization_custom_properties` is definition
+management and is deferred); `organization_custom_roles` and
 `organization_custom_org_roles` (bypass actors are role ids — the #11 probe's `RepositoryRole 5` —
 resolve them to names); `organization_self_hosted_runners`; `organization_events` (below Enterprise
 there is no audit log; the activity stream is the nearest "what changed"); `organization_plan` (the
@@ -131,7 +133,7 @@ package stays *not observable* until GitHub exposes the key. Recorded in the led
 **Deferred, named:** secret **names** (`secrets`, `organization_secrets`, `dependabot_secrets` — never
 values; they resolve `${{ secrets.X }}` references and read as sensitive, so they wait for the
 `REFERENCES_SECRET` edge and enter with the names-only fact stated); `organization_personal_access_token_requests`;
-`artifact_metadata`, `code_quality`, `custom_properties_for_organizations` (new surfaces to understand
+`organization_custom_properties` (definition management); `artifact_metadata`, `code_quality` (new surfaces to understand
 before asking); `pages`; `issues`.
 
 **Blast radius, stated once.** Every read widens what a leaked App key exposes. The reads above that
