@@ -168,6 +168,7 @@
       "path": "POST /graphql (repository.refs.target ...CommitSlice)",
       "target_entity_type": "github_core__git_commit",
       "fields": [
+        "full_name",
         "sha",
         "committed_date",
         "authored_date",
@@ -184,7 +185,7 @@
         "signed_by_github"
       ],
       "permission": "repository:contents:read",
-      "description": "The commit at every collected ref's head, sliced to identity-as-observed and signature verification state (req-github-core-commits). A fragment on the `refs` source's target — scalar fields on nodes the config-layer query already requests, measured at no additional rate-limit cost on 2026-09-02 — so it widens nothing. `signature: null` is recorded as `unsigned` (an observed value); a degraded field is surfaced by the config layer and emits no commit. Keyed on the SHA alone, platform-global."
+      "description": "The commit at every collected ref's head, sliced to identity-as-observed and signature verification state (req-github-core-commits). A fragment on the `refs` source's target — scalar fields on nodes the config-layer query already requests, measured at no additional rate-limit cost on 2026-09-02 — so it widens nothing. `signature: null` is recorded as `unsigned` (an observed value); a degraded field is surfaced by the config layer and emits no commit. Keyed on the repository plus the SHA: GitHub persists the signature verification record per repository NETWORK, so a SHA-only node could merge two networks' verdicts."
     },
     {
       "name": "rulesets",

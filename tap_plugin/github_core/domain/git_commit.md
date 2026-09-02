@@ -19,9 +19,11 @@ It is a deliberately narrow slice. No message, no tree, no parents, no history: 
 
 ## Identity
 
-Natural key: **the SHA alone.** Entity id is `uuid5(ns, "github_core__git_commit:<sha>")`, lower-cased.
+Natural key: **`<full_name>#<sha>`** — the repository the observation was made in, plus the SHA lower-cased. Entity id is `uuid5(ns, "github_core__git_commit:<full_name>#<sha>")`.
 
-Platform-global rather than repository-scoped, and the reason is what git is: a commit is content-addressed and identical wherever it lives. A per-repository key would mint one node per fork carrying the same commit, and would lose the one join that makes the node worth having later — a SHA-pinned action reference or a run's head resolving to a commit *some in-scope repository carries*, which is the fork check the `USES_ACTION` article had to leave open. Signature state is a property of the commit and of GitHub's key/user relationship, not of the repository; the same commit reports the same state from every repository that has it.
+**Not the bare SHA, and the reason was learned in review.** A commit is content-addressed and identical wherever it lives, which argued for a platform-global key with fan-in across forks. But GitHub's *verification record* is not global: "when a commit signature is verified upon being pushed to GitHub, a verification record is stored alongside the commit … persistent across the repository network, meaning that if the same commit is pushed again to the same repository or to any of its forks, the existing verification record is reused" (GitHub docs, retrieved 2026-09-02). The same SHA in two **unrelated** networks — an import rather than a fork — can therefore carry two different signature verdicts, and a SHA-only node would let one repository's verdict overwrite another's, which is precisely the false reassurance a `required_signatures` view must not inherit (PR #60 review). A repository is inside exactly one network, so this key can never merge two records.
+
+What is given up is fan-in across forks and the direct id-join from a SHA-pinned `uses:` or a run's `head_sha`. Both remain answerable as a query on the `sha` field, and the honest fan-in key — the network root, once `Repository.parent` is collected — is the named follow-on.
 
 ## Boundaries
 
@@ -29,6 +31,7 @@ Deliberately **not** covered:
 
 - **The message, tree and parents.** Not history, not content. A commit graph is a different vocabulary and a different collection cost.
 - **Commits that are not at a ref's head.** Only what the config-layer refs query resolves is collected. A run's `head_sha`, a rule suite's `after_sha`, an artifact's `head_sha` and a SHA-pinned `uses:` all name commits this node *could* represent; joining them is a follow-on, not built, and stated so a query joining on `sha` today knows it will miss commits no ref points at.
+- **The same commit in another repository.** A fork's copy is a second node under this key even though GitHub reuses the verification record within the network. The network-root key that would merge them honestly needs `Repository.parent`, not yet collected.
 - **The signature payload.** `signature.payload` and `signature.signature` (the armored blocks) are bulk with no question behind them. Not stored.
 - **Who the signer *is*.** `signer_login` is a GitHub login. Whether that account is the committer, a bot, or someone else is a query over `identity_core`, not a field here.
 - **The tag object.** For an annotated tag this node is the commit the tag points at; the tag object's own signature (a signed tag) is a separate thing and is not collected. `git_ref.target_sha` still records the tag object.
@@ -47,11 +50,11 @@ Observed shapes, by executed call against `unified-systems-com/tap` on 2026-09-0
 - An unsigned head: **`signature: null`**. This is an observed value — GitHub answered the field — and it lands as `signature_state: unsigned`, `signature_valid: null`, `signature_kind: ""`. Null, not false: "not valid" would be a claim about a signature that does not exist.
 - A tag: the same fragment on the commit the tag resolves to.
 
-**Three states, never two.** Signed (GitHub's own `state`, lower-cased: `valid`, `unknown_key`, `bad_email`, `unverified_email`, `no_user`, `expired_key`, …), unsigned (`signature: null`), and **not observable** — a field the credential could not read arrives in the response's `errors[]`, the config layer surfaces it as `GRAPHQL_FIELD_DEGRADED`, and the ref carries no commit slice, so **no node is emitted**: a row of empty strings would read as an unsigned commit by someone nobody could name. A **repos-only scope** runs no config-layer query and therefore collects no commits, as it collects no refs; the ref source already states that.
+**Three states, never two.** Signed (GitHub's own `state`, lower-cased: `valid`, `unknown_key`, `bad_email`, `unverified_email`, `no_user`, `expired_key`, …), unsigned (`signature: null`), and **`unobservable`** — a field the credential could not read arrives as `null` in `data` *beside* an entry in `errors[]`, which is byte-for-byte what an unsigned commit's `signature` looks like. The config layer therefore **removes the key at every errored path** (`prune_errored_paths`) before the shapers run, so an absent `signature` key lands as `signature_state: unobservable` with a null validity, and a body whose `committedDate` was pruned emits no node at all. Nulls *inside* a present signature (`isValid: null`) stay null, never false. This distinction was raised in review (PR #60) and is now enforced rather than documented. A **repos-only scope** runs no config-layer query and therefore collects no commits, as it collects no refs; the ref source already states that.
 
 **Author and committer as observed.** `user: null` on a `GitActor` means GitHub resolved the email to no account — an observed absence, stored as an empty login. It is not the same as "we did not ask".
 
-**Absence shape** (github-core#14): **Shape D, derived absence** — a shared, content-addressed node relevant while any ref points at it; never tombstoned on its own observation. Its inbound [`POINTS_AT`](POINTS_AT.md) is **Shape G, recomputed**: a ref that moves points at a new commit, the old edge lingers under today's additive-only collection, and reconciliation — not a property — is the fix.
+**Absence shape** (github-core#14): **Shape D, derived absence** — relevant while any ref in its repository points at it; never tombstoned on its own observation. Its inbound [`POINTS_AT`](POINTS_AT.md) is **Shape G, recomputed**: a ref that moves points at a new commit, the old edge lingers under today's additive-only collection, and reconciliation — not a property — is the fix.
 
 ## Authoritative Source
 
@@ -68,7 +71,8 @@ Observed shapes, by executed call against `unified-systems-com/tap` on 2026-09-0
 
 ## Fields
 
-- `sha` — the commit id, and the natural key. Lower-cased 40-hex; the schema allows an abbreviated form only so a node can be referenced before its full id is known.
+- `full_name` — the repository the observation was made in; half the natural key, because the verification record is network-scoped.
+- `sha` — the commit id; the other half of the key. Lower-cased 40-hex; the schema allows an abbreviated form only so a node can be referenced before its full id is known.
 - `committed_date` — when the commit was made, per the committer line.
 - `authored_date` — when the change was authored; differs from `committed_date` on a rebase or amend, which is itself a signal about who last touched it.
 - `author_name` — the author line's name, as written in the commit.
@@ -78,8 +82,8 @@ Observed shapes, by executed call against `unified-systems-com/tap` on 2026-09-0
 - `committer_email` — the committer line's email.
 - `committer_login` — the account GitHub resolved the committer email to; `web-flow` for browser-made commits.
 - `signature_kind` — `gpg`, `smime` or `ssh` from the signature's GraphQL type; empty when unsigned.
-- `signature_state` — GitHub's verification state, lower-cased, or `unsigned` when GitHub returned no signature object. The field a `required_signatures` view reads.
-- `signature_valid` — GitHub's `isValid`; **null when unsigned**, never false.
+- `signature_state` — GitHub's verification state, lower-cased; `unsigned` when GitHub returned `signature: null`; `unobservable` when the field was not answered and was pruned. The field a `required_signatures` view reads.
+- `signature_valid` — GitHub's `isValid`; **null when unsigned or unobservable**, never false.
 - `signer_login` — the account whose key produced a verified signature; empty when unsigned or when GitHub could not attribute it.
 - `signed_by_github` — the signature is GitHub's own web-flow key. A merge made in the browser is signed, verified, and not by any human's key.
 - `configuration` — reserved; empty.

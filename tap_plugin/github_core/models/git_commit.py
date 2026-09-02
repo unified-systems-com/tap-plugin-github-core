@@ -20,9 +20,10 @@ from tap_grid.models import BaseModel
 class GitCommit(BaseModel):
     """One commit as the config-layer query observes it at a ref's head.
 
-    Keyed on the SHA alone — content-addressed, platform-global — so the same commit reached
-    from two repositories (a fork) is one node. Author and committer are recorded **as
-    observed**: a `_login` is present only when GitHub resolved the email to an account, and
+    Keyed on the repository plus the SHA — not the bare SHA, although a commit is
+    content-addressed: GitHub persists the signature VERIFICATION record per repository
+    network, so the same SHA in two unrelated networks can carry two different verdicts and a
+    SHA-only node would merge them. Author and committer are recorded **as observed**: a `_login` is present only when GitHub resolved the email to an account, and
     an empty login is observed-absent, not unknown.
 
     **The signature has three states, never two.** `signature_state` is GitHub's own
@@ -41,7 +42,6 @@ class GitCommit(BaseModel):
         "whether its signature verified. The object a required-signatures rule checks."
     )
     ENTITY_ICON: ClassVar[str] = "git-commit"
-    # No owner/repo dimension: a commit belongs to every repository that carries it.
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
         "github.platform": "github.com",
@@ -58,6 +58,7 @@ class GitCommit(BaseModel):
     SIGNATURE_UNSIGNED = "unsigned"
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
+        "full_name": {"type": "string", "minLength": 1},
         "sha": {"type": "string", "minLength": 7},
         "committed_date": {"type": ["string", "null"]},
         "authored_date": {"type": ["string", "null"]},
@@ -77,6 +78,7 @@ class GitCommit(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
+        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
         "sha": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 7}},
         "committed_date": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
         "authored_date": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
@@ -99,8 +101,11 @@ class GitCommit(BaseModel):
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
-    CREATE_REQUIRED: ClassVar[list[str]] = ["sha"]
+    CREATE_REQUIRED: ClassVar[list[str]] = ["full_name", "sha"]
 
+    # The repository this observation was made in — half the key, because the verification
+    # record is network-scoped and a repository is inside exactly one network.
+    full_name = models.CharField(max_length=255, blank=True, default="", db_index=True)
     sha = models.CharField(max_length=64, blank=True, default="", db_index=True)
     committed_date = models.DateTimeField(null=True, blank=True)
     authored_date = models.DateTimeField(null=True, blank=True)

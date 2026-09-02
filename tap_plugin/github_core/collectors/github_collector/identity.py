@@ -61,16 +61,18 @@ def git_ref_id(full_name: str, ref: str) -> UUID:
     return _id("github_core__git_ref", f"{full_name}#{ref}")
 
 
-def git_commit_id(sha: str) -> UUID:
-    """A commit, keyed on its SHA alone — content-addressed and identical wherever it lives.
+def git_commit_id(full_name: str, sha: str) -> UUID:
+    """A commit as observed in ONE repository: `owner/repo` plus the SHA.
 
-    Platform-global, like `github_action`: keying per repository would mint one node per fork
-    carrying the same commit and lose the join that makes the node worth having — a SHA-pinned
-    `USES_ACTION` or a run's `head_sha` resolving to a commit some in-scope repository carries.
-    Signature state is a property of the commit and GitHub's key/user relationship, not of any
-    repository, so the same commit reports the same state from every repository.
+    Not the bare SHA, although a commit object is content-addressed: GitHub persists a commit's
+    signature VERIFICATION record per repository *network* ("if the same commit is pushed again
+    to the same repository or to any of its forks, the existing verification record is reused"),
+    so the same SHA in two unrelated networks can legitimately carry two different records, and
+    a SHA-only key would let one repository's verdict overwrite another's (PR #60 review). A
+    repository is inside exactly one network, so this key can never merge two records. The
+    cross-fork join is a follow-on keyed on the network root once `parent` is collected.
     """
-    return _id("github_core__git_commit", sha.lower())
+    return _id("github_core__git_commit", f"{full_name}#{sha.lower()}")
 
 
 def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:

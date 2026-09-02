@@ -55,9 +55,12 @@ _UNSIGNED = {
 
 
 class TestIdentity:
-    def test_pinned_to_a_literal_and_case_insensitive(self) -> None:
-        assert str(git_commit_id("A" * 40)) == str(git_commit_id("a" * 40))
-        assert git_commit_id.__code__.co_argcount == 1, "the key is the SHA alone — no repository parameter"
+    def test_repository_scoped_and_case_insensitive_on_the_sha(self) -> None:
+        """Repository + SHA, not the bare SHA: GitHub persists the verification record per
+        repository network, so one SHA can carry two verdicts in two networks (PR #60 review)."""
+        assert str(git_commit_id("o/r", "A" * 40)) == str(git_commit_id("o/r", "a" * 40))
+        assert git_commit_id("o/r", "a" * 40) != git_commit_id("o/other", "a" * 40)
+        assert git_commit_id.__code__.co_argcount == 2
 
 
 class TestCommitSlice:
@@ -82,6 +85,19 @@ class TestCommitSlice:
         slice_ = GithubGraphQLClient.commit_slice(_UNSIGNED, "c" * 40)
         assert slice_ is not None
         assert slice_["author_login"] == "" and slice_["author_name"] == "Someone"
+
+    def test_a_signature_key_that_was_not_answered_is_unobservable_not_unsigned(self) -> None:
+        """The third state (PR #60 review): a degraded `signature` field is pruned from the
+        response, and an ABSENT key must not read as GitHub having answered `null`."""
+        degraded = {k: v for k, v in _SIGNED.items() if k != "signature"}
+        slice_ = GithubGraphQLClient.commit_slice(degraded, "e" * 40)
+        assert slice_ is not None
+        assert slice_["signature_state"] == "unobservable" and slice_["signature_valid"] is None
+
+    def test_nulls_inside_a_present_signature_stay_null(self) -> None:
+        partial = {**_SIGNED, "signature": {"__typename": "GpgSignature", "isValid": None, "state": "VALID"}}
+        slice_ = GithubGraphQLClient.commit_slice(partial, "e" * 40)
+        assert slice_ is not None and slice_["signature_valid"] is None and slice_["signature_kind"] == "gpg"
 
     def test_a_body_without_the_fragment_is_no_slice_at_all(self) -> None:
         """A degraded field, or a stub without the fragment: nothing to observe, so None —
@@ -109,6 +125,25 @@ def _repo_node() -> dict:
             ],
         },
     }
+
+
+class TestPrunedErrors:
+    def test_a_field_error_removes_the_key_so_null_cannot_be_read_as_an_answer(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.graphql_client import prune_errored_paths
+
+        data = {"repositoryOwner": {"repositories": {"nodes": [
+            {"branchRefs": {"nodes": [{"name": "main", "target": {"oid": "e" * 40, "committedDate": "x", "signature": None}}]}}
+        ]}}}
+        errors = [{"type": "FORBIDDEN", "path": ["repositoryOwner", "repositories", "nodes", 0, "branchRefs", "nodes", 0, "target", "signature"]}]
+        assert prune_errored_paths(data, errors) == 1
+        target = data["repositoryOwner"]["repositories"]["nodes"][0]["branchRefs"]["nodes"][0]["target"]
+        assert "signature" not in target and target["committedDate"] == "x"
+        assert GithubGraphQLClient.commit_slice(target, "e" * 40)["signature_state"] == "unobservable"
+
+    def test_an_unresolvable_path_is_skipped_not_fatal(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.graphql_client import prune_errored_paths
+
+        assert prune_errored_paths({"a": {}}, [{"path": ["a", "b", "c"]}, {"path": []}, {"message": "root"}]) == 0
 
 
 class TestRefShaping:
@@ -143,7 +178,10 @@ class TestEmission:
         points = [e for e in edges if e["edge"]["edge_type"] == "POINTS_AT__github_core"]
         # main and v2 share one commit (emitted twice, same id — collapse keeps one); v1 is
         # another; topic carried no slice and gets neither node nor edge.
-        assert {n["entity"]["entity_id"] for n in commits} == {str(git_commit_id("e" * 40)), str(git_commit_id("c" * 40))}
+        assert {n["entity"]["entity_id"] for n in commits} == {
+            str(git_commit_id("acme/widget", "e" * 40)),
+            str(git_commit_id("acme/widget", "c" * 40)),
+        }
         assert len(points) == 3
         assert {e["edge"]["from_entity_id"] for e in points} == {
             str(git_ref_id("acme/widget", "refs/heads/main")),
@@ -151,14 +189,15 @@ class TestEmission:
             str(git_ref_id("acme/widget", "refs/tags/v2")),
         }
 
-    def test_the_commit_node_carries_no_repository_and_the_edge_does(self) -> None:
+    def test_the_commit_node_and_the_edge_are_repository_scoped(self) -> None:
         nodes: list[dict] = []
         edges: list[dict] = []
         c = self._collector()
         c._emit_refs("acme/widget", git_ref_id("acme/widget", "x"), {"github.platform": "github.com",
                      "github.owner": "acme", "github.repo": "widget"}, nodes, edges)
         commit = next(n for n in nodes if n["entity"]["entity_type"] == "github_core__git_commit")
-        assert "github.repo" not in commit["entity"]["dimensions"]
+        assert commit["entity"]["dimensions"]["github.repo"] == "widget"
+        assert commit["node"]["full_name"] == "acme/widget"
         assert commit["entity"]["dimensions"]["github.surface"] == "git"
         edge = next(e for e in edges if e["edge"]["edge_type"] == "POINTS_AT__github_core")
         assert edge["entity"]["dimensions"]["github.repo"] == "widget"
@@ -167,14 +206,14 @@ class TestEmission:
 @pytest.mark.django_db
 class TestModelAndEdge:
     def test_unsigned_stores_a_null_validity(self) -> None:
-        commit = _create("github_core__git_commit", {"sha": "c" * 40, "signature_state": "unsigned", "signature_valid": None})
+        commit = _create("github_core__git_commit", {"full_name": "o/r", "sha": "c" * 40, "signature_state": "unsigned", "signature_valid": None})
         assert commit.signature_valid is None and commit.get_name() == "c" * 12
 
     def test_signature_kind_is_constrained(self) -> None:
-        assert not create_node("github_core__git_commit", {"sha": "c" * 40, "signature_kind": "pgp"}).success
+        assert not create_node("github_core__git_commit", {"full_name": "o/r", "sha": "c" * 40, "signature_kind": "pgp"}).success
 
     def test_points_at_is_ref_to_commit_and_property_free(self) -> None:
         ref = _create("github_core__git_ref", {"full_name": "o/r", "ref": "refs/heads/main", "ref_type": "branch"})
-        commit = _create("github_core__git_commit", {"sha": "e" * 40})
+        commit = _create("github_core__git_commit", {"full_name": "o/r", "sha": "e" * 40})
         edge = create_edge(ref.entity, commit.entity, "POINTS_AT__github_core")
         assert edge.properties == {}

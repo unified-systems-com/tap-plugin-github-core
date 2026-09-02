@@ -87,7 +87,7 @@ neutral substrate when one is extracted, not in `github_core`.
 | `github_runner` | no | self | exists | 9 sources |
 | `github_app` | no | self | exists | keeps the *application*; the grant moves to `app_installation` |
 | `identity_core__oidc_issuer` | yes | self | exists | we are ahead here — the published GitHub graph has no OIDC issuer at all |
-| `git_commit` | **yes** | **self** (pulled forward) | **exists** (2026-09-02, #57) | 7 sources (as *revision*); narrow slice only — not a full commit history. Pulled from friends because signature state is a `required_signatures` ruleset input. Keyed on the SHA alone (content-addressed, platform-global); signature in three states (`state` / `unsigned` / not emitted) |
+| `git_commit` | **yes** | **self** (pulled forward) | **exists** (2026-09-02, #57) | 7 sources (as *revision*); narrow slice only — not a full commit history. Pulled from friends because signature state is a `required_signatures` ruleset input. Keyed on repository + SHA — the verification record is persisted per repository NETWORK (PR #60 review), so a SHA-only node could merge two verdicts; signature in three states (`state` / `unsigned` / `unobservable`) |
 | `github_team` | no | friends | proposed | 10 sources |
 | `credential_grant` → `identity_core` | **yes** | friends | **new** | **9 standards + 15 incidents.** One node with a `kind` enum, not four thin types — otherwise the one query the standards ask for verbatim requires a UNION |
 | `runner_group` | no | friends | **new** | the published graph is ahead of us on runner scope |

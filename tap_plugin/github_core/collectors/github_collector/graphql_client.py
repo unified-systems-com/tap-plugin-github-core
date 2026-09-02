@@ -214,11 +214,17 @@ class GithubGraphQLClient:
         while True:
             body = self._post(_CONFIG_QUERY, {"login": login, "cursor": cursor})
             data = body["data"]
-            for err in body.get("errors") or []:
+            errors = body.get("errors") or []
+            for err in errors:
                 path = ".".join(str(p) for p in (err.get("path") or []))
                 note = f"{err.get('type', 'ERROR')}: {err.get('message', '')} at {path or '<root>'}"
                 if note not in notes:
                     notes.append(note)
+            # A field the credential could not read arrives as `null` in `data` beside its
+            # entry in `errors`. Null is also what an UNSIGNED commit's `signature` looks like,
+            # so a degraded field must not survive as a null the shapers would read as an
+            # observation: remove the key, and let "absent" mean "not answered".
+            prune_errored_paths(data, errors)
 
             rate = data.get("rateLimit") or {}
             cost += int(rate.get("cost") or 0)
@@ -297,40 +303,22 @@ class GithubGraphQLClient:
     def commit_slice(commit: dict[str, Any], sha: str) -> dict[str, Any] | None:
         """Flatten one `CommitSlice` fragment into the `git_commit` field shape.
 
-        Three states for the signature, never two: a signature object yields GitHub's own
-        `state` (`VALID`, `UNSIGNED` is never returned this way, `UNKNOWN_KEY`, …) with its
-        validity and kind; **`signature: null` is `unsigned`**, an observed value; and a commit
-        body with no `committedDate` at all is not a commit slice — return None so the caller
-        emits nothing rather than a node full of empty strings pretending to be observations.
+        Three states for the signature, never two. A signature object yields GitHub's own
+        `state` with its validity and kind; **`signature: null` is `unsigned`**, an observed
+        value; and a commit body with NO `signature` key — the config layer removes a key whose
+        read failed, see `prune_errored_paths` — is `unobservable`, with a null validity. A body
+        without `committedDate` is not a commit slice at all: return None so the caller emits
+        nothing rather than a node full of empty strings pretending to be observations.
         """
         if not sha or "committedDate" not in commit:
             return None
-        author = commit.get("author") or {}
-        committer = commit.get("committer") or {}
-        signature = commit.get("signature")
-        if signature is None:
-            kind, state, valid, signer, by_github = "", "unsigned", None, "", False
-        else:
-            kind = str(signature.get("__typename") or "").removesuffix("Signature").lower()
-            state = str(signature.get("state") or "").lower()
-            valid = bool(signature.get("isValid"))
-            signer = str(((signature.get("signer") or {}).get("login")) or "")
-            by_github = bool(signature.get("wasSignedByGitHub"))
         return {
             "sha": sha,
             "committed_date": commit.get("committedDate"),
             "authored_date": commit.get("authoredDate"),
-            "author_name": str(author.get("name") or ""),
-            "author_email": str(author.get("email") or ""),
-            "author_login": str(((author.get("user") or {}).get("login")) or ""),
-            "committer_name": str(committer.get("name") or ""),
-            "committer_email": str(committer.get("email") or ""),
-            "committer_login": str(((committer.get("user") or {}).get("login")) or ""),
-            "signature_kind": kind,
-            "signature_state": state,
-            "signature_valid": valid,
-            "signer_login": signer,
-            "signed_by_github": by_github,
+            **_actor_slice("author", commit.get("author")),
+            **_actor_slice("committer", commit.get("committer")),
+            **_signature_slice(commit),
         }
 
     @staticmethod
@@ -411,3 +399,78 @@ class GithubGraphQLClient:
                 continue
             out[f".github/workflows/{entry['name']}"] = text
         return out
+
+
+#: The signature field was not answered — removed from the response by `prune_errored_paths`.
+SIGNATURE_UNOBSERVABLE = "unobservable"
+#: GitHub answered `signature: null`: the commit carries no signature.
+SIGNATURE_UNSIGNED = "unsigned"
+
+
+def _actor_slice(role: str, actor: dict[str, Any] | None) -> dict[str, Any]:
+    """`GitActor` as observed: name and email as written, login only when GitHub resolved one."""
+    actor = actor or {}
+    return {
+        f"{role}_name": str(actor.get("name") or ""),
+        f"{role}_email": str(actor.get("email") or ""),
+        f"{role}_login": str(((actor.get("user") or {}).get("login")) or ""),
+    }
+
+
+def _signature_slice(commit: dict[str, Any]) -> dict[str, Any]:
+    """The signature in three states; nulls inside a present signature stay null, never False."""
+    if "signature" not in commit:
+        return {
+            "signature_kind": "",
+            "signature_state": SIGNATURE_UNOBSERVABLE,
+            "signature_valid": None,
+            "signer_login": "",
+            "signed_by_github": False,
+        }
+    signature = commit["signature"]
+    if signature is None:
+        return {
+            "signature_kind": "",
+            "signature_state": SIGNATURE_UNSIGNED,
+            "signature_valid": None,
+            "signer_login": "",
+            "signed_by_github": False,
+        }
+    is_valid = signature.get("isValid")
+    return {
+        "signature_kind": str(signature.get("__typename") or "").removesuffix("Signature").lower(),
+        "signature_state": str(signature.get("state") or "").lower() or SIGNATURE_UNOBSERVABLE,
+        "signature_valid": None if is_valid is None else bool(is_valid),
+        "signer_login": str(((signature.get("signer") or {}).get("login")) or ""),
+        "signed_by_github": bool(signature.get("wasSignedByGitHub")),
+    }
+
+
+def prune_errored_paths(data: Any, errors: list[dict[str, Any]]) -> int:
+    """Remove every field an `errors[]` entry names from `data`, so "not answered" is ABSENT.
+
+    GraphQL leaves a failed nullable field as `null` in `data` beside its error. For a field
+    whose null is also a legitimate answer (`Commit.signature` on an unsigned commit) that
+    would turn "the credential could not read it" into an observation. Deleting the key at the
+    error's `path` is what lets a shaper distinguish the two. Returns the number of keys removed;
+    a path that no longer resolves (a parent already pruned, or a root-level error) is skipped.
+    """
+    removed = 0
+    for err in errors:
+        path = err.get("path") or []
+        if not path:
+            continue
+        node: Any = data
+        for step in path[:-1]:
+            if isinstance(node, dict) and step in node:
+                node = node[step]
+            elif isinstance(node, list) and isinstance(step, int) and step < len(node):
+                node = node[step]
+            else:
+                node = None
+                break
+        leaf = path[-1]
+        if isinstance(node, dict) and leaf in node:
+            del node[leaf]
+            removed += 1
+    return removed

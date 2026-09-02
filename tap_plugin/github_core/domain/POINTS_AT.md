@@ -54,5 +54,5 @@ Measured 2026-09-02: the commit fragment added no rate-limit cost to the refs qu
 ## Endpoints
 
 - **Source:** `github_core__git_ref` — the branch or tag.
-- **Target:** `github_core__git_commit` — the commit it resolves to, shared across every ref and repository that reaches it.
-- **Dimensions:** `github.platform`, `github.surface: git`, `github.observation: declaration`, plus the repository's `github.owner` / `github.repo` from the ref's own dimensions — the pointing is that repository's fact even though the target belongs to none.
+- **Target:** `github_core__git_commit` — the commit it resolves to, as observed in this repository (shared across the repository's refs).
+- **Dimensions:** `github.platform`, `github.surface: git`, `github.observation: declaration`, plus the repository's `github.owner` / `github.repo` from the ref's own dimensions; both ends are repository-scoped.
