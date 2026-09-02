@@ -142,6 +142,16 @@ and secret names; the rest expose configuration an organisation member can alrea
 stand regardless: installation tokens live an hour, and uninstalling the App revokes everything at once
 (`create-github-app` skill, Rotation and revocation).
 
+**Measured after acceptance (2026-09-02, installation token with 29 read permissions).** Every newly
+granted surface answered: code-scanning alerts 200 (1 open on tap), Dependabot alerts 200 (1), secret-scanning
+alerts 200 (0), repository hooks 200 (1), organisation events 200, rule suites 200 (1 — the bypass-event
+surface), artifacts 200 (3,886 on tap). The one closed door: `GET /orgs/{org}/packages?package_type=container`
+answers **400 "Invalid argument"** to the App even with `packages: read` — container-package *enumeration* is
+closed to GitHub Apps, while per-package detail by name (`/packages/container/{name}/versions`) answers 200. So
+packages are collected by *known name*, and enumeration is recorded NOT OBSERVABLE, never "no packages"
+(github-core#50). A deployment-branch-policies call on an environment with none configured answers **404**,
+which the collector must read as "no policy", distinct from a refusal.
+
 **Operator step.** A permission added to an existing App is not granted until an organisation owner
 accepts it on the installation (skill failure mode: *a probe returns 403 on a permission the table
 shows as granted*). GitHub offers no API for either step.

@@ -1,6 +1,6 @@
 {
   "_comment": "The App-permission LEDGER (spec-github-core-app-permissions.md). Every key GitHub's OpenAPI description enumerates (github_openapi_extract.json → app_permissions, refreshed by scripts/refresh_openapi_extract.py) must appear here in exactly one state: requested (derived from a manifest source — the ONLY way into the App), exploratory (granted on the installed App without a source; must gain one or be dropped — `until` names the resolver), recommended (read; add when its consuming source lands), deferred (a real need behind a feature not on the fence), declined (never, with the reason), not_applicable (write-only, user-to-server, enterprise). No entry may request write. A key GitHub adds is UNCLASSIFIED and fails tests/test_app_permission_ledger.py — that is the 'have they added permissions we should consider' check, made mechanical. Hand-maintained; the test enforces completeness and consistency with the manifest. Keys GitHub exposes in the UI but omits from the OpenAPI schema (observed 2026-09-02: repository_advisories) carry `catalogue_absent` with the evidence; the verify_app skill diffs the LIVE App's permissions against this ledger, which is the second drift source.",
-  "reviewed": "2026-09-02",
+  "reviewed": "2026-09-02 (App 29 read, installation accepted, probes measured)",
   "permissions": {
     "actions": {
       "state": "requested",
@@ -196,7 +196,7 @@
     "organization_packages": {
       "state": "recommended",
       "level": "read",
-      "why": "Organisation-scoped packages, including ghcr images not linked to a repository. The catalogue lists it, but GitHub's App-settings UI exposes no organisation-level packages permission (observed 2026-09-02): repository `packages: read` on an all-repositories installation reaches packages linked to a repository, and an unlinked package stays NOT OBSERVABLE until GitHub exposes this key — record the gap, do not render it as none.",
+      "why": "Organisation-scoped packages, including ghcr images not linked to a repository. The catalogue lists it, but GitHub's App-settings UI exposes no organisation-level packages permission (observed 2026-09-02): repository `packages: read` on an all-repositories installation reaches packages linked to a repository, and an unlinked package stays NOT OBSERVABLE until GitHub exposes this key — record the gap, do not render it as none. Same measurement applies: no UI control, and the org container listing is closed to Apps regardless.",
       "until": "#31"
     },
     "organization_personal_access_token_requests": {
@@ -240,7 +240,7 @@
     "packages": {
       "state": "recommended",
       "level": "read",
-      "why": "GitHub Packages published from the pipeline — the outputs column (decided 2026-09-02).",
+      "why": "GitHub Packages published from the pipeline — the outputs column (decided 2026-09-02). MEASURED 2026-09-02 with `packages: read` granted and accepted (installation token, 29 permissions): `GET /orgs/{org}/packages?package_type=container` still answers 400 'Invalid argument' while ghcr images exist (npm/docker list 200 empty); `GET /orgs/{org}/packages/container/{name}/versions` answers 200 by name. Enumeration of container packages is closed to Apps; detail by known name is open. The collector must record enumeration as NOT OBSERVABLE and may resolve names it can derive (publish workflows, envelope hints) — never render the 400 as 'no packages'.",
       "until": "#31"
     },
     "pages": {
