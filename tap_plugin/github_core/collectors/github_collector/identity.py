@@ -79,6 +79,16 @@ def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     return _id("github_core__github_ruleset", f"{owner}#{ruleset_id_int}")
 
 
+def rule_suite_id(suite_id_int: int | str) -> UUID:
+    """A rule suite, keyed on GitHub's own suite id — unique across the platform.
+
+    Not scoped by repository: the id is assigned by GitHub and the suite carries its own
+    `repository_name`, so scoping would add nothing and would break the join if the same
+    suite were ever reached from another path.
+    """
+    return _id("github_core__rule_suite", str(suite_id_int))
+
+
 def environment_id(full_name: str, name: str) -> UUID:
     return _id("github_core__github_environment", f"{full_name}#{name}")
 

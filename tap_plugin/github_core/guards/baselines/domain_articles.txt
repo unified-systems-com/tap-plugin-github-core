@@ -25,7 +25,6 @@
 
 tap_plugin/github_core/domain/actions_cache.md::node:github_core__actions_cache::missing-article
 tap_plugin/github_core/domain/app_installation.md::node:github_core__app_installation::missing-article
-tap_plugin/github_core/domain/BYPASSES.md::edge:BYPASSES__github_core::missing-article
 tap_plugin/github_core/domain/DEFINES_JOB.md::edge:DEFINES_JOB__github_core::missing-article
 tap_plugin/github_core/domain/DEPENDS_ON_JOB.md::edge:DEPENDS_ON_JOB__github_core::missing-article
 tap_plugin/github_core/domain/dimensions/github.surface.md::dimension:github.surface::undocumented-value:deployments

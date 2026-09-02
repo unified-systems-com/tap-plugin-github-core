@@ -22,7 +22,7 @@ class GithubRuleset(BaseModel):
     ruleset, so a read-only credential sees an empty list that is
     indistinguishable from "nobody may bypass" — the most reassuring possible
     reading of a blank. `bypass_observability` carries the third state, and it
-    lives here rather than on the `BYPASSES` edge because when the answer is
+    lives here rather than on the `EXEMPTS_ACTOR` edge because when the answer is
     *none* or *unknown* there are no edges to carry it.
 
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-rulesets)

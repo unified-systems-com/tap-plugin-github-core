@@ -72,6 +72,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-app-auth | [GitHub App Authentication](#github-app-authentication) | In Development | 2026-08-27: the App is the product credential — its permissions are DERIVED from the collection manifest, it is created per-instance from a manifest so the operator holds their own key, and two surfaces git-serious needs are App-only (organization PAT grants, installed Apps) |
 | req-github-core-org-scope | [Account Scope](#account-scope) | Implemented | 2026-08-26 (pulled by git-serious): the envelope names an `owner`; the collector enumerates its repositories (org, user fallback), `repos` becomes an optional include-filter, and the run records the enumeration incl. walk completeness. Repos-only envelopes remain valid as the degenerate run config |
 | req-github-core-models | [Model Set](#model-set) | Implemented | account/repo/workflow/run/job/runner (0001) + synthesized `github_platform` (0002) — seven tables. `oidc_issuer` was extracted to the `identity_core` substrate plugin (dropped here in 0004); github still mints the issuer node via `identity_core.issuer`. |
+| req-github-core-rule-suites | [Rule Suites — Who Actually Bypassed](#rule-suites--who-actually-bypassed) | In Development | 2026-08-28 (settled empirically): enumeration of bypass ACTORS has a documented write-access ceiling, but rule suites answer the adjacent question — who actually bypassed a gate — and return 200 to a read-only App with actor names. Detection where enumeration is refused. |
 | req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
@@ -645,6 +646,54 @@ repositories and then shows you one row about itself. Read-only, like everything
 | req-github-core-app-installations-2 | PAT Mode Claims Nothing | Implemented | Running as a token records that the inventory is unreachable rather than emitting an empty one. | An empty inventory is otherwise indistinguishable from a clean account. |
 | req-github-core-app-installations-4 | Account Inventory Preferred, Fallback Named | Implemented | The collector reads `/orgs/{owner}/installations` (which Apps reach this account) and falls back to `/app/installations` (its own installation) only when refused — warning that the absence of other Apps is then not evidence there are none, and recording which scope the answer came from. | Requires `organization:administration:read`; declared in the collection manifest so the App's permission set derives it rather than carrying it as an unexplained extra. |
 | req-github-core-app-installations-3 | Repository Selection Retained | Implemented | `repository_selection: all` is stored as-is: such an installation follows the account into new repositories without anyone granting it again. | |
+
+### Rule Suites — Who Actually Bypassed
+----
+RID: `req-github-core-rule-suites`
+Status: `In Development`
+
+`req-github-core-ruleset` records **who may bypass** a gate, and hits a documented ceiling: GitHub
+returns `bypass_actors` only to a caller with **write** access to the ruleset, "to prevent leaking
+sensitive information". A read-only App is refused (REST omits the key; GraphQL returns a truthful
+`totalCount` with `nodes: [null]`), and so is a fine-grained PAT on the history endpoint. That is a
+limitation to publish, not to engineer around — the rationale tracks, since naming who may bypass a
+control turns those accounts into targets.
+
+**A different question is fully answerable.** `GET /repos/{owner}/{repo}/rulesets/rule-suites`
+returns **200 to a read-only App installation token** and names the actor of every push evaluated
+against the repository's rulesets — including the ones whose result was `bypass`. Measured against
+`unified-systems-com/tap` on 2026-08-28: ten bypass events in a month, each carrying `actor_name`,
+`actor_id`, `ref`, `before_sha`/`after_sha`, `pushed_at`, and per-rule evaluations naming the
+ruleset gone around.
+
+So the product can say **who did, when, on which ref, and which control they went around**, even
+where it cannot say who is permitted to. Enumeration and detection are different facts, and the
+second is the one a security product is usually asked for.
+
+**The actor is a `github_account`, deliberately.** The API gives a login and a numeric id, and
+nothing more: it may be a person, a bot, or a machine account, and the collector does not know
+which. `github_account` is exactly that primitive — an account, user-or-organization merged on
+purpose (`req-github-core-account`) — so claiming more would be inventing an identity we did not
+observe. `identity_core__principal` may later carry the human-versus-robot distinction; this does
+not pre-empt it.
+
+**A rule suite is an occurrence, not a change.** The vocabulary corpus rejects
+"change / snapshot / audit-event types" because the grid already carries field-level history — and
+that ruling is right and does **not** apply here. It governs changes to objects we collect ("this
+ruleset's enforcement moved to `evaluate`"), which history handles. A rule suite is an event in the
+world that we observed, in the same category as `github_actions_run`: it has GitHub-assigned
+identity, a timestamp, and facts that point at it. Modelling it duplicates nothing.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-rule-suites-1 | Suite Model Declared | In Development | A `github_rule_suite` node carries GitHub's suite `id`, `result`, `ref`, `before_sha`, `after_sha`, `pushed_at`, `actor_login`, and the evaluations that failed or were bypassed. | Keyed on the suite id, which is GitHub-assigned and stable. |
+| req-github-core-rule-suites-2 | Actor Is An Account, Not An Identity | In Development | The pusher is emitted as a `github_account` keyed on `actor_name`, joined by `TRIGGERED_EVALUATION`. The collector does not classify it as human or machine, because the API does not say. | `actor_id` rides as a field so a login rename is detectable, matching `req-github-core-account`. |
+| req-github-core-rule-suites-3 | The Bypassed Control Is Named | In Development | Each evaluation whose `rule_source.type` is `ruleset` produces a `BYPASSED` edge from the suite to that `github_ruleset`, carrying the `rule_type` that was gone around. | This is the join that makes the event actionable rather than a log line. |
+| req-github-core-rule-suites-4 | Bypass Is The Collected Subset | In Development | Collection filters to `rule_suite_result=bypass`. A passing suite is a routine push and lands nothing; the `result` field is kept so the model can widen without a migration. | ~47 suites/day on one repository — collecting every push evaluation would swamp the grid for no finding. |
+| req-github-core-rule-suites-5 | The Window Is Explicit, Always | In Development | Every call sets `time_period` explicitly. Omitting it silently defaults to `day`, so a repository with a month of bypasses reads as a quiet one. | Measured: `day` 47, `week` 100+, `month` 100+ on one repository. An absence rendering as a finished answer, arriving through a query default. |
+| req-github-core-rule-suites-6 | Refused Is Not Empty | In Development | A refusal degrades with a warning and records that the surface was unreachable; it never lands zero bypass events as though none occurred. | Same three-state discipline as `bypass_observability`. |
 
 ### GitHub Apps
 ----

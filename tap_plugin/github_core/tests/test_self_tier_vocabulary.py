@@ -827,7 +827,7 @@ class TestVocabularyIsDeclared:
             "DEPENDS_ON_JOB__github_core",
             "HAS_REF__github_core",
             "PROTECTS__github_core",
-            "BYPASSES__github_core",
+            "EXEMPTS_ACTOR__github_core",
             "HAS_ENVIRONMENT__github_core",
             "USES_ENVIRONMENT__github_core",
             "HAS_CACHE__github_core",
@@ -846,7 +846,7 @@ class TestVocabularyIsDeclared:
         from pathlib import Path
 
         root = Path(__file__).resolve().parents[1]
-        edge = json.loads((root / "edges" / "BYPASSES.edge.json").read_text())
+        edge = json.loads((root / "edges" / "EXEMPTS_ACTOR.edge.json").read_text())
         assert "observable" in edge["property_schema"]["properties"]
         assert "ABSENCE OF THIS EDGE IS NOT ABSENCE OF BYPASS" in edge["description"]
 
