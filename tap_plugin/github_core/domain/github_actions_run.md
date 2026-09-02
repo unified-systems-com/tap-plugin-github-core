@@ -43,7 +43,7 @@ Populated from `GET /repos/{o}/{r}/actions/runs` at **`repository:actions:read`*
 **The end time is derived, not read.** The run payload carries no `completed_at`, and its `updated_at` is not one: it moves on re-run, on artifact and log events and on check-suite updates, so a run that was re-run a day later would read as having taken a day. The collector fetches the run's jobs first and sets `completed_at` to the latest `completed_at` over them, recording which of three states applied in `configuration.completed_at_source` (github-core#46):
 
 - `jobs` — derived: `max(job.completed_at)` over the collected latest-attempt jobs. A measurement.
-- `updated_at` — approximated: the run is complete but no job end time was observable (the `/jobs` call degraded, or the run has no jobs — a skipped run). An upper bound, labelled as one.
+- `updated_at` — approximated: the run is complete but its end was not observable from the jobs — the `/jobs` call degraded, the run has no jobs (a skipped run), or the listing still carried a job without a usable end (it is eventually consistent, and a maximum over the jobs that *have* finished would understate the run). An upper bound, labelled as one.
 - `in_flight` — absent: the run has not reached `completed`, so `completed_at` is null. A partial maximum over the jobs that have finished would be a lie.
 
 Because the node is the latest-attempt snapshot (see Identity), a re-run in progress moves the node back to `in_flight` and, once complete, to that attempt's end — the earlier attempt's duration lives in field history, not on the node.

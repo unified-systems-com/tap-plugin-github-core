@@ -114,13 +114,22 @@ class TestTheEndComesFromTheJobs:
         run_node, _, _ = _emit(_run(), reordered)
         assert run_node["node"]["completed_at"] == "2026-09-01T18:11:47Z"
 
-    def test_jobs_still_running_do_not_contribute(self) -> None:
-        """A completed run whose listing carries an unfinished job (GitHub's queue is eventually
-        consistent) derives from the jobs that did finish."""
+    def test_an_unfinished_job_on_a_completed_run_is_not_a_measurement(self) -> None:
+        """The listing is eventually consistent: a completed run may still show a job without an
+        end. A max over the jobs that did finish would understate the run, so it is not labelled
+        `jobs` — the node falls back to the labelled upper bound."""
         jobs = [*_JOBS, _job(4, started_at="2026-09-01T18:02:30Z", completed_at=None, status="in_progress")]
         run_node, _, _ = _emit(_run(), jobs)
-        assert run_node["node"]["completed_at"] == "2026-09-01T18:11:47Z"
-        assert run_node["node"]["configuration"]["completed_at_source"] == COMPLETED_AT_FROM_JOBS
+        assert run_node["node"]["completed_at"] == _run()["updated_at"]
+        assert run_node["node"]["configuration"]["completed_at_source"] == COMPLETED_AT_FROM_UPDATED_AT
+
+    def test_an_unparseable_job_end_degrades_instead_of_aborting(self) -> None:
+        """The per-repo boundary catches only GithubAPIError; a ValueError from one odd stamp must
+        not fail the whole collection. It reads as "no usable end" and falls back, labelled."""
+        jobs = [*_JOBS, _job(4, started_at="2026-09-01T18:02:30Z", completed_at="not a timestamp")]
+        run_node, _, _ = _emit(_run(), jobs)
+        assert run_node["node"]["completed_at"] == _run()["updated_at"]
+        assert run_node["node"]["configuration"]["completed_at_source"] == COMPLETED_AT_FROM_UPDATED_AT
 
 
 class TestTheOtherTwoStatesAreNamed:

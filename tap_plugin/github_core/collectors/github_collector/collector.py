@@ -181,6 +181,21 @@ class GithubCollectorError(Exception):
     """Unrecoverable error during the github_core collection run."""
 
 
+def _iso_datetime(value: Any) -> datetime | None:
+    """Parse a GitHub timestamp (`2026-09-01T18:11:47Z`), or `None` when it is not one.
+
+    A degrade, not an abort: the per-repo boundary in `collect` catches only
+    `GithubAPIError`, so an unparseable stamp raising here would fail the whole
+    collection over one job. The caller treats `None` as "no usable end".
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _owner_of(full_name: str) -> str:
     """`owner` from `owner/repo`. Ruleset identity keys on the owner, not the repository."""
     return full_name.partition("/")[0]
@@ -1190,9 +1205,12 @@ class GithubCollector(CollectorBase):
         - `COMPLETED_AT_FROM_JOBS`: derived, `max(job.completed_at)` over the
           collected latest-attempt jobs.
         - `COMPLETED_AT_FROM_UPDATED_AT`: approximated from the payload's
-          `updated_at`, because the run is complete but no job end time was
-          observable (the jobs endpoint degraded, or the run has no jobs — a
-          skipped run, for instance). An upper bound, not a measurement.
+          `updated_at`, because the run is complete but its end was not
+          observable from the jobs: the jobs endpoint degraded, the run has no
+          jobs (a skipped run), or the listing still carried a job without a
+          parseable end — the listing is eventually consistent, and a maximum
+          over the jobs that HAVE finished would understate the run. An upper
+          bound, not a measurement.
         - `COMPLETED_AT_IN_FLIGHT`: null, because the run has not reached a
           terminal status. No end time exists yet; a partial `max` over the jobs
           that have finished would be a lie.
@@ -1207,9 +1225,16 @@ class GithubCollector(CollectorBase):
         """
         if r.get("status") not in _TERMINAL_RUN_STATUSES:
             return None, COMPLETED_AT_IN_FLIGHT
-        ends = [j["completed_at"] for j in jobs or [] if j.get("completed_at")]
+        ends: list[tuple[datetime, str]] = []
+        for j in jobs or []:
+            parsed = _iso_datetime(j.get("completed_at"))
+            if parsed is None:
+                # One job without a usable end makes the whole listing a non-measurement.
+                ends = []
+                break
+            ends.append((parsed, j["completed_at"]))
         if ends:
-            return max(ends, key=datetime.fromisoformat), COMPLETED_AT_FROM_JOBS
+            return max(ends)[1], COMPLETED_AT_FROM_JOBS
         return r.get("updated_at"), COMPLETED_AT_FROM_UPDATED_AT
 
     def _emit_refs(
