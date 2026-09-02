@@ -167,7 +167,7 @@ deleted when the core layout merges (derive-a-fact-once: one placement implement
 | --- | --- | --- |
 | 0 — sources | The refs that enter the machinery: the default branch, tag refs, and any ref a workflow trigger names. Other branches collapse into one deck via `stack.js` above `stack_refs_over` (count chip carries the true cardinality). Rulesets sit beside the refs they protect. | `HAS_REF__github_core`, `PROTECTS__github_core`, `workflow.configuration.triggers` |
 | 1 — pipelines | Workflow boxes. Rows within the column are grouped by trigger class in a fixed order: `pull_request`, `push`, `workflow_run`, `schedule`, `workflow_dispatch`, `workflow_call`. A workflow with several triggers takes the first in that order; a workflow with none goes to an *untriggered* row. | `workflow.configuration.triggers` (*observed* on the grid) |
-| 2 — outputs | Environments the jobs deploy to; releases, artifacts and packages once their rows exist (#31). Jobs whose `permissions` grant `packages: write`, `contents: write` or `id-token: write` are marked *producer* in place — a derived proxy, never a fabricated artifact node. | `HAS_ENVIRONMENT__github_core`, `workflow_job.environment`, `workflow_job.permissions` |
+| 2 — outputs | Environments the jobs deploy to; releases, artifacts and packages once their rows exist (#31). Jobs whose EFFECTIVE permissions grant `packages: write`, `contents: write` or `id-token: write` are marked *producer* in place — a derived proxy, never a fabricated artifact node. Effective = the job's own `permissions` block when present, else the workflow-level block (`configuration.workflow_permissions`); `write-all` grants every scope. When NEITHER is declared the repository default applies, and that default is not on the grid — the job's producer state is then *not observable*, rendered as such, never as "not a producer" (*inferred* that the collector stores declared, not resolved, permissions; settle by inspecting the collector before implementing — a `write-all` fixture must mark every job). | `HAS_ENVIRONMENT__github_core`, `workflow_job.environment`, `workflow_job.permissions`, `workflow.configuration.workflow_permissions` |
 
 **Rank inside a workflow box.** `rank(job) = 0` if `needs` is empty, else `1 + max(rank(needed))`
 over `DEPENDS_ON_JOB__github_core` — the longest path from a root. Ties stack vertically in
@@ -175,10 +175,12 @@ declaration order (`DEFINES_JOB.order` when present, else `job_key`). *Observed*
 `product-lines`: `setup`, `secret-scan` at 0; `line`, `cold-boot`, `lean-boot`, `api-fuzz`, `rids` at
 1; `gate` at 2.
 
-**Unresolved.** A job whose `needs` names a job absent from the scene, or that sits on a dependency
-cycle (`resolveNesting`-style cycle detection applied to the job graph), is placed in the box's
-*unresolved* row with warning `machinery_unresolved_rank` naming the job. It is never placed at
-rank 0.
+**Unresolved.** A job is unresolved when ANY job in its transitive `needs` closure is absent from
+the scene or sits on a dependency cycle (`resolveNesting`-style cycle detection applied to the job
+graph) — unresolvedness propagates downstream, so a job that depends on a cyclic job is unresolved
+too. Unresolved jobs are placed in the box's *unresolved* row with warning
+`machinery_unresolved_rank` naming the job and the root cause (the absent or cyclic job). They are
+never placed at rank 0. Fixture: `A needs B`, `B needs A`, `C needs A` — all three are unresolved.
 
 #### Acceptance Criteria
 
@@ -187,6 +189,7 @@ rank 0.
 | req-github-core-machinery-stages-1 | Three Ranks For The Gate | In Development | `product-lines` renders three columns: {setup, secret-scan}, {line, cold-boot, lean-boot, api-fuzz, rids}, {gate}. | Done-test; observed on a running instance. |
 | req-github-core-machinery-stages-2 | Sources Then Pipelines Then Outputs | In Development | Refs and rulesets, workflow boxes, and environments occupy three distinct stage columns in that order along the flow direction. | |
 | req-github-core-machinery-stages-3 | Unresolved Is A Row | In Development | A fixture workflow whose job `needs` an absent job renders that job in the *unresolved* row and emits `machinery_unresolved_rank`. | Negative case; fixture, not live data. |
+| req-github-core-machinery-stages-5 | Unresolved Propagates | In Development | Fixture `A needs B`, `B needs A`, `C needs A`: A, B and C all render in the *unresolved* row; none is at rank 0. | Codex review finding on PR #32. |
 | req-github-core-machinery-stages-4 | Branches Collapse | In Development | A repository with more than `stack_refs_over` non-default, non-tag refs shows one deck with the true count on its chip. | *Observed*: tap carries dozens of session branches. |
 
 ---
@@ -255,9 +258,11 @@ absence read as a finished answer.
 
 - **Unresolved rank** is a row (Stage Ranking), never rank 0.
 - **Outputs not yet collected.** While no release / artifact / package type is collected (#31), the
-  outputs stage carries one placeholder node per uncollected kind reading `releases: not yet
-  collected` (and likewise artifacts, packages). It is a viz-owned synthetic node (`_synthetic:
-  true`, excluded from searches and badges), removed per kind when that kind's nodes appear. An
+  outputs stage of EACH repository box carries one placeholder node per uncollected kind reading
+  `releases: not yet collected` (and likewise artifacts, packages). It is a viz-owned synthetic node
+  (`_synthetic: true`, excluded from searches and badges), removed per kind when that kind's nodes
+  appear FOR THAT REPOSITORY — a release belonging to another repository in the scene never retires
+  this box's placeholder. An
   environment column with no environments renders `environments: none observed` only when the
   credential could read environments — which is #15's visibility verdict; until #15 lands it
   renders `environments: not observable` (fail closed).
@@ -267,7 +272,9 @@ absence read as a finished answer.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-machinery-honesty-1 | Placeholder Present | In Development | With no `github_release` node in the scene the outputs stage shows the `releases: not yet collected` placeholder; with one present it does not. | |
+| req-github-core-machinery-honesty-1 | Placeholder Present | In Development | With no `github_release` node for the repository, its outputs stage shows the `releases: not yet collected` placeholder; with one present for that repository it does not. | |
+| req-github-core-machinery-honesty-3 | Placeholder Scope Is The Box | In Development | Two repositories in one scene, only one holding a `github_release`: the other's placeholder remains. | Codex review finding on PR #32. |
+| req-github-core-machinery-honesty-4 | Producer Is Three-State | In Development | A job with no declared permissions at job or workflow level renders producer state *not observable*, not unmarked; a `write-all` fixture marks every job producer. | Codex review finding on PR #32. |
 | req-github-core-machinery-honesty-2 | Synthetic Is Marked | In Development | Every placeholder carries `_synthetic: true` and is absent from the status-badge population. | |
 
 ---
