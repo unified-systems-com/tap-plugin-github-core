@@ -2400,44 +2400,19 @@ class GithubCollector(CollectorBase):
         linked = 0
         expired = 0
         for entry in entries:
-            artifact_uuid = actions_artifact_id(full_name, entry["id"])
-            run = entry.get("workflow_run") or {}
-            run_id_int = run.get("id")
-            is_expired = bool(entry.get("expired", False))
-            expired += int(is_expired)
-            nodes.append(
-                node_envelope(
-                    entity_id=artifact_uuid,
-                    entity_type="github_core__actions_artifact",
-                    name=str(entry.get("name") or entry["id"]),
-                    dimensions=dims,
-                    fields={
-                        "full_name": full_name,
-                        "artifact_id": entry["id"],
-                        "name": str(entry.get("name") or ""),
-                        "size_in_bytes": entry.get("size_in_bytes"),
-                        "digest": str(entry.get("digest") or ""),
-                        "expired": is_expired,
-                        "expires_at": entry.get("expires_at"),
-                        "created_at": entry.get("created_at"),
-                        "updated_at": entry.get("updated_at"),
-                        "run_id": run_id_int,
-                        "head_sha": str(run.get("head_sha") or ""),
-                        "head_branch": str(run.get("head_branch") or ""),
-                        "configuration": {
-                            "workflow_run": run,
-                            # The producing run was in this batch, so the edge exists; or it was
-                            # not, and the join is by `run_id` against whatever is on the grid.
-                            "run_in_batch": run_id_int in run_ids_in_batch,
-                        },
-                        "tags": {},
-                    },
-                )
-            )
-            if run_id_int in run_ids_in_batch:
+            run_id_int = (entry.get("workflow_run") or {}).get("id")
+            in_batch = run_id_int in run_ids_in_batch
+            expired += int(bool(entry.get("expired", False)))
+            nodes.append(self._artifact_node(full_name, entry, in_batch, dims))
+            if in_batch:
                 linked += 1
                 edges.append(
-                    self._edge("UPLOADS_ARTIFACT__github_core", run_id(full_name, run_id_int), artifact_uuid, dims)
+                    self._edge(
+                        "UPLOADS_ARTIFACT__github_core",
+                        run_id(full_name, run_id_int),
+                        actions_artifact_id(full_name, entry["id"]),
+                        dims,
+                    )
                 )
         if entries:
             self.record_info(
@@ -2461,6 +2436,34 @@ class GithubCollector(CollectorBase):
                 f"artifact in this batch is not evidence it is gone or expired.",
                 message_data={"repo": full_name, "collected": len(entries), "total": total},
             )
+
+    @staticmethod
+    def _artifact_node(full_name: str, entry: dict[str, Any], in_batch: bool, dims: dict[str, str]) -> dict[str, Any]:
+        """One artifact envelope from a listing item. `run_in_batch` says whether the
+        UPLOADS_ARTIFACT edge exists or the join is by `run_id` against the grid."""
+        run = entry.get("workflow_run") or {}
+        return node_envelope(
+            entity_id=actions_artifact_id(full_name, entry["id"]),
+            entity_type="github_core__actions_artifact",
+            name=str(entry.get("name") or entry["id"]),
+            dimensions=dims,
+            fields={
+                "full_name": full_name,
+                "artifact_id": entry["id"],
+                "name": str(entry.get("name") or ""),
+                "size_in_bytes": entry.get("size_in_bytes"),
+                "digest": str(entry.get("digest") or ""),
+                "expired": bool(entry.get("expired", False)),
+                "expires_at": entry.get("expires_at"),
+                "created_at": entry.get("created_at"),
+                "updated_at": entry.get("updated_at"),
+                "run_id": run.get("id"),
+                "head_sha": str(run.get("head_sha") or ""),
+                "head_branch": str(run.get("head_branch") or ""),
+                "configuration": {"workflow_run": run, "run_in_batch": in_batch},
+                "tags": {},
+            },
+        )
 
     def _collect_app_installations(
         self,
