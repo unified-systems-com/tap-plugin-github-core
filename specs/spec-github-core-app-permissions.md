@@ -89,7 +89,7 @@ entries cite real manifest sources.
 RID: `req-github-core-app-permissions-recommended`
 Status: `Proposed`
 
-Twenty reads are recommended, in two tiers. **None enters the manifest by being recommended**: each
+Twenty-one reads are recommended, in two tiers. **None enters the manifest by being recommended**: each
 becomes `requested` only when a manifest source consumes it, so the App never holds a permission the
 collector does not exercise. The full rationale per key is the ledger's `why`; this is the shape.
 
@@ -110,12 +110,18 @@ without the values, which rulesets apply cannot be resolved); `organization_cust
 `organization_custom_org_roles` (bypass actors are role ids — the #11 probe's `RepositoryRole 5` —
 resolve them to names); `organization_self_hosted_runners`; `organization_events` (below Enterprise
 there is no audit log; the activity stream is the nearest "what changed"); `organization_plan` (the
-tier decides which surfaces can exist: the difference between *none* and *not observable on this plan*).
+tier decides which surfaces can exist: the difference between *none* and *not observable on this plan*);
+`vulnerability_alerts` (Dependabot alerts — github_core's to request, decided 2026-09-02: security
+incidents are processed here, not held until a supply-chain product exists).
+
+**A catalogue key the UI does not expose.** `organization_packages` is in GitHub's schema but
+(observed 2026-09-02) has no control in the App-settings UI; repository `packages: read` on an
+all-repositories installation reaches packages linked to a repository, and an unlinked organisation
+package stays *not observable* until GitHub exposes the key. Recorded in the ledger, rendered as such.
 
 **Deferred, named:** secret **names** (`secrets`, `organization_secrets`, `dependabot_secrets` — never
 values; they resolve `${{ secrets.X }}` references and read as sensitive, so they wait for the
-`REFERENCES_SECRET` edge and enter with the names-only fact stated); `vulnerability_alerts` (a
-supply-chain fact, supply_chain_core's to request); `organization_personal_access_token_requests`;
+`REFERENCES_SECRET` edge and enter with the names-only fact stated); `organization_personal_access_token_requests`;
 `artifact_metadata`, `code_quality`, `custom_properties_for_organizations` (new surfaces to understand
 before asking); `pages`; `issues`.
 

@@ -197,7 +197,7 @@
     "organization_packages": {
       "state": "recommended",
       "level": "read",
-      "why": "Organisation-scoped packages, including ghcr images not linked to a repository; without it a package with no source repo is invisible.",
+      "why": "Organisation-scoped packages, including ghcr images not linked to a repository. The catalogue lists it, but GitHub's App-settings UI exposes no organisation-level packages permission (observed 2026-09-02): repository `packages: read` on an all-repositories installation reaches packages linked to a repository, and an unlinked package stays NOT OBSERVABLE until GitHub exposes this key — record the gap, do not render it as none.",
       "until": "#31"
     },
     "organization_personal_access_token_requests": {
@@ -307,10 +307,9 @@
       "why": "Commit statuses: the older check API that Codacy, Sonar and other third parties still post; required checks can be statuses."
     },
     "vulnerability_alerts": {
-      "state": "deferred",
+      "state": "recommended",
       "level": "read",
-      "why": "Dependabot alerts: a supply-chain fact, not a pipeline fact — supply_chain_core's to request.",
-      "until": "supply_chain_core"
+      "why": "Dependabot alerts on the repositories the pipeline builds from. github_core's to request (decided 2026-09-02): security incidents are processed here, not held until a supply-chain product exists — the identity of the vulnerable package may later be a supply_chain_core purl, but the alert is a GitHub fact on a GitHub repository."
     },
     "workflows": {
       "state": "not_applicable",
