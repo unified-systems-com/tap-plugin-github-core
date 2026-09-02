@@ -276,50 +276,58 @@ def split_uses(uses: str) -> dict[str, Any]:
     upgrades `unresolved` to `tag`/`branch` only when it holds the action repository's refs.
     """
     if uses.startswith(_DOCKER_PREFIX):
-        image = uses[len(_DOCKER_PREFIX) :]
-        if "@" in image:
-            path, _, ref = image.partition("@")
-            pin = PIN_DIGEST if ref.startswith("sha256:") else PIN_UNRESOLVED
-        else:
-            # A `:tag` after the last `/` (a registry may carry a port: `localhost:5000/img`).
-            head, _, tail = image.rpartition("/")
-            if ":" in tail:
-                name, _, ref = tail.partition(":")
-                path = f"{head}/{name}" if head else name
-                pin = PIN_TAG
-            else:
-                path, ref, pin = image, "", PIN_UNPINNED
-        return {
-            "kind": "docker",
-            "action": f"{_DOCKER_PREFIX}{path}",
-            "action_path": f"{_DOCKER_PREFIX}{path}",
-            "owner": "",
-            "repository_full_name": "",
-            "subpath": "",
-            "ref": ref,
-            "pin_kind": pin,
-        }
+        return _split_docker_uses(uses[len(_DOCKER_PREFIX) :])
+    return _split_repository_uses(uses)
+
+
+def _split_docker_uses(image: str) -> dict[str, Any]:
+    """`docker://image[:tag|@sha256:digest]` — a registry pin, not a git one."""
+    if "@" in image:
+        path, _, ref = image.partition("@")
+        pin = PIN_DIGEST if ref.startswith("sha256:") else PIN_UNRESOLVED
+    else:
+        # A `:tag` after the last `/` (a registry may carry a port: `localhost:5000/img`).
+        head, _, tail = image.rpartition("/")
+        name, _, ref = tail.partition(":")
+        path = f"{head}/{name}" if head else name
+        pin = PIN_TAG if ref else PIN_UNPINNED
+    action_path = f"{_DOCKER_PREFIX}{path}"
+    return {
+        "kind": "docker",
+        "action": action_path,
+        "action_path": action_path,
+        "owner": "",
+        "repository_full_name": "",
+        "subpath": "",
+        "ref": ref,
+        "pin_kind": pin,
+    }
+
+
+def _split_repository_uses(uses: str) -> dict[str, Any]:
+    """`owner/repo[/subdir]@ref` — the common form."""
     path, _, ref = uses.partition("@")
     parts = path.split("/")
-    owner = parts[0] if len(parts) >= 2 else ""
-    repository_full_name = "/".join(parts[:2]) if len(parts) >= 2 else ""
-    subpath = "/".join(parts[2:]) if len(parts) > 2 else ""
-    if not ref:
-        pin = PIN_UNPINNED
-    elif _SHA_RE.match(ref):
-        pin = PIN_SHA
-    else:
-        pin = PIN_UNRESOLVED
+    has_repo = len(parts) >= 2
     return {
         "kind": "repository",
         "action": path,
         "action_path": path,
-        "owner": owner,
-        "repository_full_name": repository_full_name,
-        "subpath": subpath,
+        "owner": parts[0] if has_repo else "",
+        "repository_full_name": "/".join(parts[:2]) if has_repo else "",
+        "subpath": "/".join(parts[2:]),
         "ref": ref,
-        "pin_kind": pin,
+        "pin_kind": _git_pin_kind(ref),
     }
+
+
+def _git_pin_kind(ref: str) -> str:
+    """What a git ref string proves on its own: a commit, nothing, or a name (unresolved)."""
+    if not ref:
+        return PIN_UNPINNED
+    if _SHA_RE.match(ref):
+        return PIN_SHA
+    return PIN_UNRESOLVED
 
 
 def is_pinned(pin_kind: str) -> bool:

@@ -150,7 +150,14 @@ def _in_scope_repo(name: str, *, tags: dict[str, str] | None = None, branches: d
 def _emit(c: GithubCollector, refs: list[dict]) -> tuple[list[dict], list[dict]]:
     nodes: list[dict] = []
     edges: list[dict] = []
-    c._emit_used_actions("acme/app", workflow_job_id("acme/app", 1, "build"), refs, nodes, edges)
+    dims = {
+        "github.platform": "github.com",
+        "github.owner": "acme",
+        "github.repo": "app",
+        "github.surface": "actions",
+        "github.observation": "declaration",
+    }
+    c._emit_used_actions("acme/app", workflow_job_id("acme/app", 1, "build"), refs, dims, nodes, edges)
     return nodes, edges
 
 

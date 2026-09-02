@@ -118,6 +118,26 @@ _SITE_AUTH_MODE = "3e4d"
 _SITE_ACTION_REF_NOT_FOUND = "de95"
 _SITE_ACTIONS_USED = "13f5"
 
+#: The dimension keys that scope an envelope to ONE repository. Stripped from a node shared
+#: across the scope (an action, an app), kept on the edges that use it.
+_REPO_SCOPED_DIMENSION_KEYS = ("github.owner", "github.repo")
+
+
+def _group_action_calls(action_refs: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    """Fold a job's per-step action refs into one entry per (action path, declared ref).
+
+    Two steps calling the same action at the same ref are one relationship with two positions;
+    the same action at two refs is two relationships.
+    """
+    by_call: dict[tuple[str, str], dict[str, Any]] = {}
+    for ref in action_refs:
+        action_path = str(ref.get("action_path") or ref.get("action") or "")
+        if not action_path:
+            continue
+        entry = by_call.setdefault((action_path, str(ref.get("ref") or "")), {**ref, "step_indexes": []})
+        entry["step_indexes"].append(int(ref.get("step_index", 0)))
+    return by_call
+
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
 # list under synthetic ``dynamic/<app>/...`` paths. These are not repo CI
 # workflows — they are platform apps enabled on the repo — so we reclassify
@@ -1708,7 +1728,7 @@ class GithubCollector(CollectorBase):
                     )
                 )
             # The third-party code this job hands its token to, and how each call is pinned.
-            self._emit_used_actions(full_name, job_uuid, job.get("action_refs") or [], nodes, edges)
+            self._emit_used_actions(full_name, job_uuid, job.get("action_refs") or [], declared_dims, nodes, edges)
         # `needs:` — emitted after every job in the file has an id, because a job may need one
         # declared below it.
         for job in jobs:
@@ -1737,6 +1757,7 @@ class GithubCollector(CollectorBase):
         full_name: str,
         job_uuid: Any,
         action_refs: list[dict[str, Any]],
+        usage_dims: dict[str, str],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
@@ -1744,59 +1765,15 @@ class GithubCollector(CollectorBase):
 
         The node is shared across the whole run (deterministic id; envelope collapse keeps one
         copy) and carries NO owner/repo dimension, because `actions/checkout` belongs to no one
-        repository in scope. The pin lives on the edge: it is a fact about this job's call, and
-        the same action is pinned differently by different jobs.
+        repository in scope. The edge keeps the calling repository's dimensions: the usage is
+        that repository's fact. The pin lives on the edge — it is a fact about this job's call,
+        and the same action is pinned differently by different jobs.
         """
-        # Node dimensions: declaration-side, no repo scoping — see the model.
-        action_dims = {
-            "github.platform": "github.com",
-            "github.surface": "actions",
-            "github.observation": "declaration",
-        }
-        # Edge dimensions carry the CALLING repository: the usage is that repository's fact.
-        owner, _, repo = full_name.partition("/")
-        usage_dims = {**action_dims, "github.owner": owner, "github.repo": repo}
-        by_call: dict[tuple[str, str], dict[str, Any]] = {}
-        for ref in action_refs:
-            action_path = str(ref.get("action_path") or ref.get("action") or "")
-            if not action_path:
-                continue
-            key = (action_path, str(ref.get("ref") or ""))
-            entry = by_call.setdefault(key, {**ref, "step_indexes": []})
-            entry["step_indexes"].append(int(ref.get("step_index", 0)))
-        for (action_path, declared_ref), call in sorted(by_call.items()):
+        action_dims = {k: v for k, v in usage_dims.items() if k not in _REPO_SCOPED_DIMENSION_KEYS}
+        for (action_path, declared_ref), call in sorted(_group_action_calls(action_refs).items()):
             action_uuid = github_action_id(action_path)
-            nodes.append(
-                node_envelope(
-                    entity_id=action_uuid,
-                    entity_type="github_core__github_action",
-                    name=action_path,
-                    dimensions=action_dims,
-                    fields={
-                        "action_path": action_path,
-                        "kind": str(call.get("kind") or "repository"),
-                        "owner": str(call.get("owner") or ""),
-                        "repository_full_name": str(call.get("repository_full_name") or ""),
-                        "subpath": str(call.get("subpath") or ""),
-                        "name": action_path,
-                        "configuration": {},
-                        "tags": {},
-                    },
-                )
-            )
-            pin_kind, resolved_sha, resolution = self._resolve_action_pin(
-                full_name, str(call.get("kind") or ""), str(call.get("repository_full_name") or ""),
-                declared_ref, str(call.get("pin_kind") or ""),
-            )
-            properties: dict[str, Any] = {
-                "declared_ref": declared_ref,
-                "pin_kind": pin_kind,
-                "is_pinned": is_pinned(pin_kind),
-                "resolution": resolution,
-                "step_indexes": sorted(call["step_indexes"]),
-            }
-            if resolved_sha:
-                properties["resolved_sha"] = resolved_sha
+            nodes.append(self._action_node(action_uuid, action_path, call, action_dims))
+            properties = self._uses_action_properties(full_name, call, declared_ref)
             edges.append(
                 edge_envelope(
                     entity_id=uses_action_edge_id(job_uuid, action_uuid, declared_ref),
@@ -1807,13 +1784,55 @@ class GithubCollector(CollectorBase):
                     properties=properties,
                 )
             )
-            usage = self._usage_tally()
-            usage["actions"].add(action_path)
-            usage["edges"] += 1
-            if not properties["is_pinned"]:
-                usage["unpinned"] += 1
-            if resolution == "unobservable":
-                usage["unobservable"] += 1
+            self._tally_usage(action_path, properties)
+
+    @staticmethod
+    def _action_node(action_uuid: Any, action_path: str, call: dict[str, Any], dims: dict[str, str]) -> dict[str, Any]:
+        return node_envelope(
+            entity_id=action_uuid,
+            entity_type="github_core__github_action",
+            name=action_path,
+            dimensions=dims,
+            fields={
+                "action_path": action_path,
+                "kind": str(call.get("kind") or "repository"),
+                "owner": str(call.get("owner") or ""),
+                "repository_full_name": str(call.get("repository_full_name") or ""),
+                "subpath": str(call.get("subpath") or ""),
+                "name": action_path,
+                "configuration": {},
+                "tags": {},
+            },
+        )
+
+    def _uses_action_properties(self, full_name: str, call: dict[str, Any], declared_ref: str) -> dict[str, Any]:
+        """The pin, in three states — see `_resolve_action_pin`."""
+        pin_kind, resolved_sha, resolution = self._resolve_action_pin(
+            full_name,
+            str(call.get("kind") or ""),
+            str(call.get("repository_full_name") or ""),
+            declared_ref,
+            str(call.get("pin_kind") or ""),
+        )
+        properties: dict[str, Any] = {
+            "declared_ref": declared_ref,
+            "pin_kind": pin_kind,
+            "is_pinned": is_pinned(pin_kind),
+            "resolution": resolution,
+            "step_indexes": sorted(call["step_indexes"]),
+        }
+        if resolved_sha:
+            properties["resolved_sha"] = resolved_sha
+        return properties
+
+    def _tally_usage(self, action_path: str, properties: dict[str, Any]) -> None:
+        usage = self._usage_tally()
+        usage["actions"].add(action_path)
+        usage["edges"] += 1
+        if not properties["is_pinned"]:
+            usage["unpinned"] += 1
+        if properties["resolution"] == "unobservable":
+            usage["unobservable"] += 1
 
     def _resolve_action_pin(
         self, full_name: str, kind: str, repository_full_name: str, declared_ref: str, parsed_pin: str
