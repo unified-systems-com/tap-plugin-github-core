@@ -67,8 +67,16 @@ extract's own rule); the catalogue is never fetched in a test.
 | `declined` | Not what this product observes; granting widens a leaked key's blast radius for nothing. | reason only |
 | `not_applicable` | Write-only, user-to-server, or enterprise surfaces an organisation-observing installation never uses. | reason only |
 
+**The catalogue is incomplete — two sources, not one.** GitHub's OpenAPI schema omits keys its
+App-settings UI exposes (*observed* 2026-09-02: `repository_advisories`, present in the UI and on the
+App, absent from `app-permissions`). So the ledger has two sources of truth: the pinned catalogue
+(offline, tested) and the **live App's own requested set** (`GET /app` with the App JWT — the
+`verify_app` skill prints the diff: unclassified keys, keys the ledger says not to ask, keys in the
+ask not on the App, and any write level). A key known only from the App carries `catalogue_absent`
+with its evidence.
+
 **Invariants the test enforces:** every catalogue key is classified (fail closed on novelty); every
-ledger key exists in the catalogue (no decisions about nothing); every entry has a reason; levelled
+ledger key exists in the catalogue or carries `catalogue_absent` evidence (no decisions about nothing); every entry has a reason; levelled
 states are `read` and GitHub offers `read` for that key; `requested` ⇔ the skill's `derive_permissions`
 over the manifest (loaded from the skill so there is one derivation of manifest keys); requested
 entries cite real manifest sources.
@@ -78,7 +86,8 @@ entries cite real manifest sources.
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-app-permissions-ledger-1 | Unclassified Fails | Implemented | A key present in the catalogue and absent from the ledger fails the suite naming the key. | The novelty check. |
-| req-github-core-app-permissions-ledger-2 | No Decisions About Nothing | Implemented | A ledger key absent from the catalogue fails. | |
+| req-github-core-app-permissions-ledger-2 | No Decisions About Nothing | Implemented | A ledger key absent from the catalogue fails unless it carries `catalogue_absent` evidence; a key in the catalogue may not carry the marker. | The OpenAPI schema is incomplete; the live App is the second source. |
+| req-github-core-app-permissions-ledger-6 | The Live App Is Diffed | Implemented | `verify_app` prints the App's requested permissions against the ledger: write levels, unclassified keys, keys the ledger declined, keys in the ask not yet on the App. | Observed 2026-09-02: 24 on the App, 0 write, 0 unclassified after `repository_advisories` was added. |
 | req-github-core-app-permissions-ledger-3 | Well-Formed, Read-Only | Implemented | Every entry has a known state and a reason; levelled entries are `read` and GitHub offers `read`; exploratory/deferred name `until`. | |
 | req-github-core-app-permissions-ledger-4 | Manifest ⇔ Ledger | Implemented | The set the skill derives from the manifest equals the ledger's `requested` set, and derives only `read`. | One derivation, reused. |
 | req-github-core-app-permissions-ledger-5 | Requested Cites Sources | Implemented | Every `requested` entry names existing manifest sources. | |
@@ -153,8 +162,10 @@ scheduled check notices when it is stale.
 
 #### Implementation
 
-A scheduled workflow in this repository (weekly; the `nightly-plugins` shape) runs
-`scripts/refresh_openapi_extract.py --check`. On exit 1 it opens (or updates) one issue titled from
+Two sources drift independently. **The catalogue:** a scheduled workflow in this repository
+(weekly; the `nightly-plugins` shape) runs `scripts/refresh_openapi_extract.py --check`. **The App:**
+`verify_app` is run after any App-side change and at boot preflight time (it needs the credential, so
+it cannot be a CI job on this repository); its ledger diff is the check. On exit 1 it opens (or updates) one issue titled from
 the upstream commit, carrying the diff of the `app_permissions` section — never a regenerate, never a
 PR that changes expectations unreviewed. A maintainer refreshes the extract, classifies the new keys
 in the ledger (ledger-1 forces this), and the PR that lands both closes the issue. The same check

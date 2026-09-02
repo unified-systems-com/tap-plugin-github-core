@@ -1,5 +1,5 @@
 {
-  "_comment": "The App-permission LEDGER (spec-github-core-app-permissions.md). Every key GitHub's OpenAPI description enumerates (github_openapi_extract.json → app_permissions, refreshed by scripts/refresh_openapi_extract.py) must appear here in exactly one state: requested (derived from a manifest source — the ONLY way into the App), exploratory (granted on the installed App without a source; must gain one or be dropped — `until` names the resolver), recommended (read; add when its consuming source lands), deferred (a real need behind a feature not on the fence), declined (never, with the reason), not_applicable (write-only, user-to-server, enterprise). No entry may request write. A key GitHub adds is UNCLASSIFIED and fails tests/test_app_permission_ledger.py — that is the 'have they added permissions we should consider' check, made mechanical. Hand-maintained; the test enforces completeness and consistency with the manifest.",
+  "_comment": "The App-permission LEDGER (spec-github-core-app-permissions.md). Every key GitHub's OpenAPI description enumerates (github_openapi_extract.json → app_permissions, refreshed by scripts/refresh_openapi_extract.py) must appear here in exactly one state: requested (derived from a manifest source — the ONLY way into the App), exploratory (granted on the installed App without a source; must gain one or be dropped — `until` names the resolver), recommended (read; add when its consuming source lands), deferred (a real need behind a feature not on the fence), declined (never, with the reason), not_applicable (write-only, user-to-server, enterprise). No entry may request write. A key GitHub adds is UNCLASSIFIED and fails tests/test_app_permission_ledger.py — that is the 'have they added permissions we should consider' check, made mechanical. Hand-maintained; the test enforces completeness and consistency with the manifest. Keys GitHub exposes in the UI but omits from the OpenAPI schema (observed 2026-09-02: repository_advisories) carry `catalogue_absent` with the evidence; the verify_app skill diffs the LIVE App's permissions against this ledger, which is the second drift source.",
   "reviewed": "2026-09-02",
   "permissions": {
     "actions": {
@@ -259,6 +259,12 @@
       "state": "recommended",
       "level": "read",
       "why": "Pull requests, reviews, approvals: the admission gate's subject; waiting-on-me and why-isn't-this-merging."
+    },
+    "repository_advisories": {
+      "state": "recommended",
+      "level": "read",
+      "catalogue_absent": "Present in GitHub's App-settings UI as 'Repository security advisories' and on the App (observed via GET /app, 2026-09-02); ABSENT from components.schemas.app-permissions in the OpenAPI description. The catalogue is incomplete; the live App is the second source.",
+      "why": "Repository security advisories and private vulnerability reports — the intake side of processing a security incident, alongside Dependabot and secret-scanning alerts. Added by George 2026-09-02; kept."
     },
     "repository_custom_properties": {
       "state": "recommended",

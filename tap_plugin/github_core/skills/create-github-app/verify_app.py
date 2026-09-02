@@ -85,6 +85,29 @@ def describe_missing_app(envelope: dict) -> str:
     return f"envelope kind {kind!r} carries no GitHub App (app_id + private_key)"
 
 
+_LEDGER_PATH = Path(__file__).resolve().parents[2] / "collectors" / "github_collector" / "github_app_permissions.json"
+
+
+def _ledger_diff(app: dict) -> None:
+    """Print how the App's requested permissions compare to the ledger's decisions."""
+    granted = app.get("permissions") or {}
+    try:
+        ledger = json.loads(_LEDGER_PATH.read_text()).get("permissions", {})
+    except (OSError, ValueError) as exc:
+        print(f"    ledger                              NOT READ ({exc}) — cannot compare")
+        return
+    ask = {k for k, e in ledger.items() if e.get("state") in {"requested", "recommended", "exploratory"}}
+    print(f"    App-level permissions               {len(granted)} requested by the App")
+    writes = {k: lvl for k, lvl in granted.items() if lvl != "read"}
+    unclassified = sorted(set(granted) - set(ledger))
+    beyond = sorted(k for k in set(granted) - ask if k in ledger)
+    missing = sorted(ask - set(granted))
+    print(f"    WRITE on the App                    {writes or 'none'}")
+    print(f"    on the App, UNCLASSIFIED in ledger  {unclassified or 'none'}")
+    print(f"    on the App, ledger says not to ask  {beyond or 'none'}")
+    print(f"    in the ledger's ask, not on the App {missing or 'none'}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--secrets-root", type=Path,
@@ -113,6 +136,11 @@ def main() -> int:
     print("  chain")
     jwt = mint_jwt(d["app"]["app_id"], d["app"]["private_key"])
     status, app = call(f"{api}/app", jwt)
+    # The App's own requested set, held against the ledger (github_app_permissions.json,
+    # spec-github-core-app-permissions.md). GitHub's OpenAPI catalogue is incomplete, so the
+    # live App is the second drift source: a key here that the ledger has not classified, or
+    # a write level anywhere, is reported — never silently accepted.
+    _ledger_diff(app if isinstance(app, dict) else {})
     print(f"    JWT -> /app                         {status} {app.get('slug') if status == 200 else app}")
     if status != 200:
         return 1

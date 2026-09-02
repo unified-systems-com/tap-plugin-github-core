@@ -64,10 +64,17 @@ def test_every_catalogue_key_is_classified() -> None:
 
 
 @pytest.mark.spec("req-github-core-app-permissions-ledger-2")
-def test_every_ledger_key_exists_in_the_catalogue() -> None:
-    """A ledger entry GitHub no longer publishes is a decision about nothing — surface it."""
-    stale = sorted(set(_entries()) - set(_catalogue()))
-    assert not stale, f"Ledger names permission(s) GitHub's catalogue no longer has: {stale}."
+def test_every_ledger_key_exists_in_the_catalogue_or_is_marked_absent() -> None:
+    """A ledger entry GitHub no longer publishes is a decision about nothing — surface it.
+
+    The OpenAPI catalogue is INCOMPLETE (observed 2026-09-02: `repository_advisories` exists in
+    the App-settings UI and on the App, not in the schema), so a key may be carried with
+    `catalogue_absent` naming the evidence; a key in the catalogue must not carry the marker."""
+    for key, entry in _entries().items():
+        in_catalogue = key in _catalogue()
+        marked = bool(entry.get("catalogue_absent"))
+        assert in_catalogue or marked, f"Ledger names {key!r}, which GitHub's catalogue does not have and no `catalogue_absent` evidence explains."
+        assert not (in_catalogue and marked), f"{key!r}: in the catalogue, yet marked catalogue_absent — drop the marker."
 
 
 @pytest.mark.spec("req-github-core-app-permissions-ledger-3")
@@ -75,7 +82,7 @@ def test_entries_are_well_formed() -> None:
     for key, entry in _entries().items():
         assert entry.get("state") in _STATES, f"{key}: state {entry.get('state')!r} not in {sorted(_STATES)}"
         assert entry.get("why"), f"{key}: a classification without a reason is a presence, not a decision"
-        levels = _catalogue()[key]["levels"]
+        levels = _catalogue().get(key, {}).get("levels", ["read"])   # absent-from-catalogue keys: read assumed, evidenced
         if entry["state"] in _LEVELLED:
             assert entry.get("level") == "read", f"{key}: only read may be requested/recommended (got {entry.get('level')!r})"
             assert "read" in levels, f"{key}: GitHub offers no read level ({levels}); it cannot be a read-only ask"
