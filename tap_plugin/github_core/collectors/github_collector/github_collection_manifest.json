@@ -205,6 +205,19 @@
       "description": "Ruleset DETAIL, fetched once per ruleset per run and cached across the repos it protects (req-github-core-rulesets). The config-layer query already says which rulesets apply; this is the only place each rule's PARAMETERS live, including the required status-check contexts a gate view needs. Whether the response carries a `bypass_actors` key is itself the observability signal: GitHub returns it only to a caller with WRITE access to the ruleset, which this read-only credential deliberately does not have."
     },
     {
+      "name": "status_checks",
+      "kind": "custom_fn",
+      "path": "derived from rulesets (rules[].parameters.required_status_checks) and workflow_yaml (job display names)",
+      "target_entity_type": "github_core__status_check",
+      "fields": [
+        "owner_login",
+        "context"
+      ],
+      "permission": "repository:administration:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Required check contexts (req-github-core-status-checks): one node per (owner, context) named by any ruleset's required_status_checks rule, from the REST ruleset detail the `rulesets` source already fetches — so this widens nothing. A ruleset whose detail was refused carries a type-only rule with no contexts; those are COUNTED as not observable and mint nothing, never rendered as a ruleset without required checks. PRODUCES_CHECK is derived toward these nodes from workflow job display names (exact, or the matrix template) when the requirement allows an Actions check; a check nobody requires has no node."
+    },
+    {
       "name": "environments",
       "kind": "custom_fn",
       "path": "POST /graphql (repository.environments)",
@@ -469,6 +482,18 @@
       "source": "github_core__git_ref",
       "target": "github_core__git_commit",
       "condition": "the ref's head commit carried a commit slice in the config layer"
+    },
+    {
+      "slug": "REQUIRES_CHECK__github_core",
+      "source": "github_core__github_ruleset",
+      "target": "github_core__status_check",
+      "condition": "a required_status_checks rule with parameters on the ruleset detail"
+    },
+    {
+      "slug": "PRODUCES_CHECK__github_core",
+      "source": "github_core__github_workflow",
+      "target": "github_core__status_check",
+      "condition": "a declared job's display name equals a required context (or is its matrix template) and the requirement's integration is null or GitHub Actions (15368)"
     }
   ]
 }

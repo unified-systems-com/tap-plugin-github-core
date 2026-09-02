@@ -55,6 +55,7 @@ from .identity import (
     ruleset_id,
     rule_suite_id,
     run_id,
+    status_check_id,
     ruleset_id,
     runner_id,
     uses_action_edge_id,
@@ -127,10 +128,29 @@ _SITE_WORKFLOW_TRIGGERS = "3025"
 _SITE_ARTIFACTS_DEGRADED = "eef3"
 _SITE_ARTIFACTS_TRUNCATED = "8e7f"
 _SITE_ARTIFACTS_COLLECTED = "933f"
+_SITE_REQUIRED_CHECKS_UNOBSERVABLE = "d66c 9409 "
+_SITE_STATUS_CHECKS = ""
+
+#: GitHub Actions' own App id — the integration that produces a workflow job's check run.
+_GITHUB_ACTIONS_INTEGRATION_ID = 15368
 
 #: The dimension keys that scope an envelope to ONE repository. Stripped from a node shared
 #: across the scope (an action, an app), kept on the edges that use it.
 _REPO_SCOPED_DIMENSION_KEYS = ("github.owner", "github.repo")
+
+
+def _check_name_confidence(job_name: str, context: str) -> str | None:
+    """How a declared job's display name relates to a required check context, or None.
+
+    A GitHub Actions check run is named after the job's display name; a matrix job expands it
+    to `name (value, …)`. The template is a prefix, not the context, so it is reported as
+    `matrix_template` rather than claimed as a match.
+    """
+    if job_name == context:
+        return "exact"
+    if context.startswith(f"{job_name} (") and context.endswith(")"):
+        return "matrix_template"
+    return None
 
 
 def _group_action_calls(action_refs: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
@@ -580,6 +600,9 @@ class GithubCollector(CollectorBase):
         self._pending_calls: list[dict[str, Any]] = []
         self._pending_triggers: list[dict[str, Any]] = []
         self._collected_repos: set[str] = set()
+        self._required_checks: dict[tuple[str, str], dict[str, Any]] = {}
+        self._job_names: list[dict[str, Any]] = []
+        self._checks_unobservable: list[dict[str, Any]] = []
 
         # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope)
         owner = collection_owner(data)
@@ -689,6 +712,7 @@ class GithubCollector(CollectorBase):
         # Workflow-to-workflow reach, now that every workflow in scope has an id.
         self._emit_workflow_calls(edges)
         self._emit_workflow_triggers(edges)
+        self._emit_status_checks(nodes, edges)
 
         nodes, node_dupes = self._collapse_by_entity_id(nodes)
         edges, edge_dupes = self._collapse_by_entity_id(edges)
@@ -1408,6 +1432,9 @@ class GithubCollector(CollectorBase):
             )
             self._emit_protected_refs(ruleset, rs_uuid, full_name, ref_uuid_by_ref, rules_dims, edges)
             self._emit_bypass_edges(ruleset, rs_uuid, observability, rules_dims, nodes, edges)
+            self._register_required_checks(
+                owner, rs_uuid, ruleset["name"], list((detail or {}).get("rules") or ruleset["rules"]), ruleset_dims
+            )
             if observability["state"] == "unobservable":
                 self.record_warn(
                     _SITE_RULESET_BYPASS_UNOBSERVABLE,
@@ -1736,6 +1763,16 @@ class GithubCollector(CollectorBase):
                 continue
             job_uuid = workflow_job_id(full_name, workflow_id_int, job_key)
             uuid_by_key[job_key] = job_uuid
+            self._walk_state()["job_names"].append(
+                {
+                    "owner": full_name.partition("/")[0],
+                    "repo": full_name,
+                    "wf_uuid": wf_uuid,
+                    "job_key": job_key,
+                    "job_name": str(job.get("name") or job_key),
+                    "dims": {**declared_dims, "github.surface": "actions"},
+                }
+            )
             job_envelope = node_envelope(
                     entity_id=job_uuid,
                     entity_type="github_core__workflow_job",
@@ -1959,12 +1996,21 @@ class GithubCollector(CollectorBase):
             self._pending_calls = []
             self._pending_triggers = []
             self._collected_repos = set()
+            # Required check contexts by (owner, context) -> the requirements that name them;
+            # every declared job's display name; and the rulesets whose contexts could not be
+            # read. All three feed `_emit_status_checks` after the whole scope is walked.
+            self._required_checks = {}
+            self._job_names = []
+            self._checks_unobservable = []
         return {
             "by_path": self._workflow_uuid_by_path,
             "by_name": self._workflow_uuids_by_name,
             "pending_calls": self._pending_calls,
             "pending_triggers": self._pending_triggers,
             "collected_repos": self._collected_repos,
+            "required_checks": self._required_checks,
+            "job_names": self._job_names,
+            "checks_unobservable": self._checks_unobservable,
         }
 
     def _register_workflow(
@@ -2129,6 +2175,129 @@ class GithubCollector(CollectorBase):
                 message_data={"repo": pending["repo"], "unresolved": unresolved},
             )
         return emitted, unresolved
+
+    def _register_required_checks(
+        self, owner: str, rs_uuid: Any, ruleset_name: str, rules: list[dict[str, Any]], dims: dict[str, str]
+    ) -> None:
+        """Record every context a ruleset's `required_status_checks` rule names — or that it
+        names some and the credential could not read which.
+
+        A rule with no `parameters` is the type-only GraphQL fallback: the detail was refused, the
+        contexts are NOT observable, and the ruleset is counted rather than read as requiring
+        nothing.
+        """
+        state = self._walk_state()
+        for rule in rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            params = rule.get("parameters")
+            if not isinstance(params, dict):
+                state["checks_unobservable"].append({"ruleset": ruleset_name, "owner": owner})
+                continue
+            for check in params.get("required_status_checks") or []:
+                context = str((check or {}).get("context") or "")
+                if not context:
+                    continue
+                entry = state["required_checks"].setdefault(
+                    (owner, context), {"dims": dims, "requirements": {}}
+                )
+                entry["requirements"][str(rs_uuid)] = {
+                    "rs_uuid": rs_uuid,
+                    "integration_id": (check or {}).get("integration_id"),
+                    "strict": bool(params.get("strict_required_status_checks_policy", False)),
+                    "do_not_enforce_on_create": bool(params.get("do_not_enforce_on_create", False)),
+                }
+
+    def _emit_status_checks(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+        """One `status_check` per required (owner, context); `REQUIRES_CHECK` from each ruleset
+        naming it; `PRODUCES_CHECK` from each workflow in the owner's scope declaring a job whose
+        display name is the context (`exact`) or its matrix template — only when the
+        requirement admits an Actions-produced check.
+        """
+        state = self._walk_state()
+        produced = 0
+        unproduced: list[str] = []
+        for (owner, context), entry in sorted(state["required_checks"].items()):
+            check_uuid = status_check_id(owner, context)
+            nodes.append(
+                node_envelope(
+                    entity_id=check_uuid,
+                    entity_type="github_core__status_check",
+                    name=context,
+                    dimensions=entry["dims"],
+                    fields={"owner_login": owner, "context": context, "name": context, "configuration": {}, "tags": {}},
+                )
+            )
+            actions_may_produce = False
+            for requirement in entry["requirements"].values():
+                integration = requirement["integration_id"]
+                actions_may_produce |= integration is None or integration == _GITHUB_ACTIONS_INTEGRATION_ID
+                edges.append(
+                    self._edge(
+                        "REQUIRES_CHECK__github_core",
+                        requirement["rs_uuid"],
+                        check_uuid,
+                        entry["dims"],
+                        {
+                            "integration_id": integration,
+                            "strict": requirement["strict"],
+                            "do_not_enforce_on_create": requirement["do_not_enforce_on_create"],
+                        },
+                    )
+                )
+            if not actions_may_produce:
+                continue
+            producers = self._check_producers(owner, context, check_uuid, edges)
+            produced += producers
+            if not producers:
+                unproduced.append(f"{owner}#{context}")
+        for gap in state["checks_unobservable"]:
+            self.record_warn(
+                _SITE_REQUIRED_CHECKS_UNOBSERVABLE,
+                "REQUIRED_CHECKS_UNOBSERVABLE",
+                f"{gap['owner']}: ruleset {gap['ruleset']!r} requires status checks, but WHICH is not observable — "
+                f"the ruleset detail was refused and only the rule type is known. No status_check node was "
+                f"minted; this is not a ruleset with no required checks.",
+                message_data=gap,
+            )
+        if state["required_checks"] or state["checks_unobservable"]:
+            self.record_info(
+                _SITE_STATUS_CHECKS,
+                "STATUS_CHECKS",
+                f"{len(state['required_checks'])} required check context(s), {produced} producer edge(s) from "
+                f"workflow jobs, {len(unproduced)} Actions-producible context(s) with no declared producer in "
+                f"scope ({', '.join(unproduced[:5])}{'…' if len(unproduced) > 5 else ''}), "
+                f"{len(state['checks_unobservable'])} ruleset(s) whose required contexts could not be read.",
+                message_data={
+                    "contexts": len(state["required_checks"]),
+                    "producers": produced,
+                    "unproduced": unproduced,
+                    "unobservable": len(state["checks_unobservable"]),
+                },
+            )
+
+    def _check_producers(self, owner: str, context: str, check_uuid: Any, edges: list[dict[str, Any]]) -> int:
+        """`PRODUCES_CHECK` from every workflow (in the owner's scope) with a job named for the context."""
+        emitted = 0
+        seen: set[tuple[str, str]] = set()
+        for job in self._walk_state()["job_names"]:
+            if job["owner"] != owner:
+                continue
+            confidence = _check_name_confidence(job["job_name"], context)
+            if confidence is None or (str(job["wf_uuid"]), job["job_key"]) in seen:
+                continue
+            seen.add((str(job["wf_uuid"]), job["job_key"]))
+            edges.append(
+                self._edge(
+                    "PRODUCES_CHECK__github_core",
+                    job["wf_uuid"],
+                    check_uuid,
+                    job["dims"],
+                    {"job_key": job["job_key"], "job_name": job["job_name"], "confidence": confidence},
+                )
+            )
+            emitted += 1
+        return emitted
 
     def _usage_tally(self) -> dict[str, Any]:
         """The run's action tally, created on first touch.

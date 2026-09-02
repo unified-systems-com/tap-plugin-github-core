@@ -79,6 +79,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-workflow-chains | [Workflow Chains](#workflow-chains) | In Development | 2026-09-02 (github-core#29, #52): `CALLS_WORKFLOW` (job → reusable workflow, the `USES_ACTION` pin grammar + `secrets_inherit`) and `TRIGGERS_WORKFLOW` (completing → triggered, from `on.workflow_run`), both resolved in a post-pass over the whole scope; an unresolved callee or name is recorded on the node, never fabricated. |
 | req-github-core-artifacts | [Artifacts](#artifacts) | In Development | 2026-09-02 (github-core#55): `actions_artifact` from the repository listing (newest first, capped, total reported) joined by `UPLOADS_ARTIFACT` from the producing run when it is in the batch; `expired` observed, never inferred (shape C). Declared upload/download steps on the job; no download edge — GitHub keeps no record of downloads. |
 | req-github-core-commits | [Commits](#commits) | In Development | 2026-09-02 (github-core#57): `git_commit` keyed on repository + SHA (the verification record is network-scoped), sliced to identity-as-observed and signature state from a `CommitSlice` fragment on the config-layer refs query (no extra request, no extra permission — measured); `POINTS_AT` from each ref, property-free. `signature: null` is `unsigned`; a degraded field is pruned and lands as `unobservable`. |
+| req-github-core-status-checks | [Status Checks](#status-checks) | In Development | 2026-09-02 (github-core#61): `status_check` keyed `<owner>#<context>` from the ruleset detail's `required_status_checks` parameters; `REQUIRES_CHECK` with the rule's qualifiers; `PRODUCES_CHECK` derived from job display names with stated confidence, only toward required contexts an Actions job may produce. A refused detail is counted as not observable, never as no requirement. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -648,6 +649,43 @@ under additive-only collection the old edge lingers, and reconciliation, not a f
 | req-github-core-commits-2 | Signature In Three States | In Development | A signed commit stores GitHub's `state`, kind, validity and signer; `signature: null` stores `unsigned` with `signature_valid: null`; a `signature` key pruned for a field error stores `unobservable`; a ref whose commit slice is absent emits no commit and no edge. | Never false for unsigned or unobservable. |
 | req-github-core-commits-3 | Identity As Observed | In Development | `author_login` / `committer_login` are set only when GitHub resolved the email to an account; the raw name and email are kept alongside. | |
 | req-github-core-commits-4 | No Extra Request Or Permission | In Development | The slice rides the config-layer refs query; the manifest declares `repository:contents:read`, already in the union, and the conformance extract carries the traversed `Commit`, `GitActor` and `GitSignature` fields. | |
+
+### Status Checks
+----
+RID: `req-github-core-status-checks`
+Status: `In Development`
+
+The convergence node between the gate and the machinery (github-core#61). A ruleset's
+`required_status_checks` rule names contexts that must pass; a workflow's job, named the same,
+produces them. `status_check` is keyed **`<owner>#<context>`** — owner-scoped like the ruleset,
+because an organization requirement spans every repository it protects — and **a check nobody
+requires has no node**: every job produces a check run, and one node per job would drown the
+convergence in leaves. The node is the requirement's target; producers are derived toward it.
+
+`REQUIRES_CHECK` (ruleset → check) carries the rule's own qualifiers — `integration_id` (null means
+any source may satisfy it), `strict` and `do_not_enforce_on_create` — and not the corpus's
+`enforcement`, which is a field on the ruleset node. `PRODUCES_CHECK` (workflow → check) is
+**derived from job display names and says so**: `confidence: exact` when the declared name equals
+the context, `matrix_template` when the context is the declared name plus a parenthesised matrix
+expansion. It is emitted only where a requirement admits an Actions-produced check (`integration_id`
+null or 15368); an App's check has the node and the requirement and no producer, pending the App's
+numeric id on the grid.
+
+**The type-only fallback is the state that must not read as "none".** The ruleset detail is
+administration-gated and degrades; when refused, `rules` come from the GraphQL config layer with
+types only, so the contexts are NOT observable. Such a ruleset mints no node, warns
+`REQUIRED_CHECKS_UNOBSERVABLE`, and is counted in the `STATUS_CHECKS` summary — which also lists the
+Actions-producible contexts with no declared producer anywhere in scope. Both resolve in the
+post-pass after the whole scope is walked.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-status-checks-1 | One Node Per Required Context | In Development | Every context named by any ruleset's `required_status_checks` parameters lands as one `status_check` per (owner, context) with a `REQUIRES_CHECK` from each ruleset naming it, carrying the rule's qualifiers. | |
+| req-github-core-status-checks-2 | Unreadable Requirements Are Counted | In Development | A `required_status_checks` rule with no parameters (the type-only fallback) mints nothing, warns per ruleset, and is counted in the run summary. | Shape E. |
+| req-github-core-status-checks-3 | Producers Derived With Stated Confidence | In Development | `PRODUCES_CHECK` from a workflow whose job display name equals the context (`exact`) or is its matrix template (`matrix_template`), only where a requirement admits an Actions check; the summary lists producible contexts with no producer. | |
+| req-github-core-status-checks-4 | No Extra Request Or Permission | In Development | Both edges derive from the `rulesets` and `workflow_yaml` sources already in the manifest. | |
 
 ### Refs
 ----

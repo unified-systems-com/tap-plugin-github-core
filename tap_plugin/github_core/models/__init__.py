@@ -15,6 +15,7 @@ from tap_plugin.github_core.models.github_platform import GithubPlatform
 from tap_plugin.github_core.models.github_repository import GithubRepository
 from tap_plugin.github_core.models.github_ruleset import GithubRuleset
 from tap_plugin.github_core.models.rule_suite import RuleSuite
+from tap_plugin.github_core.models.status_check import StatusCheck
 from tap_plugin.github_core.models.github_runner import GithubRunner
 from tap_plugin.github_core.models.github_workflow import GithubWorkflow
 from tap_plugin.github_core.models.workflow_job import WorkflowJob
@@ -35,6 +36,7 @@ __all__ = [
     "GithubRepository",
     "GithubRuleset",
     "RuleSuite",
+    "StatusCheck",
     "GithubRunner",
     "GithubWorkflow",
     "WorkflowJob",

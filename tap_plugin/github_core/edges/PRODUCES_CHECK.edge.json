@@ -1,0 +1,43 @@
+{
+  "slug": "PRODUCES_CHECK__github_core",
+  "name": "Produces Check",
+  "description": "A workflow declares a job whose check run carries a context some ruleset requires — the machinery that satisfies the gate. DERIVED from job display names, and honest about it: `confidence` says whether the declared name equals the context or is the template a matrix job expands into. Emitted only toward contexts a rule requires and only when the requirement allows an Actions-produced check (integration null or 15368); a required Actions context with no producer in a repository is visible as a check node with no inbound edge from that repository's workflows.",
+  "sources": [
+    "github_core__github_workflow"
+  ],
+  "targets": [
+    "github_core__status_check"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "required": [
+      "job_key",
+      "job_name",
+      "confidence"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "job_key": {
+        "type": "string",
+        "description": "The YAML key of the job whose check run carries the context."
+      },
+      "job_name": {
+        "type": "string",
+        "description": "The job's display name as declared — the string GitHub names the check run with."
+      },
+      "confidence": {
+        "type": "string",
+        "enum": [
+          "exact",
+          "matrix_template"
+        ],
+        "description": "`exact`: the declared display name equals the required context. `matrix_template`: the context is the declared name followed by a parenthesised matrix expansion (`test (3.12)` for a job named `test`), so the producer is inferred from the template, not observed as the context."
+      }
+    }
+  }
+}
