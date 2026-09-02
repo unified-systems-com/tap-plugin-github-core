@@ -34,11 +34,17 @@ mint_jwt = collector_modules.load("app_jwt").mint_jwt
 normalize_credentials = collector_modules.load("credential_shape").normalize_credentials
 
 
-def call(url: str, token: str, *, scheme: str = "Bearer", method: str = "GET") -> tuple[int, object]:
+def call(
+    url: str, token: str, *, scheme: str = "Bearer", method: str = "GET"
+) -> tuple[int, object]:
     request = urllib.request.Request(
-        url, method=method,
-        headers={"Authorization": f"{scheme} {token}", "Accept": "application/vnd.github+json",
-                 "User-Agent": "tap-github-core"},
+        url,
+        method=method,
+        headers={
+            "Authorization": f"{scheme} {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "tap-github-core",
+        },
     )
     try:
         # nosec B310 — every caller builds `url` from the validate_api_base_url()'d base.
@@ -81,11 +87,18 @@ def describe_missing_app(envelope: dict) -> str:
         return f"envelope kind {kind!r} has no `data` object"
     data = _folded(envelope)
     if data.get("pat"):
-        return f"envelope kind {kind!r} carries a personal access token but no GitHub App"
+        return (
+            f"envelope kind {kind!r} carries a personal access token but no GitHub App"
+        )
     return f"envelope kind {kind!r} carries no GitHub App (app_id + private_key)"
 
 
-_LEDGER_PATH = Path(__file__).resolve().parents[2] / "collectors" / "github_collector" / "github_app_permissions.json"
+_LEDGER_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "collectors"
+    / "github_collector"
+    / "github_app_permissions.json"
+)
 
 
 def _ledger_diff(app: dict) -> None:
@@ -94,10 +107,18 @@ def _ledger_diff(app: dict) -> None:
     try:
         ledger = json.loads(_LEDGER_PATH.read_text()).get("permissions", {})
     except (OSError, ValueError) as exc:
-        print(f"    ledger                              NOT READ ({exc}) — cannot compare")
+        print(
+            f"    ledger                              NOT READ ({exc}) — cannot compare"
+        )
         return
-    ask = {k for k, e in ledger.items() if e.get("state") in {"requested", "recommended", "exploratory"}}
-    print(f"    App-level permissions               {len(granted)} requested by the App")
+    ask = {
+        k
+        for k, e in ledger.items()
+        if e.get("state") in {"requested", "recommended", "exploratory"}
+    }
+    print(
+        f"    App-level permissions               {len(granted)} requested by the App"
+    )
     writes = {k: lvl for k, lvl in granted.items() if lvl != "read"}
     unclassified = sorted(set(granted) - set(ledger))
     beyond = sorted(k for k in set(granted) - ask if k in ledger)
@@ -110,11 +131,16 @@ def _ledger_diff(app: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--secrets-root", type=Path,
-                    default=Path(os.environ.get("TAP_SECRETS_ROOT", "/run/tap-secrets")))
+    ap.add_argument(
+        "--secrets-root",
+        type=Path,
+        default=Path(os.environ.get("TAP_SECRETS_ROOT", "/run/tap-secrets")),
+    )
     args = ap.parse_args()
 
-    envelope = json.loads((args.secrets_root / "github_core" / "collector.secret.json").read_text())
+    envelope = json.loads(
+        (args.secrets_root / "github_core" / "collector.secret.json").read_text()
+    )
     d = app_credentials(envelope)
     if d is None:
         print(f"  {describe_missing_app(envelope)} — nothing to verify")
@@ -122,12 +148,16 @@ def main() -> int:
     if not d.get("owner"):
         # A legacy repos-only envelope is valid for collection but cannot be verified: `owner`
         # is what selects the installation to mint a token for.
-        print("  envelope names no `owner` — verification needs the account whose installation to mint for")
+        print(
+            "  envelope names no `owner` — verification needs the account whose installation to mint for"
+        )
         return 1
     # Same control as create_app.py: the envelope is operator-written, but a mistyped or
     # tampered base URL here would carry a live installation token to it.
     try:
-        api = api_url.validate_api_base_url(d.get("api_base_url") or "https://api.github.com")
+        api = api_url.validate_api_base_url(
+            d.get("api_base_url") or "https://api.github.com"
+        )
     except ValueError as exc:
         print(f"  envelope api_base_url rejected: {exc}")
         return 1
@@ -141,28 +171,44 @@ def main() -> int:
     # live App is the second drift source: a key here that the ledger has not classified, or
     # a write level anywhere, is reported — never silently accepted.
     _ledger_diff(app if isinstance(app, dict) else {})
-    print(f"    JWT -> /app                         {status} {app.get('slug') if status == 200 else app}")
+    print(
+        f"    JWT -> /app                         {status} {app.get('slug') if status == 200 else app}"
+    )
     if status != 200:
         return 1
 
     status, installs = call(f"{api}/app/installations", jwt)
-    print(f"    JWT -> /app/installations           {status} {len(installs) if status == 200 else installs} installation(s)")
+    print(
+        f"    JWT -> /app/installations           {status} {len(installs) if status == 200 else installs} installation(s)"
+    )
     if status != 200 or not installs:
         print("    NOT INSTALLED — install it, then re-run")
         return 1
-    match = next((i for i in installs if i["account"]["login"].lower() == owner.lower()), installs[0])
+    match = next(
+        (i for i in installs if i["account"]["login"].lower() == owner.lower()),
+        installs[0],
+    )
     inst_id, sel = match["id"], match.get("repository_selection")
-    print(f"    installation {inst_id} on {match['account']['login']} (repository_selection={sel})")
+    print(
+        f"    installation {inst_id} on {match['account']['login']} (repository_selection={sel})"
+    )
 
     request = urllib.request.Request(
-        f"{api}/app/installations/{inst_id}/access_tokens", method="POST",
-        headers={"Authorization": f"Bearer {jwt}", "Accept": "application/vnd.github+json",
-                 "User-Agent": "tap-github-core"})
+        f"{api}/app/installations/{inst_id}/access_tokens",
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {jwt}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "tap-github-core",
+        },
+    )
     # nosec B310 — `api` came from validate_api_base_url() above.
     with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
         token_payload = json.loads(response.read().decode("utf-8"))
     token = token_payload["token"]
-    print(f"    installation token                  expires {token_payload['expires_at']}")
+    print(
+        f"    installation token                  expires {token_payload['expires_at']}"
+    )
     print(f"    granted permissions                 {token_payload.get('permissions')}")
 
     print("\n  probes (what the credential can actually reach)")
@@ -170,12 +216,19 @@ def main() -> int:
         ("repos (metadata)", f"{api}/orgs/{owner}/repos?per_page=1"),
         ("installation repos", f"{api}/installation/repositories?per_page=1"),
         ("org installations", f"{api}/orgs/{owner}/installations"),
-        ("PAT grants  [App-only]", f"{api}/orgs/{owner}/personal-access-tokens?per_page=1"),
+        (
+            "PAT grants  [App-only]",
+            f"{api}/orgs/{owner}/personal-access-tokens?per_page=1",
+        ),
         ("org members", f"{api}/orgs/{owner}/members?per_page=1"),
     ]
     for label, url in probes:
         status, body = call(url, token)
-        n = len(body) if isinstance(body, list) else (body.get("total_count") if isinstance(body, dict) else "")
+        n = (
+            len(body)
+            if isinstance(body, list)
+            else (body.get("total_count") if isinstance(body, dict) else "")
+        )
         print(f"    {label:<28} {status} {n if status == 200 else str(body)[:70]}")
 
     # The question the corpus flagged: is bypass visibility better, worse, or equal to a PAT?
@@ -183,12 +236,18 @@ def main() -> int:
     if status == 200 and repos:
         full = repos[0]["full_name"]
         status, rulesets = call(f"{api}/repos/{full}/rulesets", token)
-        print(f"    rulesets on {full:<16} {status} {len(rulesets) if status == 200 else rulesets}")
+        print(
+            f"    rulesets on {full:<16} {status} {len(rulesets) if status == 200 else rulesets}"
+        )
         if status == 200 and rulesets:
-            status, detail = call(f"{api}/repos/{full}/rulesets/{rulesets[0]['id']}", token)
+            status, detail = call(
+                f"{api}/repos/{full}/rulesets/{rulesets[0]['id']}", token
+            )
             seen = isinstance(detail, dict) and "bypass_actors" in detail
-            print(f"    bypass_actors visible to the App    {status} {seen}"
-                  f"{' -> ' + str(detail.get('bypass_actors')) if seen else ''}")
+            print(
+                f"    bypass_actors visible to the App    {status} {seen}"
+                f"{' -> ' + str(detail.get('bypass_actors')) if seen else ''}"
+            )
     return 0
 
 
