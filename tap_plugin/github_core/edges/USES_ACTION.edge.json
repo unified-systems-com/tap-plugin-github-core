@@ -30,7 +30,14 @@
       },
       "pin_kind": {
         "type": "string",
-        "enum": ["sha", "digest", "tag", "branch", "unresolved", "unpinned"],
+        "enum": [
+          "sha",
+          "digest",
+          "tag",
+          "branch",
+          "unresolved",
+          "unpinned"
+        ],
         "description": "What kind of thing the declared ref is. `sha` and `digest` are immutable and provable from the string alone. `tag` and `branch` are mutable names whose kind was RESOLVED against the action repository's refs (only possible when that repository is inside the observed scope). `unresolved` is a mutable name whose kind could not be established — the honest value for `actions/checkout@v4` on almost every grid, never guessed as `tag`. `unpinned` means no ref was written."
       },
       "is_pinned": {
@@ -43,14 +50,93 @@
       },
       "resolution": {
         "type": "string",
-        "enum": ["literal", "in_scope", "unobservable"],
+        "enum": [
+          "literal",
+          "in_scope",
+          "unobservable"
+        ],
         "description": "How `pin_kind` and `resolved_sha` were established. `literal`: read off the string (a SHA or digest). `in_scope`: resolved against refs the collector holds for the action's own repository. `unobservable`: the action lives outside the observed scope and no call was made to look — absence of a resolved SHA here is NOT evidence of anything."
       },
       "step_indexes": {
         "type": "array",
-        "items": {"type": "integer"},
+        "items": {
+          "type": "integer"
+        },
         "description": "Every step position in the job that uses this action at this ref, in file order. Steps are not nodes (rejected on the node test), so this is where a step-level fact lives."
       }
-    }
+    },
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "pin_kind": {
+              "enum": [
+                "sha",
+                "digest"
+              ]
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "is_pinned": {
+              "const": true
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "is_pinned": {
+              "const": false
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "pin_kind": {
+              "enum": [
+                "tag",
+                "branch"
+              ]
+            },
+            "resolution": {
+              "const": "in_scope"
+            }
+          },
+          "required": [
+            "resolution"
+          ]
+        },
+        "then": {
+          "required": [
+            "resolved_sha"
+          ]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "resolution": {
+              "const": "unobservable"
+            }
+          }
+        },
+        "then": {
+          "not": {
+            "required": [
+              "resolved_sha"
+            ]
+          },
+          "properties": {
+            "pin_kind": {
+              "const": "unresolved"
+            }
+          }
+        }
+      }
+    ],
+    "description": "The pin, with its internal consistency enforced: `is_pinned` is DERIVED from `pin_kind` and the schema refuses a contradiction (an `unresolved` pin claiming `is_pinned: true` is exactly the false-reassurance shape this edge exists to prevent); an `unobservable` resolution can only carry `unresolved` and no `resolved_sha`; an in-scope tag or branch must say what it resolved to."
   }
 }

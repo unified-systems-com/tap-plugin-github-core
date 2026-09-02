@@ -27,6 +27,7 @@ from tap_plugin.github_core.collectors.github_collector.parser import (
     split_uses,
 )
 
+from tap_grid.exceptions import EdgePropertyValidationError
 from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_edge, create_node
@@ -101,6 +102,22 @@ class TestSplitUses:
         assert tag["pin_kind"] == "tag" and tag["ref"] == "1.2" and not is_pinned("tag")
         assert tag["action_path"] == "docker://ghcr.io/org/image"
         assert tag["owner"] == "" and tag["repository_full_name"] == ""
+
+    def test_a_malformed_digest_is_not_a_pin(self) -> None:
+        """`sha256:` proves nothing without 64 hex characters after it (PR #51 review)."""
+        assert split_uses("docker://alpine@sha256:not-a-digest")["pin_kind"] == "unresolved"
+        assert split_uses("docker://alpine@sha256:")["pin_kind"] == "unresolved"
+
+    def test_owner_and_repository_are_canonicalized_but_the_subpath_is_not(self) -> None:
+        """GitHub resolves repository names case-insensitively; `Actions/Checkout` is
+        `actions/checkout` and must be ONE node (PR #51 review). A subpath is a filesystem path."""
+        upper = split_uses("Actions/Cache/Restore@v4")
+        assert upper["action_path"] == "actions/cache/Restore"
+        assert upper["repository_full_name"] == "actions/cache" and upper["owner"] == "actions"
+        assert github_action_id(upper["action_path"]) == github_action_id("actions/cache/Restore")
+        assert github_action_id(split_uses("Actions/Checkout@v4")["action_path"]) == github_action_id(
+            "actions/checkout"
+        )
 
     def test_a_registry_port_is_not_mistaken_for_an_image_tag(self) -> None:
         parsed = split_uses("docker://localhost:5000/image")
@@ -295,15 +312,27 @@ class TestUsesActionEdge:
     def test_a_bare_edge_is_refused(self) -> None:
         """Finding 2 of the corpus: an edge that only says the relationship exists produces
         confident nonsense in any risk view. The schema requires the pin."""
-        from tap_grid.exceptions import EdgePropertyValidationError
-
         job, action = self._ends()
         with pytest.raises(EdgePropertyValidationError):
             create_edge(job.entity, action.entity, "USES_ACTION__github_core", {})
 
-    def test_a_guessed_pin_kind_is_refused(self) -> None:
-        from tap_grid.exceptions import EdgePropertyValidationError
+    def test_a_contradictory_pin_is_refused(self) -> None:
+        """`is_pinned` is derived from `pin_kind`; a writer outside this collector cannot mint an
+        `unresolved` edge that reads as pinned, and an unobservable one cannot carry a SHA
+        (PR #51 review)."""
+        job, action = self._ends()
+        for props in (
+            {"declared_ref": "v4", "pin_kind": "unresolved", "is_pinned": True, "resolution": "literal", "step_indexes": [0]},
+            {"declared_ref": "a" * 40, "pin_kind": "sha", "is_pinned": False, "resolution": "literal", "step_indexes": [0]},
+            {"declared_ref": "v4", "pin_kind": "tag", "is_pinned": False, "resolution": "unobservable", "step_indexes": [0]},
+            {"declared_ref": "v4", "pin_kind": "unresolved", "is_pinned": False, "resolution": "unobservable",
+             "resolved_sha": "a" * 40, "step_indexes": [0]},
+            {"declared_ref": "v1", "pin_kind": "tag", "is_pinned": False, "resolution": "in_scope", "step_indexes": [0]},
+        ):
+            with pytest.raises(EdgePropertyValidationError):
+                create_edge(job.entity, action.entity, "USES_ACTION__github_core", props)
 
+    def test_a_guessed_pin_kind_is_refused(self) -> None:
         job, action = self._ends()
         with pytest.raises(EdgePropertyValidationError):
             create_edge(

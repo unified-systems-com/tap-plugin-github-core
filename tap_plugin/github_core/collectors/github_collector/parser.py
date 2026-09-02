@@ -246,6 +246,9 @@ def _action_refs(steps: Any) -> list[dict[str, Any]]:
 
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+#: An OCI digest is `sha256:` plus exactly 64 hex characters; anything else that starts with
+#: `sha256:` is a malformed declaration, and a malformed pin must not read as an immutable one.
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DOCKER_PREFIX = "docker://"
 
 #: Immutable from the string alone (a commit SHA).
@@ -284,7 +287,7 @@ def _split_docker_uses(image: str) -> dict[str, Any]:
     """`docker://image[:tag|@sha256:digest]` — a registry pin, not a git one."""
     if "@" in image:
         path, _, ref = image.partition("@")
-        pin = PIN_DIGEST if ref.startswith("sha256:") else PIN_UNRESOLVED
+        pin = PIN_DIGEST if _DIGEST_RE.match(ref) else PIN_UNRESOLVED
     else:
         # A `:tag` after the last `/` (a registry may carry a port: `localhost:5000/img`).
         head, _, tail = image.rpartition("/")
@@ -305,17 +308,26 @@ def _split_docker_uses(image: str) -> dict[str, Any]:
 
 
 def _split_repository_uses(uses: str) -> dict[str, Any]:
-    """`owner/repo[/subdir]@ref` — the common form."""
+    """`owner/repo[/subdir]@ref` — the common form.
+
+    Owner and repository are lower-cased: GitHub resolves them case-insensitively, so
+    `Actions/Checkout` and `actions/checkout` are one repository and must be one node, or
+    fan-in fragments and an exact-action query misses the differently cased declaration.
+    The subpath stays as written — it is a filesystem path inside the repository.
+    """
     path, _, ref = uses.partition("@")
     parts = path.split("/")
     has_repo = len(parts) >= 2
+    repository_full_name = "/".join(part.lower() for part in parts[:2]) if has_repo else path.lower()
+    subpath = "/".join(parts[2:])
+    action_path = f"{repository_full_name}/{subpath}" if subpath else repository_full_name
     return {
         "kind": "repository",
-        "action": path,
-        "action_path": path,
-        "owner": parts[0] if has_repo else "",
-        "repository_full_name": "/".join(parts[:2]) if has_repo else "",
-        "subpath": "/".join(parts[2:]),
+        "action": action_path,
+        "action_path": action_path,
+        "owner": parts[0].lower() if has_repo else "",
+        "repository_full_name": repository_full_name if has_repo else "",
+        "subpath": subpath,
         "ref": ref,
         "pin_kind": _git_pin_kind(ref),
     }
