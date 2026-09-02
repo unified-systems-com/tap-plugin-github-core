@@ -61,6 +61,18 @@ def git_ref_id(full_name: str, ref: str) -> UUID:
     return _id("github_core__git_ref", f"{full_name}#{ref}")
 
 
+def git_commit_id(sha: str) -> UUID:
+    """A commit, keyed on its SHA alone — content-addressed and identical wherever it lives.
+
+    Platform-global, like `github_action`: keying per repository would mint one node per fork
+    carrying the same commit and lose the join that makes the node worth having — a SHA-pinned
+    `USES_ACTION` or a run's `head_sha` resolving to a commit some in-scope repository carries.
+    Signature state is a property of the commit and GitHub's key/user relationship, not of any
+    repository, so the same commit reports the same state from every repository.
+    """
+    return _id("github_core__git_commit", sha.lower())
+
+
 def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     """A ruleset, keyed on owner + GitHub's ruleset id.
 

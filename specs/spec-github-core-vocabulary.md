@@ -87,7 +87,7 @@ neutral substrate when one is extracted, not in `github_core`.
 | `github_runner` | no | self | exists | 9 sources |
 | `github_app` | no | self | exists | keeps the *application*; the grant moves to `app_installation` |
 | `identity_core__oidc_issuer` | yes | self | exists | we are ahead here — the published GitHub graph has no OIDC issuer at all |
-| `git_commit` | **yes** | friends | **new** | 7 sources (as *revision*); narrow slice only — not a full commit history |
+| `git_commit` | **yes** | **self** (pulled forward) | **exists** (2026-09-02, #57) | 7 sources (as *revision*); narrow slice only — not a full commit history. Pulled from friends because signature state is a `required_signatures` ruleset input. Keyed on the SHA alone (content-addressed, platform-global); signature in three states (`state` / `unsigned` / not emitted) |
 | `github_team` | no | friends | proposed | 10 sources |
 | `credential_grant` → `identity_core` | **yes** | friends | **new** | **9 standards + 15 incidents.** One node with a `kind` enum, not four thin types — otherwise the one query the standards ask for verbatim requires a UNION |
 | `runner_group` | no | friends | **new** | the published graph is ahead of us on runner scope |
@@ -136,7 +136,7 @@ properties must justify why it needs none.
 | `HOLDS_CREDENTIAL` / `GRANTS_ACCESS_TO` | principal → grant → repository | friends | new | `{permission, granted_at, last_used_at}` — grant timestamps are a standardised property |
 | `REGISTERED_ON` / `MEMBER_OF_RUNNER_GROUP` | runner → repo\|account, runner → group | friends | new | `{first_seen, scope}` — "a runner appeared where none had been" |
 | `BUILDS_PACKAGE_VERSION` | run → package_version | friends | new | `{attested}` — **its absence is the finding**: a registry version with no run behind it is how five incidents read |
-| `POINTS_AT` | git_ref → git_commit | friends | new | `{observed_at}` |
+| `POINTS_AT` | git_ref → git_commit | self | **exists** (2026-09-02, #57) | — (**`observed_at` dropped**: batch provenance and `git_ref.head_sha` field history already keep it; a second copy would disagree on the first re-run). Shape G: a moved ref re-derives the relation |
 | `FETCHES_FROM` | workflow_job → web_host | friends | new | `{url_pattern, piped_to_shell, digest_pinned}` |
 | `UPLOADS_ARTIFACT` | **run** → artifact | self | **exists** (2026-09-02, #55) | — (exact, from the listing's `workflow_run.id`; every candidate property is a field on the artifact, which IS the event). **Source corrected to the run**: the listing names the run, not the job |
 | ~~`DOWNLOADS_ARTIFACT`~~ | ~~workflow_job → artifact~~ | — | **rejected 2026-09-02** | **No observable target.** GitHub records the uploader and nothing about downloads; a declared download names a pattern, and the node is one concrete id — joining them is the inference `req-github-core-caches-4` refuses. `cross_workflow` survives on the job's `configuration.artifact_steps` (a `run-id`/`repository` input), where it is derivable |

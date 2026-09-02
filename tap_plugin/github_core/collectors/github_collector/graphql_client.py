@@ -63,6 +63,14 @@ class GithubGraphQLError(Exception):
         self.status = status
 
 
+# The `CommitSlice` fragment at the end of the query is the narrow commit slice
+# (req-github-core-commits): identity as observed, and signature state. Scalar fields on nodes
+# the query already requests — measured at no additional rate-limit cost on 2026-09-02.
+# Deliberately NOT message, tree or parents: the ref/signature convergence, not history.
+# `signature` is null on an unsigned commit, which is an observed value; a field the credential
+# cannot read lands in `errors` and is surfaced separately. The comment lives HERE, outside the
+# query string, because the conformance test reads identifiers out of the query text.
+#
 # The config-layer query. Deliberately does NOT request `branchProtectionRules`: it is admin-only
 # and its absence would add a FORBIDDEN error to every response for a read-only credential, which
 # would train us to ignore the errors array. Rulesets are the current mechanism anyway.
@@ -118,11 +126,11 @@ query($login: String!, $cursor: String) {
           }
           branchRefs: refs(refPrefix: "refs/heads/", first: %(refs)d) {
             totalCount
-            nodes { name target { oid } }
+            nodes { name target { oid ...CommitSlice } }
           }
           tagRefs: refs(refPrefix: "refs/tags/", first: %(refs)d) {
             totalCount
-            nodes { name target { oid __typename ... on Tag { target { oid } } } }
+            nodes { name target { oid __typename ...CommitSlice ... on Tag { target { oid ...CommitSlice } } } }
           }
           object(expression: "HEAD:.github/workflows") {
             ... on Tree {
@@ -133,6 +141,13 @@ query($login: String!, $cursor: String) {
       }
     }
   }
+}
+fragment CommitSlice on Commit {
+  committedDate
+  authoredDate
+  author { name email user { login } }
+  committer { name email user { login } }
+  signature { __typename isValid state wasSignedByGitHub signer { login } }
 }
 """ % {
     "page": _REPO_PAGE_SIZE,
@@ -271,9 +286,52 @@ class GithubGraphQLClient:
                         "target_sha": target_sha,
                         "target_type": str(target.get("__typename") or "").lower(),
                         "is_default": ref_type == "branch" and name == default_ref,
+                        # The commit the ref resolves to, sliced; None when the response carries
+                        # no commit body (a degraded field, or a stub without the fragment).
+                        "commit": GithubGraphQLClient.commit_slice(nested if nested else target, head_sha),
                     }
                 )
         return out, truncated
+
+    @staticmethod
+    def commit_slice(commit: dict[str, Any], sha: str) -> dict[str, Any] | None:
+        """Flatten one `CommitSlice` fragment into the `git_commit` field shape.
+
+        Three states for the signature, never two: a signature object yields GitHub's own
+        `state` (`VALID`, `UNSIGNED` is never returned this way, `UNKNOWN_KEY`, …) with its
+        validity and kind; **`signature: null` is `unsigned`**, an observed value; and a commit
+        body with no `committedDate` at all is not a commit slice — return None so the caller
+        emits nothing rather than a node full of empty strings pretending to be observations.
+        """
+        if not sha or "committedDate" not in commit:
+            return None
+        author = commit.get("author") or {}
+        committer = commit.get("committer") or {}
+        signature = commit.get("signature")
+        if signature is None:
+            kind, state, valid, signer, by_github = "", "unsigned", None, "", False
+        else:
+            kind = str(signature.get("__typename") or "").removesuffix("Signature").lower()
+            state = str(signature.get("state") or "").lower()
+            valid = bool(signature.get("isValid"))
+            signer = str(((signature.get("signer") or {}).get("login")) or "")
+            by_github = bool(signature.get("wasSignedByGitHub"))
+        return {
+            "sha": sha,
+            "committed_date": commit.get("committedDate"),
+            "authored_date": commit.get("authoredDate"),
+            "author_name": str(author.get("name") or ""),
+            "author_email": str(author.get("email") or ""),
+            "author_login": str(((author.get("user") or {}).get("login")) or ""),
+            "committer_name": str(committer.get("name") or ""),
+            "committer_email": str(committer.get("email") or ""),
+            "committer_login": str(((committer.get("user") or {}).get("login")) or ""),
+            "signature_kind": kind,
+            "signature_state": state,
+            "signature_valid": valid,
+            "signer_login": signer,
+            "signed_by_github": by_github,
+        }
 
     @staticmethod
     def rulesets(repo: dict[str, Any]) -> list[dict[str, Any]]:

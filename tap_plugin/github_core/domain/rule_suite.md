@@ -31,7 +31,7 @@ The identity is stable because a rule suite is an **event**: it happened once, a
 
 - **Only bypasses are collected.** `result` is retained as a field so the model can widen to `fail` or `pass` without a migration, but a passing suite is a routine push — roughly 47 a day on one active repository — and landing every one would swamp the grid to record that nothing happened.
 - **Not a change record.** The vocabulary corpus rejects "change / snapshot / audit-event types" because the grid already carries field-level history, and that ruling is correct for changes to objects we collect. A rule suite is not a change to a ruleset; it is an occurrence in the world we observed, in the same category as `github_actions_run`. Modelling it duplicates nothing.
-- **Not a commit.** `before_sha` and `after_sha` are fields, not edges. `git_commit` is a proposed type this plugin does not yet build; when it exists, these become the natural join.
+- **Not a commit.** `before_sha` and `after_sha` are fields, not edges. [`git_commit`](git_commit.md) exists (2026-09-02) for commits at a ref's head; a pushed commit that no ref points at is not collected, so joining these SHAs to it is a follow-on and a query on `sha` today may miss.
 - **Not an approval trail.** Whether the bypass was legitimate is not in the data. The event is the finding; the judgement is a human's.
 
 ## Neutrality

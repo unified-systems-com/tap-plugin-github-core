@@ -1,0 +1,16 @@
+{
+  "slug": "POINTS_AT__github_core",
+  "name": "Points At",
+  "description": "A ref resolves to a commit — the branch head or the tag's commit (for an annotated tag, the commit the tag object points at, not the tag object). The join that lets a ruleset's required-signatures rule be checked against what is actually on the protected ref. Property-free: movement is field history on git_ref.head_sha and every write carries batch provenance, so the corpus's `observed_at` would be a second derivation of a fact the grid already keeps. A ref that moves gets a new edge; the old one is a relation that was re-derived, not one that ended (github-core#14, shape G).",
+  "sources": [
+    "github_core__git_ref"
+  ],
+  "targets": [
+    "github_core__git_commit"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "git",
+    "github.observation": "declaration"
+  }
+}

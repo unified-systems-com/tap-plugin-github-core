@@ -18,3 +18,6 @@ sit with the Octicons family — same 24-unit grid, same #1f2328 ink — with a 
 actions-artifact.svg is derived from the Octicons `package` glyph at v19.15.1 — the icon
 GitHub itself uses for a run's uploaded artifacts — with the same padded viewBox, explicit
 #1f2328 fill and <title> as the rest of the derived set.
+
+git-commit.svg is derived from the Octicons `git-commit` glyph at v19.15.1, with the same
+padded viewBox, explicit #1f2328 fill and <title> as the rest of the derived set.
