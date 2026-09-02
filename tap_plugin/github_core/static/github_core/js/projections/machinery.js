@@ -419,7 +419,7 @@ function _stampJobs(cy, facts, warn) {
             if (!entry) return "unresolved";
             if (visiting.has(key)) return "unresolved";
             visiting.add(key);
-            const needs = Array.isArray(entry.fact.needs) ? entry.fact.needs : [];
+            const needs = _needsList(entry.fact.needs);
             let r = 0;
             for (const dep of needs) {
                 const dr = rank(String(dep));
@@ -436,7 +436,7 @@ function _stampJobs(cy, facts, warn) {
                 node.data("_stage", r);
             } else {
                 node.addClass("machinery-unresolved");
-                const needs = Array.isArray(fact.needs) ? fact.needs : [];
+                const needs = _needsList(fact.needs);
                 const missing = needs.filter((d) => !byKey.has(String(d)));
                 warn("machinery_unresolved_rank",
                     `${fact.job_key || node.id()} in ${wfKey}: ` + (missing.length ? `needs absent job(s) ${missing.join(", ")}` : "dependency cycle or unkeyed job"));
@@ -450,6 +450,13 @@ function _stampJobs(cy, facts, warn) {
 // workflow block; only an UNDECLARED job block (null) inherits. An undeclared
 // workflow block too means the repository default applies, which is not on
 // the grid — not observable, never "not a producer".
+// GitHub accepts `needs: build` as well as `needs: [build]`; the stored
+// value may be either, so a scalar is one dependency, never none.
+function _needsList(needs) {
+    if (needs == null || needs === "") return [];
+    return Array.isArray(needs) ? needs : [needs];
+}
+
 function _producerState(jobPerms, wfPerms) {
     const effective = jobPerms != null ? jobPerms : wfPerms;
     if (effective == null) return "not_observable";
@@ -551,6 +558,14 @@ function _hideOrphans(cy, repos, warn) {
     cy.nodes(`[entity_type = "${T.workflow}"], [entity_type = "${T.ref}"]`).forEach((n) => {
         const et = n.data("entity_type") === T.workflow ? E.definesWorkflow : E.hasRef;
         if (!attachedTo(n, et, "in")) hidden.push(n);
+    });
+    // A job whose DEFINES_JOB edge does not lead to a workflow that survived
+    // the pass above has no box to live in; it would float as a root outside
+    // github.com. Hide it, and say so.
+    const hiddenIds = new Set(hidden.map((n) => n.id()));
+    cy.nodes(`[entity_type = "${T.job}"]`).forEach((job) => {
+        const definers = job.incomers(edgeSel(E.definesJob)).sources().filter((w) => !hiddenIds.has(w.id()));
+        if (definers.empty()) hidden.push(job);
     });
     hidden.forEach((n) => { n.data("_machinery_hidden", true); n.addClass(ELEVATION_HIDDEN_CLASS); });
     if (hidden.length) warn("machinery_hidden_unowned", `${hidden.length} node(s) not attached to a repository in the scene were hidden`);

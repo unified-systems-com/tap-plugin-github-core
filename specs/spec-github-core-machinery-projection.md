@@ -64,6 +64,14 @@ prose (`git-serious-tap/docs/doc-git-serious-shape-of-a-pipeline.md`).
 
 ## Requirement Status
 
+> **Status semantics.** An ACID is `Implemented` when its done-test was OBSERVED on a running
+> instance (the git-serious convergence rule: a step's status flips on observation, not on a
+> merge). The observations below were made 2026-09-02 with tap core's `session/viz-git-serious`
+> installed — the `ranked` inner layout and flowed columns (tap#293), `input_schema` defaults
+> (req-grid-search-obj-5-2) and the stack.js re-entrancy fix (tap#304). **Those must be on tap
+> main before this module is released**; on a core without them the module degrades (grid inner
+> layouts, `?repo=` required) rather than breaks, and the observations are not reproducible.
+
 | RID | Name | Status | Notes |
 | --- | --- | :---: | --- |
 | req-github-core-machinery-module | [The Layout Module](#the-layout-module) | In Development | `static/github_core/js/projections/machinery.js`; standard tap layout contract; repository is an input |
