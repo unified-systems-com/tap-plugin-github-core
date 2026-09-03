@@ -21,7 +21,10 @@ renders one row per node of one search, and this row is a four-edge join with pe
 aggregation — Gryphon's only aggregate is ``COUNT`` (req-grid-gryphon-count).
 
 Reads go through Gryphon (``execute_gryphon_raw``, the sanctioned raw-query chokepoint gated on
-``grid.read``); no model is imported on the read path. Every fact rendered is derived ONCE here
+``grid.read``); no model is imported on the read path. The five reads are over the STRUCTURAL
+nodes of the observed account — repositories, rulesets, workflows, required checks — never runs
+or jobs, so their size is the account's shape, not its history; a table over them is whole or
+it is wrong, which is why they carry no LIMIT. Every fact rendered is derived ONCE here
 from the collected edges — the panel never re-derives a producer from a job name; that is the
 collector's derivation (`_emit_status_checks`), and it is what the ``PRODUCES_CHECK`` edge is for.
 
@@ -273,21 +276,32 @@ def _pairs(
     return pairs
 
 
-def _governs_default_branch(ruleset: dict[str, Any], default_branch: str) -> bool:
-    """A branch ruleset whose ref conditions include the default branch, by token or by name."""
+def _covers_default_branch(ruleset: dict[str, Any], default_branch: str) -> bool:
+    """A branch ruleset whose ref conditions select the default branch, by token or by name.
+
+    Fail closed on shape: a ruleset with no ``target`` is not assumed to be a branch ruleset,
+    and an ``exclude`` naming the default branch — by ``~DEFAULT_BRANCH``, ``~ALL`` or its
+    ``refs/heads/`` name — wins over any include (PR #66 review, Codex + Grok seats).
+    """
     data = ruleset.get("data") or {}
-    if data.get("target") not in ("", None, "branch"):
+    if data.get("target") != "branch":
         return False
     ref_name = ((data.get("conditions") or {}).get("ref_name")) or {}
-    include = [str(x) for x in (ref_name.get("include") or [])]
-    exclude = [str(x) for x in (ref_name.get("exclude") or [])]
+    include = {str(x) for x in (ref_name.get("include") or [])}
+    exclude = {str(x) for x in (ref_name.get("exclude") or [])}
     named = f"refs/heads/{default_branch}" if default_branch else ""
-    if named and named in exclude:
+    selectors = {DEFAULT_BRANCH_TOKEN, "~ALL"} | ({named} if named else set())
+    if exclude & selectors:
         return False
+    return bool(include & selectors)
+
+
+def _governs_default_branch(ruleset: dict[str, Any], default_branch: str) -> bool:
+    """Covers the default branch AND is enforced. ``evaluate`` and ``disabled`` rulesets are
+    reported beside the governing ones (``rulesets_text``) but gate nothing."""
     return (
-        DEFAULT_BRANCH_TOKEN in include
-        or (bool(named) and named in include)
-        or "~ALL" in include
+        _covers_default_branch(ruleset, default_branch)
+        and str((ruleset.get("data") or {}).get("enforcement") or "") == "active"
     )
 
 
@@ -358,19 +372,29 @@ def build_rows(env: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     for repo_id, repo in repos.items():
         rdata = repo.get("data") or {}
         default_branch = str(rdata.get("default_branch") or "")
-        governing = [
+        covering = [
             rulesets[rs_id]
             for rs_id in dict.fromkeys(protects.get(repo_id, []))
-            if _governs_default_branch(rulesets[rs_id], default_branch)
+            if _covers_default_branch(rulesets[rs_id], default_branch)
         ]
+        governing = [
+            rs for rs in covering if _governs_default_branch(rs, default_branch)
+        ]
+        not_enforced = [
+            f"{rs.get('name')} ({(rs.get('data') or {}).get('enforcement') or 'unknown'}, not enforced)"
+            for rs in covering
+            if rs not in governing
+        ]
+        full_name = str(rdata.get("full_name") or repo.get("name") or "")
         row_data: dict[str, Any] = {
-            "full_name": rdata.get("full_name") or repo.get("name") or "",
-            "name": rdata.get("name")
-            or str(rdata.get("full_name") or repo.get("name") or "").rpartition("/")[2],
+            "full_name": full_name,
+            "name": full_name.rpartition("/")[2] or full_name,
+            "owner": str(rdata.get("owner_login") or full_name.partition("/")[0]),
             "html_url": rdata.get("html_url") or "",
             "default_branch": default_branch,
             "rulesets": [],
-            "rulesets_text": "",
+            "rulesets_not_enforced": not_enforced,
+            "rulesets_text": "; ".join(not_enforced),
             "ruleset_count": len(governing),
             "enforcement": "",
             "requires_pr": None,
@@ -493,7 +517,7 @@ def _fill_gated_row(
     row.update(
         {
             "rulesets": [str(rs.get("name")) for rs in governing],
-            "rulesets_text": "; ".join(names),
+            "rulesets_text": "; ".join([*names, *row.get("rulesets_not_enforced", [])]),
             "enforcement": (
                 "active"
                 if "active" in enforcement
@@ -528,28 +552,34 @@ def _fill_gated_row(
 
 
 def _fill_missing_vs_peers(rows: list[dict[str, Any]]) -> None:
-    """Name what the account's gated repositories share that a row lacks (configured-the-same)."""
-    gated = [
-        r
-        for r in rows
-        if r["data"]["ruleset_count"]
-        and r["data"]["checks_state"] != "required checks not observable"
-    ]
-    if not gated:
-        return
-    tally: dict[str, int] = defaultdict(int)
-    for r in gated:
-        for context in r["data"]["checks_required"]:
-            tally[context] += 1
-    shared = sorted(
-        c for c, n in tally.items() if n >= max(2, PEER_SHARE_FRACTION * len(gated))
-    )
-    if not shared:
-        return
+    """Name what an owner's gated repositories share that a row lacks (configured-the-same).
+
+    Peers are the repositories of the SAME owner: one graph may hold several accounts, and a
+    check one organisation requires is not a requirement on another (PR #66 review).
+    """
+    by_owner: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
-        if r["data"]["checks_state"] == "required checks not observable":
-            r["data"]["missing_vs_peers_text"] = "not observable"
+        by_owner[r["data"]["owner"]].append(r)
+    for peers in by_owner.values():
+        gated = [
+            r
+            for r in peers
+            if r["data"]["ruleset_count"]
+            and r["data"]["checks_state"] != "required checks not observable"
+        ]
+        tally: dict[str, int] = defaultdict(int)
+        for r in gated:
+            for context in r["data"]["checks_required"]:
+                tally[context] += 1
+        shared = sorted(
+            c for c, n in tally.items() if n >= max(2, PEER_SHARE_FRACTION * len(gated))
+        )
+        if not shared:
             continue
-        missing = [c for c in shared if c not in r["data"]["checks_required"]]
-        r["data"]["missing_vs_peers"] = missing
-        r["data"]["missing_vs_peers_text"] = "; ".join(missing)
+        for r in peers:
+            if r["data"]["checks_state"] == "required checks not observable":
+                r["data"]["missing_vs_peers_text"] = "not observable"
+                continue
+            missing = [c for c in shared if c not in r["data"]["checks_required"]]
+            r["data"]["missing_vs_peers"] = missing
+            r["data"]["missing_vs_peers_text"] = "; ".join(missing)

@@ -53,9 +53,17 @@ Status: `Implemented`
   full layer, whose edge envelopes carry `edge_type`, endpoints and properties under `data`.
 - `build_rows(envelopes)` is pure: it folds the envelopes into node-shaped rows (the repository's
   spine surface + display lane, with a derived `data` lane) ordered worst gate first.
-- A ruleset **governs** a repository's default branch when a `PROTECTS` edge joins them, the
-  ruleset targets branches, and its `ref_name.include` carries `~DEFAULT_BRANCH`, `~ALL`, or the
-  repository's default branch by name (and `exclude` does not name it).
+- A ruleset **covers** a repository's default branch when a `PROTECTS` edge joins them, the
+  ruleset's `target` is `branch` (a missing target fails closed), and its `ref_name.include`
+  carries `~DEFAULT_BRANCH`, `~ALL`, or the repository's default branch by name — unless
+  `exclude` carries any of those. It **governs** when it also has `enforcement = active`;
+  `evaluate` and `disabled` rulesets are listed in *Governed by* as *not enforced* and gate
+  nothing (PR #66 review).
+- Peers for *missing vs peers* are the repositories of the same owner (`owner_login`), never
+  the whole graph.
+- The five reads are over the account's STRUCTURAL nodes (repositories, rulesets, workflows,
+  required checks), never runs or jobs; their size is the account's shape, and a posture table
+  over them is whole or it is wrong, so they carry no LIMIT.
 - Producer resolution per required context, in order: an `integration_id` other than `15368`
   → **app** (no workflow can satisfy it); a `PRODUCES_CHECK` edge from a workflow this repository
   `DEFINES_WORKFLOW` → **workflow** (with the edge's `confidence` shown unless `exact`); a producer
@@ -77,6 +85,8 @@ Status: `Implemented`
 | req-github-core-gates-panel-3 | Bypass Is The Worst Governing Ruleset | Implemented | `unobservable` outranks `counted` outranks `observed`; an observed empty list renders *observed: none*. | `test_bypass_is_the_worst_of_the_governing_rulesets`, `test_an_observed_empty_bypass_list_is_a_fact` |
 | req-github-core-gates-panel-4 | Outlier Named | Implemented | A context at least half of the gated repositories require and one lacks is named on that row. | `test_missing_vs_peers_names_the_outlier` |
 | req-github-core-gates-panel-5 | Through The Graph | Implemented | A graph built through the service layer, read back through the panel's own queries, yields the row the graph says. | `TestThroughTheGraph` |
+| req-github-core-gates-panel-6 | Enforcement And Exclusion | Implemented | An `evaluate` or `disabled` ruleset is listed as *not enforced* and gates nothing; an `exclude` carrying `~DEFAULT_BRANCH`, `~ALL` or the default ref beats any include; a ruleset without `target` never governs. | `test_evaluate_and_disabled_rulesets_are_listed_but_gate_nothing`, `test_an_exclude_token_beats_an_include_and_a_missing_target_fails_closed` |
+| req-github-core-gates-panel-7 | Peers Share An Owner | Implemented | A context required across one owner's repositories is never reported missing on another owner's row. | `test_peers_are_the_same_owner_only` |
 
 #### Future
 

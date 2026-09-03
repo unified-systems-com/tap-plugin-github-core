@@ -63,6 +63,7 @@ def _repo(rid: str, full_name: str, default_branch: str = "main") -> dict[str, A
         "github_core__github_repository",
         full_name,
         full_name=full_name,
+        owner_login=full_name.partition("/")[0],
         name=full_name.rpartition("/")[2],
         default_branch=default_branch,
         html_url=f"https://github.com/{full_name}",
@@ -77,7 +78,8 @@ def _ruleset(
     bypass: str = "unobservable",
     count: int | None = None,
     include: list[str] | None = None,
-    target: str = "branch",
+    exclude: list[str] | None = None,
+    target: str | None = "branch",
     enforcement: str = "active",
 ) -> dict[str, Any]:
     return _node(
@@ -89,7 +91,7 @@ def _ruleset(
         conditions={
             "ref_name": {
                 "include": include if include is not None else ["~DEFAULT_BRANCH"],
-                "exclude": [],
+                "exclude": exclude or [],
             }
         },
         rules=rules or [],
@@ -341,6 +343,87 @@ class TestBuildRows:
         assert d["gate_state"] == "gated"
         assert d["requires_pr"] is True
         assert d["checks_state"] == "none required"
+
+    def test_evaluate_and_disabled_rulesets_are_listed_but_gate_nothing(self) -> None:
+        env = _env(
+            repos=[_repo("r1", "acme/a")],
+            rulesets=[
+                _ruleset(
+                    "rs-eval", "dry-run", rules=[_PR_RULE], enforcement="evaluate"
+                ),
+                _ruleset(
+                    "rs-off", "switched-off", rules=[_PR_RULE], enforcement="disabled"
+                ),
+            ],
+            protects=[("rs-eval", "r1"), ("rs-off", "r1")],
+        )
+        d = _row(build_rows(env), "acme/a")
+        assert d["gate_state"] == "no ruleset observed"
+        assert d["requires_pr"] is None
+        assert (
+            d["rulesets_text"]
+            == "dry-run (evaluate, not enforced); switched-off (disabled, not enforced)"
+        )
+
+    def test_an_exclude_token_beats_an_include_and_a_missing_target_fails_closed(
+        self,
+    ) -> None:
+        env = _env(
+            repos=[_repo("r1", "acme/a"), _repo("r2", "acme/b"), _repo("r3", "acme/c")],
+            rulesets=[
+                _ruleset(
+                    "rs-x",
+                    "all-but-default",
+                    include=["~ALL"],
+                    exclude=["~DEFAULT_BRANCH"],
+                    rules=[_PR_RULE],
+                ),
+                _ruleset(
+                    "rs-n",
+                    "all-but-main",
+                    include=["~ALL"],
+                    exclude=["refs/heads/main"],
+                    rules=[_PR_RULE],
+                ),
+                _ruleset("rs-t", "no-target", target=None, rules=[_PR_RULE]),
+            ],
+            protects=[("rs-x", "r1"), ("rs-n", "r2"), ("rs-t", "r3")],
+        )
+        rows = build_rows(env)
+        assert {r["data"]["gate_state"] for r in rows} == {"no ruleset observed"}
+
+    def test_peers_are_the_same_owner_only(self) -> None:
+        env = _env(
+            repos=[
+                _repo("a1", "acme/a"),
+                _repo("a2", "acme/b"),
+                _repo("b1", "beta/x"),
+                _repo("b2", "beta/y"),
+            ],
+            rulesets=[
+                _ruleset("rs-beta", "beta-checks", rules=[_RSC_RULE]),
+                _ruleset("rs-acme", "acme-pr", rules=[_PR_RULE]),
+            ],
+            checks=[_check("c-dco", "dco")],
+            workflows=[_workflow("w1", "ci"), _workflow("w2", "ci")],
+            protects=[
+                ("rs-beta", "b1"),
+                ("rs-beta", "b2"),
+                ("rs-acme", "a1"),
+                ("rs-acme", "a2"),
+            ],
+            requires=[("rs-beta", "c-dco", None)],
+            produces=[("w1", "c-dco", "dco", "exact"), ("w2", "c-dco", "dco", "exact")],
+            defines=[("b1", "w1"), ("b2", "w2")],
+        )
+        rows = build_rows(env)
+        assert _row(rows, "acme/a")["missing_vs_peers"] == []
+        assert _row(rows, "beta/x")["missing_vs_peers"] == []
+
+    def test_repository_name_is_the_short_name(self) -> None:
+        rows = build_rows(_env(repos=[_repo("r1", "acme/a")]))
+        assert rows[0]["data"]["name"] == "a"
+        assert rows[0]["data"]["owner"] == "acme"
 
     def test_rows_are_node_shaped_for_the_table_renderer(self) -> None:
         rows = build_rows(_env(repos=[_repo("r1", "acme/a")]))
