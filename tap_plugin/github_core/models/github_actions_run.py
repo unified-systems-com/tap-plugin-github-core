@@ -35,8 +35,12 @@ class GithubActionsRun(BaseModel):
         "conclusion": {"type": "string"},
         "head_sha": {"type": "string"},
         "head_branch": {"type": "string"},
+        "created_at": {"type": ["string", "null"]},
         "run_started_at": {"type": ["string", "null"]},
         "completed_at": {"type": ["string", "null"]},
+        "run_attempt": {"type": ["integer", "null"]},
+        "actor_login": {"type": "string"},
+        "triggering_actor_login": {"type": "string"},
         "html_url": {"type": "string"},
         "configuration": {"type": "object"},
         "tags": {"type": "object"},
@@ -56,6 +60,9 @@ class GithubActionsRun(BaseModel):
         "conclusion": {"validation": "jsonschema", "schema": {"type": "string"}},
         "head_sha": {"validation": "jsonschema", "schema": {"type": "string"}},
         "head_branch": {"validation": "jsonschema", "schema": {"type": "string"}},
+        "run_attempt": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "actor_login": {"validation": "jsonschema", "schema": {"type": "string"}},
+        "triggering_actor_login": {"validation": "jsonschema", "schema": {"type": "string"}},
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
@@ -70,8 +77,12 @@ class GithubActionsRun(BaseModel):
     conclusion = models.CharField(max_length=32, blank=True, default="")
     head_sha = models.CharField(max_length=64, blank=True, default="", db_index=True)
     head_branch = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(null=True, blank=True, db_index=True)
     run_started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    run_attempt = models.IntegerField(null=True, blank=True)
+    actor_login = models.CharField(max_length=255, blank=True, default="")
+    triggering_actor_login = models.CharField(max_length=255, blank=True, default="")
     html_url = models.URLField(max_length=512, blank=True, default="")
     configuration = models.JSONField(default=dict, blank=True)
     tags = models.JSONField(default=dict, blank=True)

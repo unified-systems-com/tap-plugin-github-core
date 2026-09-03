@@ -74,6 +74,7 @@ The response carries the **observed runner** (`runner_id`, `runner_name`, `runne
 - `name` — the job's declared name, or its matrix expansion. Display only, and explicitly not identity, because a matrix shares one declared name across many executions.
 - `status` — `queued`, `in_progress`, `completed`. Drives incremental refresh alongside the run's status.
 - `conclusion` — `success`, `failure`, `cancelled`, `skipped`. Null while in flight — the grid's unobserved convention, not a claim that there was no outcome.
+- `created_at` — when GitHub created the job, i.e. when it entered the queue. `started_at − created_at` is the job's queue time — the per-job form of the run's `run_started_at − created_at`, and the number that separates "the runners are saturated" from "the job is slow" (github-core#47). A job with no `created_at` renders as not observed, never as zero.
 - `started_at` — when the job began executing.
 - `completed_at` — when it finished; null while running. With `started_at`, the duration that makes an anomalously long job visible.
 - `html_url` — the browser URL for the job.
