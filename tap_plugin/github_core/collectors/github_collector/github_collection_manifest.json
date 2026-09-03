@@ -1,6 +1,6 @@
 {
   "manifest_version": "0",
-  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth). A source that genuinely needs no triple states why in `permission_not_applicable` — the exemption is declared, never achieved by leaving the field out.",
+  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth). A source that genuinely needs no triple states why in `permission_not_applicable` \u2014 the exemption is declared, never achieved by leaving the field out.",
   "api_base_url": "https://api.github.com",
   "sources": [
     {
@@ -185,7 +185,7 @@
         "signed_by_github"
       ],
       "permission": "repository:contents:read",
-      "description": "The commit at every collected ref's head, sliced to identity-as-observed and signature verification state (req-github-core-commits). A fragment on the `refs` source's target — scalar fields on nodes the config-layer query already requests, measured at no additional rate-limit cost on 2026-09-02 — so it widens nothing. `signature: null` is recorded as `unsigned` (an observed value); a degraded field is surfaced by the config layer and emits no commit. Keyed on the repository plus the SHA: GitHub persists the signature verification record per repository NETWORK, so a SHA-only node could merge two networks' verdicts."
+      "description": "The commit at every collected ref's head, sliced to identity-as-observed and signature verification state (req-github-core-commits). A fragment on the `refs` source's target \u2014 scalar fields on nodes the config-layer query already requests, measured at no additional rate-limit cost on 2026-09-02 \u2014 so it widens nothing. `signature: null` is recorded as `unsigned` (an observed value); a degraded field is surfaced by the config layer and emits no commit. Keyed on the repository plus the SHA: GitHub persists the signature verification record per repository NETWORK, so a SHA-only node could merge two networks' verdicts."
     },
     {
       "name": "rulesets",
@@ -215,7 +215,7 @@
       ],
       "permission": "repository:administration:read",
       "permission_failure": "degrade_with_warning",
-      "description": "Required check contexts (req-github-core-status-checks): one node per (owner, context) named by any ruleset's required_status_checks rule, from the REST ruleset detail the `rulesets` source already fetches — so this widens nothing. A ruleset whose detail was refused carries a type-only rule with no contexts; those are COUNTED as not observable and mint nothing, never rendered as a ruleset without required checks. PRODUCES_CHECK is derived toward these nodes from workflow job display names (exact, or the matrix template) when the requirement allows an Actions check; a check nobody requires has no node."
+      "description": "Required check contexts (req-github-core-status-checks): one node per (owner, context) named by any ruleset's required_status_checks rule, from the REST ruleset detail the `rulesets` source already fetches \u2014 so this widens nothing. A ruleset whose detail was refused carries a type-only rule with no contexts; those are COUNTED as not observable and mint nothing, never rendered as a ruleset without required checks. PRODUCES_CHECK is derived toward these nodes from workflow job display names (exact, or the matrix template) when the requirement allows an Actions check; a check nobody requires has no node."
     },
     {
       "name": "environments",
@@ -274,7 +274,7 @@
       ],
       "permission": "repository:actions:read",
       "permission_failure": "degrade_with_warning",
-      "description": "Artifacts a repository's runs uploaded, newest first, with the producing run on each (req-github-core-artifacts). The REPOSITORY listing rather than the per-run endpoint: one call per page instead of one per run, and it carries `workflow_run.id`, which is the UPLOADS_ARTIFACT source. Expired artifacts stay listed with `expired: true` — an immutable event with a retention window (github-core#14, shape C) — so absence from this listing is never read as expiry or deletion. Capped per repository with the total reported. GitHub keeps no record of who DOWNLOADED an artifact; the declared download steps live on workflow_job.configuration.artifact_steps and no download edge is emitted."
+      "description": "Artifacts a repository's runs uploaded, newest first, with the producing run on each (req-github-core-artifacts). The REPOSITORY listing rather than the per-run endpoint: one call per page instead of one per run, and it carries `workflow_run.id`, which is the UPLOADS_ARTIFACT source. Expired artifacts stay listed with `expired: true` \u2014 an immutable event with a retention window (github-core#14, shape C) \u2014 so absence from this listing is never read as expiry or deletion. Capped per repository with the total reported. GitHub keeps no record of who DOWNLOADED an artifact; the declared download steps live on workflow_job.configuration.artifact_steps and no download edge is emitted."
     },
     {
       "name": "app_installations",
@@ -293,7 +293,7 @@
         "suspended"
       ],
       "permission_failure": "degrade_with_warning",
-      "description": "Which Apps can reach this account's repositories, and with which granted permissions (req-github-core-app-installations). App-ONLY: a personal access token gets 404, which is one of the two surfaces that make the App the product credential rather than a convenience. Falls back to `/app/installations` — THIS App's own installation, an inventory of one — when the account-wide list is refused, and says which it got, because an inventory of one is not an inventory.",
+      "description": "Which Apps can reach this account's repositories, and with which granted permissions (req-github-core-app-installations). App-ONLY: a personal access token gets 404, which is one of the two surfaces that make the App the product credential rather than a convenience. Falls back to `/app/installations` \u2014 THIS App's own installation, an inventory of one \u2014 when the account-wide list is refused, and says which it got, because an inventory of one is not an inventory.",
       "permission": "organization:administration:read"
     },
     {
@@ -365,6 +365,32 @@
       ],
       "permission": "repository:contents:read",
       "description": "Actions a declared job calls (req-github-core-actions-used), split out of the workflow YAML the `workflow_yaml` source already fetches, so this widens nothing. One node per action path, shared across the scope; the pin (`declared_ref`, `pin_kind`, `is_pinned`, `resolved_sha`, `resolution`) rides on the USES_ACTION edge. A mutable name is resolved to a tag or branch and a commit ONLY when the action's own repository is inside the observed scope, from the `refs` source already in hand; otherwise the edge says `unresolved` / `unobservable` rather than guessing. No call is made to an out-of-scope action repository."
+    },
+    {
+      "name": "action_ref",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/git/ref/{ref}",
+      "target_entity_type": "github_core__github_action",
+      "fields": [
+        "ref",
+        "object"
+      ],
+      "permission": "repository:contents:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Resolves a `uses: owner/repo@ref` whose repository is OUTSIDE the scope to the commit it points at (req-github-core-actions-used-6): `tags/{ref}` first, then `heads/{ref}` on 404, so the pin kind is OBSERVED rather than guessed. Public repositories answer any credential; a refusal lands as `resolution: unobservable` on the edge, never as a missing SHA. At most one lookup per distinct (repository, ref) per run, under a resolution cap. In-scope repositories resolve from the config layer at no request."
+    },
+    {
+      "name": "action_tag_object",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/git/tags/{tag_sha}",
+      "target_entity_type": "github_core__github_action",
+      "fields": [
+        "sha",
+        "object"
+      ],
+      "permission": "repository:contents:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Peels an ANNOTATED tag to its commit: `git/ref/tags/{ref}` returns the tag object's SHA for an annotated tag, and that SHA is not the commit a runner checks out. One extra call, only when the ref's object type is `tag`."
     }
   ],
   "edges": [

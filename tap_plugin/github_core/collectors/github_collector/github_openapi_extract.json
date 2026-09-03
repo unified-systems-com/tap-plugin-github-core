@@ -1326,6 +1326,30 @@
       "present": true,
       "source": "workflows"
     },
+    "/repos/{owner}/{repo}/git/ref/{ref}": {
+      "item_properties": [
+        "node_id",
+        "object",
+        "ref",
+        "url"
+      ],
+      "present": true,
+      "source": "action_ref"
+    },
+    "/repos/{owner}/{repo}/git/tags/{tag_sha}": {
+      "item_properties": [
+        "message",
+        "node_id",
+        "object",
+        "sha",
+        "tag",
+        "tagger",
+        "url",
+        "verification"
+      ],
+      "present": true,
+      "source": "action_tag_object"
+    },
     "/repos/{owner}/{repo}/rulesets/rule-suites": {
       "item_properties": [
         "actor_id",
@@ -1424,8 +1448,8 @@
       "source": "account"
     }
   },
-  "spec_commit": "875b39fae632318533e61d3e5217b340f5ec3ebd",
-  "spec_sha256": "27008e60d890d3d7ab74791bcdf7ef009b5506867a75069408e8ef02eb74fc1e",
-  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/875b39fae632318533e61d3e5217b340f5ec3ebd/descriptions/api.github.com/api.github.com.json",
+  "spec_commit": "9afcff5e82ad046d20ce1f292ed2e5ed9d643f10",
+  "spec_sha256": "a00e97b728e9f3c4ad45170cd07b5d104810db303c15a67a4fb08e45f8e2d538",
+  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/9afcff5e82ad046d20ce1f292ed2e5ed9d643f10/descriptions/api.github.com/api.github.com.json",
   "spec_version": "1.1.4"
 }
