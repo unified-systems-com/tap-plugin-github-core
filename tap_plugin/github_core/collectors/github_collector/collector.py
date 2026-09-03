@@ -10,8 +10,12 @@ from __future__ import annotations
 import base64
 import fnmatch
 import logging
+import re
+from datetime import datetime
 from typing import Any, ClassVar
+from urllib.parse import quote
 
+from tap_plugin.github_core.models.status_check import StatusCheck
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
 
 from tap_cares.collectors import (
@@ -45,7 +49,9 @@ from .identity import (
     app_installation_id,
     edge_id,
     environment_id,
+    git_commit_id,
     git_ref_id,
+    github_action_id,
     github_app_id,
     job_id,
     package_id,
@@ -58,11 +64,21 @@ from .identity import (
     ruleset_id,
     run_id,
     runner_id,
+    status_check_id,
+    uses_action_edge_id,
     workflow_id,
     workflow_job_id,
 )
 from .manifest import load_collection_manifest, load_link_manifest
-from .parser import parse_workflow_yaml
+from .parser import (
+    PIN_BRANCH,
+    PIN_LOCAL,
+    PIN_SHA,
+    PIN_TAG,
+    PIN_UNRESOLVED,
+    is_pinned,
+    parse_workflow_yaml,
+)
 from .secret import (
     GITHUB_SECRET_REF,
     api_base_url,
@@ -112,13 +128,76 @@ _SITE_BYPASS_ACTOR_UNMODELLED = "5dd2"
 _SITE_AUTH_MODE = "3e4d"
 _SITE_RELEASES_TRUNCATED = "a401"
 _SITE_RELEASES_UNOBSERVABLE = "efd6"
-_SITE_ARTIFACTS_DEGRADED = "5bb0"
-_SITE_ARTIFACTS_TRUNCATED = "879d"
-_SITE_PACKAGES_UNREADABLE = "de95"
+_SITE_PACKAGES_UNREADABLE = "8478"
 _SITE_PACKAGES_UNOBSERVABLE = "590d"
 _SITE_PACKAGE_VERSIONS_DEGRADED = "ffd2"
 _SITE_PACKAGE_VERSIONS_TRUNCATED = "e9ed"
 _SITE_PACKAGES_COLLECTED = "540a"
+_SITE_ACTION_REF_NOT_FOUND = "de95"
+_SITE_ACTIONS_USED = "13f5"
+_SITE_WORKFLOW_CALL_UNRESOLVED = "e9e5"
+_SITE_WORKFLOW_CALLS = "b97e"
+_SITE_WORKFLOW_TRIGGER_UNRESOLVED = "8f14"
+_SITE_WORKFLOW_TRIGGERS = "3025"
+_SITE_ARTIFACTS_DEGRADED = "eef3"
+_SITE_ARTIFACTS_TRUNCATED = "8e7f"
+_SITE_ARTIFACTS_COLLECTED = "933f"
+_SITE_REQUIRED_CHECKS_UNOBSERVABLE = "d66c"
+_SITE_STATUS_CHECKS = "9409"
+_SITE_ACTION_REF_UNOBSERVABLE = "a288"
+_SITE_ACTION_REF_BUDGET = "c9a3"
+_SITE_ACTION_REF_MALFORMED = "45b3"
+
+#: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
+#: three calls against a repository that is NOT in scope; past the cap an edge lands as
+#: `resolution: not_attempted` and the run says how many, rather than spending the rate limit.
+_ACTION_REF_RESOLUTION_CAP = 400
+#: What may reach an authenticated API path from a workflow file's `uses:` line. The repository is
+#: exactly `owner/repo` (no dots-only segments, no extra segments) and the ref is a git refname
+#: fragment: no `..`, no leading/trailing `/`, no empty segment — a crafted `../../orgs/x` must fail
+#: HERE, never travel as a request (Grok seat on PR #67).
+_SAFE_REPOSITORY_RE = re.compile(r"^(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+$")
+_SAFE_REF_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.?(?:/|$))(?!.*//)[A-Za-z0-9_.@+/-]+(?<!/)$")
+#: An annotated tag may point at another tag object; peel that many levels before giving up.
+_TAG_PEEL_MAX_DEPTH = 3
+_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+
+#: GitHub Actions' own App id — the integration that produces a workflow job's check run.
+_GITHUB_ACTIONS_INTEGRATION_ID = 15368
+
+#: The dimension keys that scope an envelope to ONE repository. Stripped from a node shared
+#: across the scope (an action, an app), kept on the edges that use it.
+_REPO_SCOPED_DIMENSION_KEYS = ("github.owner", "github.repo")
+
+
+def _check_name_confidence(job_name: str, context: str) -> str | None:
+    """How a declared job's display name relates to a required check context, or None.
+
+    A GitHub Actions check run is named after the job's display name; a matrix job expands it
+    to `name (value, …)`. The template is a prefix, not the context, so it is reported as
+    `matrix_template` rather than claimed as a match.
+    """
+    if job_name == context:
+        return "exact"
+    if context.startswith(f"{job_name} (") and context.endswith(")"):
+        return "matrix_template"
+    return None
+
+
+def _group_action_calls(action_refs: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    """Fold a job's per-step action refs into one entry per (action path, declared ref).
+
+    Two steps calling the same action at the same ref are one relationship with two positions;
+    the same action at two refs is two relationships.
+    """
+    by_call: dict[tuple[str, str], dict[str, Any]] = {}
+    for ref in action_refs:
+        action_path = str(ref.get("action_path") or ref.get("action") or "")
+        if not action_path:
+            continue
+        entry = by_call.setdefault((action_path, str(ref.get("ref") or "")), {**ref, "step_indexes": []})
+        entry["step_indexes"].append(int(ref.get("step_index", 0)))
+    return by_call
 
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
 # list under synthetic ``dynamic/<app>/...`` paths. These are not repo CI
@@ -129,7 +208,12 @@ _SYNTHETIC_APP_BY_PATH_PREFIX: dict[str, dict[str, str]] = {
     "dynamic/dependabot/": {
         "slug": "dependabot",
         "name": "Dependabot",
+        # Generic app page — the fallback when the observed owner is a user account.
         "html_url": "https://github.com/apps/dependabot",
+        # For an organization the app's own page is the org's security-settings
+        # page, where Dependabot is enabled and configured for every repository;
+        # `{owner}` is the account login. The generic apps/ page is documentation.
+        "org_html_url": "https://github.com/organizations/{owner}/settings/security_analysis",
         "description": "GitHub's managed dependency-update and security-alert app.",
     },
 }
@@ -151,10 +235,19 @@ _DOCS = (
 # anything we don't recognize is safer treated as "keep watching."
 _TERMINAL_RUN_STATUSES: frozenset[str] = frozenset({"completed"})
 
+# `configuration.completed_at_source` on a run node — which of the three states in
+# `GithubCollector._run_completed_at` produced its `completed_at` (github-core#46).
+COMPLETED_AT_FROM_JOBS = "jobs"
+COMPLETED_AT_FROM_UPDATED_AT = "updated_at"
+COMPLETED_AT_IN_FLIGHT = "in_flight"
+
 # How many cache entries to pull per repository. GitHub returns them most-recently-accessed
 # first, so a cap keeps the freshest — and the collector says how many it left, because a
 # truncated cache list that reads as complete would make "no cache from that ref" a wrong answer.
 _CACHE_LIMIT_PER_REPO = 100
+#: Artifacts per repository per run, newest first; the total is reported alongside. One
+#: repository measured 3,831 on 2026-09-02, so a cap is a necessity, not a nicety.
+_ARTIFACT_LIMIT_PER_REPO = 100
 #: Rule suites collected per repository per run. Bypasses only, so this is a ceiling on
 #: FINDINGS rather than on traffic — a repository with more than this many bypasses in the
 #: window has a bigger problem than truncation.
@@ -163,9 +256,6 @@ _RULE_SUITE_LIMIT_PER_REPO = 100
 #: month of bypasses reads as a quiet one (req-github-core-rule-suites-5).
 _RULE_SUITE_WINDOW = "month"
 
-#: Artifacts collected per repository per run, newest first. Measured 3,636 on one active
-#: repository, so the cap is the rule rather than the exception and the total is always reported.
-_ARTIFACT_LIMIT_PER_REPO = 100
 #: Packages per type and versions per package. Both endpoints are newest-first; GitHub's own
 #: `version_count` says what the version cap left behind (measured 1,973 on one image).
 _PACKAGE_LIMIT_PER_TYPE = 100
@@ -206,6 +296,31 @@ _OIDC_ISSUER_URL = "https://token.actions.githubusercontent.com"
 
 class GithubCollectorError(Exception):
     """Unrecoverable error during the github_core collection run."""
+
+
+def _iso_datetime(value: Any) -> datetime | None:
+    """Parse a GitHub timestamp (`2026-09-01T18:11:47Z`), or `None` when it is not one.
+
+    A degrade, not an abort: the per-repo boundary in `collect` catches only
+    `GithubAPIError`, so an unparseable stamp raising here would fail the whole
+    collection over one job. The caller treats `None` as "no usable end".
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+def _login_of(user: Any) -> str:
+    """The `login` of a GitHub user object, or `""` when the payload carried none.
+
+    Runs name their `actor` and `triggering_actor` as full user objects; the node
+    stores the login alone (github-core#47). `""` is observed-empty, which is what
+    an absent or null actor is: the payload was read and named nobody.
+    """
+    if not isinstance(user, dict):
+        return ""
+    return str(user.get("login") or "")
 
 
 def _owner_of(full_name: str) -> str:
@@ -484,6 +599,9 @@ class GithubCollector(CollectorBase):
         # github_app nodes are singletons shared across repos; dedupe the node
         # emission across the whole run (the ENABLED_ON edges still fan in).
         self._emitted_app_ids: set[str] = set()
+        # Account type of the observed owner ("Organization" | "User"), learned when
+        # the account node is emitted; steers owner-scoped app URLs.
+        self._account_type: str = ""
         #: Actor logins already emitted as accounts this run. One person bypassing in
         #: nineteen repositories is ONE account node, not nineteen.
         self._emitted_actor_logins: set[str] = set()
@@ -562,6 +680,28 @@ class GithubCollector(CollectorBase):
         #: output state onto it after the walk (github-core#31: three states on the node the
         #: absence is about).
         self._repo_envelopes: dict[str, dict[str, Any]] = {}
+        # Refs of an in-scope repository, `ref path -> head sha`, built on first demand from the
+        # config layer already in hand. What lets `uses: acme/tool@main` be resolved to a branch
+        # and a commit without a request, and what leaves `actions/checkout@v4` honestly
+        # unresolved: that repository is not in scope, and nothing here goes looking.
+        self._refs_by_repo: dict[str, dict[str, str]] = {}
+        #: Run-level tally for the actions summary, so a run can say what it saw.
+        # Built by `_usage_tally()` on first touch — ONE initializer, so a state added there cannot be
+        # missing here (2026-09-03: two live runs failed on KeyError('rest') because this line carried
+        # its own copy of the key set).
+        self._action_usage: dict[str, Any] | None = None
+        # Workflow-to-workflow reach is resolved in a POST-PASS, after every repository in scope
+        # has been walked: a reusable-workflow callee is named by (repo, path) and a
+        # `workflow_run` trigger by (repo, name), and either may live in a repository walked
+        # later — or in none we walked at all, which is the state that must stay visible.
+        self._workflow_uuid_by_path: dict[tuple[str, str], Any] = {}
+        self._workflow_uuids_by_name: dict[tuple[str, str], list[Any]] = {}
+        self._pending_calls: list[dict[str, Any]] = []
+        self._pending_triggers: list[dict[str, Any]] = []
+        self._collected_repos: set[str] = set()
+        self._required_checks: dict[tuple[str, str], dict[str, Any]] = {}
+        self._job_names: list[dict[str, Any]] = []
+        self._checks_unobservable: list[dict[str, Any]] = []
 
         # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope)
         owner = collection_owner(data)
@@ -679,6 +819,11 @@ class GithubCollector(CollectorBase):
         # for duplicate entity ids and NOTHING landed. Deduping is correct rather than
         # defensive: these are the same observation seen from several repos, and identity is
         # deterministic, so the last copy is as good as the first.
+        # Workflow-to-workflow reach, now that every workflow in scope has an id.
+        self._emit_workflow_calls(edges)
+        self._emit_workflow_triggers(edges)
+        self._emit_status_checks(nodes, edges)
+
         nodes, node_dupes = self._collapse_by_entity_id(nodes)
         edges, edge_dupes = self._collapse_by_entity_id(edges)
         # Every edge in the COLLECTION batch must land on a node in the same batch — cross-grid
@@ -721,6 +866,38 @@ class GithubCollector(CollectorBase):
             "COLLECTION_BATCH_SUBMITTED",
             f"Submitted collection batch with {len(nodes)} node(s) + {len(edges)} edge(s).",
         )
+        usage = self._usage_tally()
+        self.record_info(
+            _SITE_ACTIONS_USED,
+            "ACTIONS_USED",
+            f"{len(usage['actions'])} distinct action(s) across {usage['edges']} job usage(s); "
+            f"{usage['unpinned']} usage(s) pinned to a mutable name or nothing, of which "
+            f"{usage['rest']} resolved over REST against out-of-scope repositories, {usage['unresolved']} named "
+            f"a ref that exists as neither tag nor branch, {usage['unobservable']} could not be looked up "
+            f"(refused or failed) and {usage['not_attempted']} were not attempted (resolution cap "
+            f"{_ACTION_REF_RESOLUTION_CAP}; {self._action_ref_state()['lookups']} REST lookup(s) spent). "
+            f"A zero here with workflows in scope means no `uses:` lines, not a clean bill — check the "
+            f"workflow count.",
+            message_data={
+                "actions": len(usage["actions"]),
+                "usages": usage["edges"],
+                "unpinned": usage["unpinned"],
+                "unobservable": usage["unobservable"],
+                "rest": usage["rest"],
+                "unresolved": usage["unresolved"],
+                "not_attempted": usage["not_attempted"],
+                "rest_lookups": self._action_ref_state()["lookups"],
+            },
+        )
+        if self._action_ref_state()["skipped"]:
+            self.record_warn(
+                _SITE_ACTION_REF_BUDGET,
+                "ACTION_REF_BUDGET_EXHAUSTED",
+                f"{self._action_ref_state()['skipped']} distinct action ref(s) were not looked up: the per-run "
+                f"resolution cap ({_ACTION_REF_RESOLUTION_CAP}) was reached. Their edges carry "
+                f"`resolution: not_attempted`; an unresolved pin kind there is a budget fact, not an observation.",
+                message_data={"skipped": self._action_ref_state()["skipped"], "cap": _ACTION_REF_RESOLUTION_CAP},
+            )
 
         # --- enrichment phase (link resolution against landed nodes) ---
         enrichment_dims = {"github.platform": "github.com"}
@@ -932,10 +1109,12 @@ class GithubCollector(CollectorBase):
         }
         actions_dims = {**repo_dims, "github.surface": "actions"}
         observation_dims = {**actions_dims, "github.observation": "execution"}
+        self._walk_state()["collected_repos"].add(full_name)
 
         # account
         account_payload = self._fetch_account(client, owner)
         account_uuid = account_id(account_payload["login"])
+        self._account_type = str(account_payload.get("type") or "")
         nodes.append(
             node_envelope(
                 entity_id=account_uuid,
@@ -1016,28 +1195,31 @@ class GithubCollector(CollectorBase):
             wf_uuid = workflow_id(full_name, wf["id"])
             raw_yaml, parsed_config = self._workflow_config(client, full_name, wf.get("path", ""))
             wf_display_name = wf.get("name") or wf.get("path") or str(wf["id"])
-            nodes.append(
-                node_envelope(
-                    entity_id=wf_uuid,
-                    entity_type="github_core__github_workflow",
-                    name=wf_display_name,
-                    dimensions=actions_dims,
-                    fields={
-                        "full_name": full_name,
-                        "workflow_id": wf["id"],
-                        "path": wf.get("path", ""),
-                        "name": wf_display_name,
-                        "state": wf.get("state", ""),
-                        "html_url": wf.get("html_url", ""),
-                        "configuration": parsed_config,
-                        "tags": {},
-                    },
-                )
+            wf_envelope = node_envelope(
+                entity_id=wf_uuid,
+                entity_type="github_core__github_workflow",
+                name=wf_display_name,
+                dimensions=actions_dims,
+                fields={
+                    "full_name": full_name,
+                    "workflow_id": wf["id"],
+                    "path": wf.get("path", ""),
+                    "name": wf_display_name,
+                    "state": wf.get("state", ""),
+                    "html_url": wf.get("html_url", ""),
+                    "configuration": parsed_config,
+                    "tags": {},
+                },
             )
+            nodes.append(wf_envelope)
             edges.append(self._edge("DEFINES_WORKFLOW__github_core", repo_uuid, wf_uuid, actions_dims))
+            self._register_workflow(
+                full_name, wf.get("path", ""), wf_display_name, wf_uuid, wf_envelope, parsed_config, actions_dims
+            )
             # The DECLARED jobs inside this file — the level every privilege decision is made at.
             self._emit_declared_jobs(
-                full_name, wf_uuid, wf["id"], wf.get("path", ""), parsed_config, env_uuid_by_name, nodes, edges
+                full_name, wf_uuid, wf["id"], wf.get("path", ""), parsed_config, env_uuid_by_name, nodes, edges,
+                client=client,
             )
             # Local-action surfacing per req-github-core-workflow-parse-3.
             for ref in parsed_config.get("local_action_refs") or []:
@@ -1064,75 +1246,12 @@ class GithubCollector(CollectorBase):
             client, full_name, already_fetched_run_ids={r["id"] for r in run_payloads}
         )
         run_payloads.extend(refreshed)
+        # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
+        # the same job payloads, and at account scope a second walk is one extra API call per
+        # RUN — the single largest cost in the whole collection.
         jobs_by_run: dict[int, list[dict[str, Any]]] = {}
         for r in run_payloads:
-            run_uuid = run_id(full_name, r["id"])
-            wf_ref_uuid = workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
-            nodes.append(
-                node_envelope(
-                    entity_id=run_uuid,
-                    entity_type="github_core__github_actions_run",
-                    name=f"Run #{r.get('run_number', r['id'])}",
-                    dimensions=observation_dims,
-                    fields={
-                        "full_name": full_name,
-                        "run_id": r["id"],
-                        "run_number": r.get("run_number"),
-                        "event": r.get("event", ""),
-                        "status": r.get("status", ""),
-                        "conclusion": r.get("conclusion") or "",
-                        "head_sha": r.get("head_sha", ""),
-                        "head_branch": r.get("head_branch", ""),
-                        "run_started_at": r.get("run_started_at"),
-                        "completed_at": r.get("updated_at"),
-                        "html_url": r.get("html_url", ""),
-                        "configuration": {
-                            "workflow_id": r.get("workflow_id"),
-                            "raw_payload_keys": sorted(r.keys()),
-                        },
-                        "tags": {},
-                    },
-                )
-            )
-            if wf_ref_uuid is not None:
-                edges.append(self._edge("EXECUTES_WORKFLOW__github_core", run_uuid, wf_ref_uuid, observation_dims))
-
-            # jobs for this run (latest-attempt endpoint per req-github-core-collector-8).
-            # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
-            # the same payloads, and at account scope a second walk is one extra API call per RUN
-            # — the single largest cost in the whole collection.
-            jobs = self._fetch_run_jobs(client, full_name, r["id"])
-            jobs_by_run[r["id"]] = jobs
-            for j in jobs:
-                j_uuid = job_id(full_name, j["id"])
-                j_display_name = j.get("name") or str(j["id"])
-                nodes.append(
-                    node_envelope(
-                        entity_id=j_uuid,
-                        entity_type="github_core__github_actions_job",
-                        name=j_display_name,
-                        dimensions=observation_dims,
-                        fields={
-                            "full_name": full_name,
-                            "job_id": j["id"],
-                            "name": j_display_name,
-                            "status": j.get("status", ""),
-                            "conclusion": j.get("conclusion") or "",
-                            "started_at": j.get("started_at"),
-                            "completed_at": j.get("completed_at"),
-                            "html_url": j.get("html_url", ""),
-                            "configuration": {
-                                "runner_id": j.get("runner_id"),
-                                "runner_name": j.get("runner_name"),
-                                "runner_group_id": j.get("runner_group_id"),
-                                "labels": j.get("labels") or [],
-                                "steps": j.get("steps") or [],
-                            },
-                            "tags": {},
-                        },
-                    )
-                )
-                edges.append(self._edge("HAS_ACTIONS_JOB__github_core", run_uuid, j_uuid, observation_dims))
+            jobs_by_run[r["id"]] = self._emit_run_with_jobs(client, full_name, r, observation_dims, nodes, edges)
 
         # runners (graceful-degrade on 403 per req-github-core-collector-5)
         try:
@@ -1222,6 +1341,153 @@ class GithubCollector(CollectorBase):
 
     # ---------- configuration-layer emitters ----------
 
+    def _emit_run_with_jobs(
+        self,
+        client: GithubClient,
+        full_name: str,
+        r: dict[str, Any],
+        observation_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Emit one run node, its latest-attempt job nodes, and the edges between them.
+
+        The jobs are fetched FIRST (latest-attempt endpoint per
+        req-github-core-collector-8) because the run's end time is derived from
+        them — see `_run_completed_at` (github-core#46). Returns the job payloads
+        (empty when the endpoint degraded) so the caller can hold them for the
+        EXECUTED_ON pass without a second walk.
+
+        Args:
+            client: The REST client for this collection.
+            full_name: `owner/repo` of the run's repository.
+            r: The run payload as GitHub returned it.
+            observation_dims: Dimensions stamped on every execution node.
+            nodes: Node envelopes to append to.
+            edges: Edge envelopes to append to.
+
+        Returns:
+            The run's job payloads; `[]` when they were not observable.
+        """
+        run_uuid = run_id(full_name, r["id"])
+        wf_ref_uuid = workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
+        jobs = self._fetch_run_jobs(client, full_name, r["id"])
+        completed_at, completed_at_source = self._run_completed_at(r, jobs)
+        nodes.append(
+            node_envelope(
+                entity_id=run_uuid,
+                entity_type="github_core__github_actions_run",
+                name=f"Run #{r.get('run_number', r['id'])}",
+                dimensions=observation_dims,
+                fields={
+                    "full_name": full_name,
+                    "run_id": r["id"],
+                    "run_number": r.get("run_number"),
+                    "event": r.get("event", ""),
+                    "status": r.get("status", ""),
+                    "conclusion": r.get("conclusion") or "",
+                    "head_sha": r.get("head_sha", ""),
+                    "head_branch": r.get("head_branch", ""),
+                    "created_at": r.get("created_at"),
+                    "run_started_at": r.get("run_started_at"),
+                    "completed_at": completed_at,
+                    "run_attempt": r.get("run_attempt"),
+                    # Logins only (github-core#47): the actor objects carry avatar URLs, node
+                    # ids and a dozen API links — the login is the join key and the answer.
+                    "actor_login": _login_of(r.get("actor")),
+                    "triggering_actor_login": _login_of(r.get("triggering_actor")),
+                    "html_url": r.get("html_url", ""),
+                    "configuration": {
+                        "workflow_id": r.get("workflow_id"),
+                        "raw_payload_keys": sorted(r.keys()),
+                        "completed_at_source": completed_at_source,
+                    },
+                    "tags": {},
+                },
+            )
+        )
+        if wf_ref_uuid is not None:
+            edges.append(self._edge("EXECUTES_WORKFLOW__github_core", run_uuid, wf_ref_uuid, observation_dims))
+
+        for j in jobs or []:
+            j_uuid = job_id(full_name, j["id"])
+            j_display_name = j.get("name") or str(j["id"])
+            nodes.append(
+                node_envelope(
+                    entity_id=j_uuid,
+                    entity_type="github_core__github_actions_job",
+                    name=j_display_name,
+                    dimensions=observation_dims,
+                    fields={
+                        "full_name": full_name,
+                        "job_id": j["id"],
+                        "name": j_display_name,
+                        "status": j.get("status", ""),
+                        "conclusion": j.get("conclusion") or "",
+                        "created_at": j.get("created_at"),
+                        "started_at": j.get("started_at"),
+                        "completed_at": j.get("completed_at"),
+                        "html_url": j.get("html_url", ""),
+                        "configuration": {
+                            "runner_id": j.get("runner_id"),
+                            "runner_name": j.get("runner_name"),
+                            "runner_group_id": j.get("runner_group_id"),
+                            "labels": j.get("labels") or [],
+                            "steps": j.get("steps") or [],
+                        },
+                        "tags": {},
+                    },
+                )
+            )
+            edges.append(self._edge("HAS_ACTIONS_JOB__github_core", run_uuid, j_uuid, observation_dims))
+        return jobs or []
+
+    @staticmethod
+    def _run_completed_at(r: dict[str, Any], jobs: list[dict[str, Any]] | None) -> tuple[str | None, str]:
+        """Establish a run's end time honestly (github-core#46).
+
+        GitHub's run payload carries no `completed_at`. Its `updated_at` moves on
+        re-run, on artifact and log events and on check-suite updates, so a run
+        that was touched later reads as having taken hours. The end the run
+        actually had is the latest `completed_at` over its jobs.
+
+        Three states, never two — the second element names which one applies:
+
+        - `COMPLETED_AT_FROM_JOBS`: derived, `max(job.completed_at)` over the
+          collected latest-attempt jobs.
+        - `COMPLETED_AT_FROM_UPDATED_AT`: approximated from the payload's
+          `updated_at`, because the run is complete but its end was not
+          observable from the jobs: the jobs endpoint degraded, the run has no
+          jobs (a skipped run), or the listing still carried a job without a
+          parseable end — the listing is eventually consistent, and a maximum
+          over the jobs that HAVE finished would understate the run. An upper
+          bound, not a measurement.
+        - `COMPLETED_AT_IN_FLIGHT`: null, because the run has not reached a
+          terminal status. No end time exists yet; a partial `max` over the jobs
+          that have finished would be a lie.
+
+        Args:
+            r: The run payload as GitHub returned it.
+            jobs: The run's job payloads, or `None` when they were not observable.
+
+        Returns:
+            `(completed_at, source)` — the ISO timestamp (or `None`) and the
+            source label recorded beside it in `configuration.completed_at_source`.
+        """
+        if r.get("status") not in _TERMINAL_RUN_STATUSES:
+            return None, COMPLETED_AT_IN_FLIGHT
+        ends: list[tuple[datetime, str]] = []
+        for j in jobs or []:
+            parsed = _iso_datetime(j.get("completed_at"))
+            if parsed is None:
+                # One job without a usable end makes the whole listing a non-measurement.
+                ends = []
+                break
+            ends.append((parsed, j["completed_at"]))
+        if ends:
+            return max(ends)[1], COMPLETED_AT_FROM_JOBS
+        return r.get("updated_at"), COMPLETED_AT_FROM_UPDATED_AT
+
     def _emit_refs(
         self,
         full_name: str,
@@ -1273,6 +1539,7 @@ class GithubCollector(CollectorBase):
                 )
             )
             edges.append(self._edge("HAS_REF__github_core", repo_uuid, ref_uuid, git_dims))
+            self._emit_commit(full_name, ref.get("commit"), ref_uuid, git_dims, nodes, edges)
         for ref_type, missing in sorted(truncated.items()):
             self.record_warn(
                 _SITE_REFS_TRUNCATED,
@@ -1282,6 +1549,38 @@ class GithubCollector(CollectorBase):
                 message_data={"repo": full_name, "ref_type": ref_type, "missing": missing},
             )
         return uuid_by_ref
+
+    def _emit_commit(
+        self,
+        full_name: str,
+        commit: dict[str, Any] | None,
+        ref_uuid: Any,
+        git_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """One `git_commit` per (repository, head SHA), shared across that repository's refs,
+        plus `POINTS_AT`.
+
+        Repository-scoped, because GitHub's signature verification record is persisted per
+        repository network and a SHA-only node could merge two networks' verdicts. Nothing is
+        emitted when the ref carried no commit slice: a config layer whose commit fields were
+        degraded, or a repos-only scope, yields refs without commits — and a node full of empty
+        strings would read as an unsigned commit by someone nobody could name.
+        """
+        if not commit:
+            return
+        commit_uuid = git_commit_id(full_name, str(commit["sha"]))
+        nodes.append(
+            node_envelope(
+                entity_id=commit_uuid,
+                entity_type="github_core__git_commit",
+                name=str(commit["sha"])[:12],
+                dimensions=git_dims,
+                fields={**commit, "full_name": full_name, "configuration": {}, "tags": {}},
+            )
+        )
+        edges.append(self._edge("POINTS_AT__github_core", ref_uuid, commit_uuid, git_dims))
 
     def _emit_rulesets(
         self,
@@ -1373,6 +1672,9 @@ class GithubCollector(CollectorBase):
             )
             self._emit_protected_refs(ruleset, rs_uuid, full_name, ref_uuid_by_ref, rules_dims, edges)
             self._emit_bypass_edges(ruleset, rs_uuid, observability, rules_dims, nodes, edges)
+            self._register_required_checks(
+                owner, rs_uuid, ruleset["name"], list((detail or {}).get("rules") or ruleset["rules"]), ruleset_dims
+            )
             if observability["state"] == "unobservable":
                 self.record_warn(
                     _SITE_RULESET_BYPASS_UNOBSERVABLE,
@@ -1679,6 +1981,7 @@ class GithubCollector(CollectorBase):
         env_uuid_by_name: dict[str, Any],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
+            client: GithubClient | None = None,
     ) -> None:
         """Emit one `workflow_job` per job declared in the file, plus its `needs:` graph.
 
@@ -1701,8 +2004,17 @@ class GithubCollector(CollectorBase):
                 continue
             job_uuid = workflow_job_id(full_name, workflow_id_int, job_key)
             uuid_by_key[job_key] = job_uuid
-            nodes.append(
-                node_envelope(
+            self._walk_state()["job_names"].append(
+                {
+                    "owner": full_name.partition("/")[0],
+                    "repo": full_name,
+                    "wf_uuid": wf_uuid,
+                    "job_key": job_key,
+                    "job_name": str(job.get("name") or job_key),
+                    "dims": {**declared_dims, "github.surface": "actions"},
+                }
+            )
+            job_envelope = node_envelope(
                     entity_id=job_uuid,
                     entity_type="github_core__workflow_job",
                     name=str(job.get("name") or job_key),
@@ -1732,11 +2044,27 @@ class GithubCollector(CollectorBase):
                             # it spans both levels.
                             "workflow_triggers": parsed_config.get("triggers") or [],
                             "workflow_permissions": parsed_config.get("permissions"),
+                            # Which secrets cross into a reusable workflow this job calls — every
+                            # one (`inherit`) or the named few. Names only, never material.
+                            "secrets_inherit": bool(job.get("secrets_inherit")),
+                            "secrets_passed": list(job.get("secrets_passed") or []),
                         },
                         "tags": {},
                     },
-                )
             )
+            nodes.append(job_envelope)
+            if job.get("workflow_call"):
+                # Resolved after every repo is walked — the callee may live in a later one.
+                self._walk_state()["pending_calls"].append(
+                    {
+                        "envelope": job_envelope,
+                        "job_uuid": job_uuid,
+                        "caller": full_name,
+                        "call": dict(job["workflow_call"]),
+                        "secrets_inherit": bool(job.get("secrets_inherit")),
+                        "dims": declared_dims,
+                    }
+                )
             edges.append(
                 edge_envelope(
                     entity_id=edge_id("DEFINES_JOB__github_core", wf_uuid, job_uuid),
@@ -1757,6 +2085,10 @@ class GithubCollector(CollectorBase):
                         {**declared_dims, "github.surface": "deployments"},
                     )
                 )
+            # The third-party code this job hands its token to, and how each call is pinned.
+            self._emit_used_actions(
+                full_name, job_uuid, job.get("action_refs") or [], declared_dims, nodes, edges, client=client
+            )
         # `needs:` — emitted after every job in the file has an id, because a job may need one
         # declared below it.
         for job in jobs:
@@ -1779,6 +2111,615 @@ class GithubCollector(CollectorBase):
                         properties={"condition": str(job.get("if") or "")},
                     )
                 )
+
+    def _emit_used_actions(
+        self,
+        full_name: str,
+        job_uuid: Any,
+        action_refs: list[dict[str, Any]],
+        usage_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+            client: GithubClient | None = None,
+    ) -> None:
+        """One `github_action` per distinct path, one `USES_ACTION` per (job, action, ref).
+
+        The node is shared across the whole run (deterministic id; envelope collapse keeps one
+        copy) and carries NO owner/repo dimension, because `actions/checkout` belongs to no one
+        repository in scope. The edge keeps the calling repository's dimensions: the usage is
+        that repository's fact. The pin lives on the edge — it is a fact about this job's call,
+        and the same action is pinned differently by different jobs.
+        """
+        action_dims = {k: v for k, v in usage_dims.items() if k not in _REPO_SCOPED_DIMENSION_KEYS}
+        for (action_path, declared_ref), call in sorted(_group_action_calls(action_refs).items()):
+            action_uuid = github_action_id(action_path)
+            nodes.append(self._action_node(action_uuid, action_path, call, action_dims))
+            properties = self._uses_action_properties(full_name, call, declared_ref, client=client)
+            edges.append(
+                edge_envelope(
+                    entity_id=uses_action_edge_id(job_uuid, action_uuid, declared_ref),
+                    edge_type="USES_ACTION__github_core",
+                    source_id=job_uuid,
+                    target_id=action_uuid,
+                    dimensions=usage_dims,
+                    properties=properties,
+                )
+            )
+            self._tally_usage(action_path, properties)
+
+    @staticmethod
+    def _action_node(action_uuid: Any, action_path: str, call: dict[str, Any], dims: dict[str, str]) -> dict[str, Any]:
+        return node_envelope(
+            entity_id=action_uuid,
+            entity_type="github_core__github_action",
+            name=action_path,
+            dimensions=dims,
+            fields={
+                "action_path": action_path,
+                "kind": str(call.get("kind") or "repository"),
+                "owner": str(call.get("owner") or ""),
+                "repository_full_name": str(call.get("repository_full_name") or ""),
+                "subpath": str(call.get("subpath") or ""),
+                "name": action_path,
+                "configuration": {},
+                "tags": {},
+            },
+        )
+
+    def _uses_action_properties(
+        self, full_name: str, call: dict[str, Any], declared_ref: str, client: GithubClient | None = None
+    ) -> dict[str, Any]:
+        """The pin, in three states — see `_resolve_action_pin`."""
+        pin_kind, resolved_sha, resolution = self._resolve_action_pin(
+            full_name,
+            str(call.get("kind") or ""),
+            str(call.get("repository_full_name") or ""),
+            declared_ref,
+            str(call.get("pin_kind") or ""),
+            client=client,
+        )
+        properties: dict[str, Any] = {
+            "declared_ref": declared_ref,
+            "pin_kind": pin_kind,
+            "is_pinned": is_pinned(pin_kind),
+            "resolution": resolution,
+            "step_indexes": sorted(call["step_indexes"]),
+        }
+        if resolved_sha:
+            properties["resolved_sha"] = resolved_sha
+        return properties
+
+    def _tally_usage(self, action_path: str, properties: dict[str, Any]) -> None:
+        usage = self._usage_tally()
+        usage["actions"].add(action_path)
+        usage["edges"] += 1
+        if not properties["is_pinned"]:
+            usage["unpinned"] += 1
+        if properties["resolution"] in ("unobservable", "rest", "unresolved", "not_attempted"):
+            usage[properties["resolution"]] += 1
+
+    def _resolve_action_pin(
+        self,
+        full_name: str,
+        kind: str,
+        repository_full_name: str,
+        declared_ref: str,
+        parsed_pin: str,
+        client: GithubClient | None = None,
+    ) -> tuple[str, str, str]:
+        """Upgrade a parsed pin to what the collector can PROVE: ``(pin_kind, resolved_sha, resolution)``.
+
+        Three states, never two. `literal`: the string settles it (a SHA, a digest, an image
+        tag, nothing written). `in_scope`: the action's repository is in the observed scope, so
+        its refs are in hand and the name is a `tag` or a `branch` with a head commit — or it
+        matches neither, which stays `unresolved` and is warned about. `unobservable`: the
+        repository is outside the scope and no call was made; the absence of a resolved SHA
+        here is not evidence of anything and must not render as one.
+        """
+        if parsed_pin != PIN_UNRESOLVED or kind != "repository":
+            return parsed_pin, declared_ref if parsed_pin == PIN_SHA else "", "literal"
+        refs = self._refs_for(repository_full_name)
+        if refs is None:
+            # Out of scope. With a client the name is looked up over REST — once per distinct
+            # (repository, ref) per run, under a cap — and lands as `rest`, `unresolved`,
+            # `unobservable` or `not_attempted` (req-github-core-actions-used-6). Without one
+            # (a caller driving the walk directly) nothing was fetched: `unobservable`.
+            if client is None:
+                return PIN_UNRESOLVED, "", "unobservable"
+            return self._resolve_action_ref_via_rest(client, repository_full_name, declared_ref)
+        tag_sha = refs.get(f"refs/tags/{declared_ref}")
+        if tag_sha is not None:
+            return PIN_TAG, tag_sha, "in_scope"
+        branch_sha = refs.get(f"refs/heads/{declared_ref}")
+        if branch_sha is not None:
+            return PIN_BRANCH, branch_sha, "in_scope"
+        self.record_warn(
+            _SITE_ACTION_REF_NOT_FOUND,
+            "ACTION_REF_NOT_FOUND",
+            f"{full_name} uses {repository_full_name}@{declared_ref}, whose repository is in scope "
+            f"but carries no tag or branch by that name among the refs collected — a deleted ref, "
+            f"or one beyond the ref page cap. Left unresolved rather than guessed.",
+            message_data={"repo": full_name, "action_repo": repository_full_name, "ref": declared_ref},
+        )
+        return PIN_UNRESOLVED, "", "in_scope"
+
+    def _walk_state(self) -> dict[str, Any]:
+        """The run-wide registers the workflow-chain post-pass reads, created on first touch.
+
+        Lazy for the same reason as `_usage_tally`: the per-repo walk is driven directly by
+        tests that never call `run()`.
+        """
+        if getattr(self, "_workflow_uuid_by_path", None) is None:
+            self._workflow_uuid_by_path = {}
+            self._workflow_uuids_by_name = {}
+            self._pending_calls = []
+            self._pending_triggers = []
+            self._collected_repos = set()
+            # Required check contexts by (owner, context) -> the requirements that name them;
+            # every declared job's display name; and the rulesets whose contexts could not be
+            # read. All three feed `_emit_status_checks` after the whole scope is walked.
+            self._required_checks = {}
+            self._job_names = []
+            self._checks_unobservable = []
+        return {
+            "by_path": self._workflow_uuid_by_path,
+            "by_name": self._workflow_uuids_by_name,
+            "pending_calls": self._pending_calls,
+            "pending_triggers": self._pending_triggers,
+            "collected_repos": self._collected_repos,
+            "required_checks": self._required_checks,
+            "job_names": self._job_names,
+            "checks_unobservable": self._checks_unobservable,
+        }
+
+    def _register_workflow(
+        self,
+        full_name: str,
+        path: str,
+        display_name: str,
+        wf_uuid: Any,
+        wf_envelope: dict[str, Any],
+        parsed_config: dict[str, Any],
+        dims: dict[str, str],
+    ) -> None:
+        """Index a workflow by (repo, path) and (repo, name) for the post-pass, and queue its
+        `workflow_run` trigger if it declares one."""
+        state = self._walk_state()
+        state["by_path"][(full_name, path)] = wf_uuid
+        # Several workflows may share a display name; GitHub fires `workflow_run` on all of them.
+        state["by_name"].setdefault((full_name, display_name), []).append(wf_uuid)
+        workflow_run = parsed_config.get("workflow_run")
+        if workflow_run:
+            state["pending_triggers"].append(
+                {"envelope": wf_envelope, "wf_uuid": wf_uuid, "repo": full_name, "workflow_run": workflow_run, "dims": dims}
+            )
+
+    def _emit_workflow_calls(self, edges: list[dict[str, Any]]) -> None:
+        """`CALLS_WORKFLOW`: a declared job to the reusable workflow it calls, when that workflow
+        is on the grid — and a recorded reason on the job when it is not.
+
+        Three states, on the CALLING job's `configuration.call_resolution`, because a property
+        that qualifies an absence belongs on the node the absence is about: `resolved` (edge
+        emitted), `unresolved_in_scope` (the callee's repository was walked and has no workflow
+        at that path — a broken call, or a workflow GitHub does not list), `out_of_scope` (the
+        callee's repository was not walked; nothing is known and no node is invented).
+        """
+        state = self._walk_state()
+        counts = {"resolved": 0, "unresolved_in_scope": 0, "out_of_scope": 0, "secrets_inherit": 0}
+        for pending in state["pending_calls"]:
+            verdict = self._resolve_workflow_call(pending, state, edges)
+            pending["envelope"]["node"]["configuration"]["call_resolution"] = verdict
+            counts[verdict] += 1
+            counts["secrets_inherit"] += int(verdict == "resolved" and bool(pending["secrets_inherit"]))
+        if state["pending_calls"]:
+            self.record_info(
+                _SITE_WORKFLOW_CALLS,
+                "WORKFLOW_CALLS",
+                f"{len(state['pending_calls'])} reusable-workflow call(s): {counts['resolved']} resolved to a workflow on "
+                f"the grid, {counts['unresolved_in_scope']} unresolved inside the scope, {counts['out_of_scope']} "
+                f"calling a repository outside it (not observable — no node was invented); "
+                f"{counts['secrets_inherit']} pass every secret with `secrets: inherit`.",
+                message_data=counts,
+            )
+
+    def _resolve_workflow_call(self, pending: dict[str, Any], state: dict[str, Any], edges: list[dict[str, Any]]) -> str:
+        """One pending call → its verdict, emitting the edge when the callee is on the grid."""
+        call = pending["call"]
+        callee_repo = pending["caller"] if call["same_repository"] else str(call["repository_full_name"])
+        target = state["by_path"].get((callee_repo, str(call["path"])))
+        if target is None:
+            if callee_repo not in state["collected_repos"]:
+                return "out_of_scope"
+            self.record_warn(
+                _SITE_WORKFLOW_CALL_UNRESOLVED,
+                "WORKFLOW_CALL_UNRESOLVED",
+                f"{pending['caller']} calls {callee_repo}/{call['path']}, whose repository is in scope but "
+                f"lists no workflow at that path. No edge; the call stays on the job as text.",
+                message_data={"caller": pending["caller"], "callee_repo": callee_repo, "path": call["path"]},
+            )
+            return "unresolved_in_scope"
+        edges.append(
+            self._edge(
+                "CALLS_WORKFLOW__github_core",
+                pending["job_uuid"],
+                target,
+                pending["dims"],
+                self._calls_workflow_properties(pending, callee_repo),
+            )
+        )
+        return "resolved"
+
+    def _calls_workflow_properties(self, pending: dict[str, Any], callee_repo: str) -> dict[str, Any]:
+        """The pin (USES_ACTION's grammar; a `./` call is `local`) plus the secrets posture."""
+        call = pending["call"]
+        if call["pin_kind"] == PIN_LOCAL:
+            pin_kind, resolved_sha, resolution = PIN_LOCAL, "", "literal"
+        else:
+            pin_kind, resolved_sha, resolution = self._resolve_action_pin(
+                pending["caller"], "repository", callee_repo, str(call["ref"]), str(call["pin_kind"])
+            )
+        properties: dict[str, Any] = {
+            "declared_ref": str(call["ref"]),
+            "pin_kind": pin_kind,
+            "is_pinned": is_pinned(pin_kind),
+            "resolution": resolution,
+            "same_repository": bool(call["same_repository"]),
+            "secrets_inherit": bool(pending["secrets_inherit"]),
+        }
+        if resolved_sha:
+            properties["resolved_sha"] = resolved_sha
+        return properties
+
+    def _emit_workflow_triggers(self, edges: list[dict[str, Any]]) -> None:
+        """`TRIGGERS_WORKFLOW`: from each workflow named in `on: workflow_run: workflows:` to the
+        workflow that declares it. Names resolve within the same repository only (GitHub's
+        rule), against the stored display name; every workflow sharing the name gets an edge,
+        because GitHub fires on all of them. An unmatched name is recorded on the declaring
+        workflow's `configuration.trigger_resolution` and warned, never guessed.
+        """
+        state = self._walk_state()
+        emitted = 0
+        unresolved_total = 0
+        for pending in state["pending_triggers"]:
+            matched, unresolved = self._resolve_workflow_trigger(pending, state, edges)
+            emitted += matched
+            unresolved_total += len(unresolved)
+            pending["envelope"]["node"]["configuration"]["trigger_resolution"] = {
+                "resolved": len(pending["workflow_run"].get("workflows") or []) - len(unresolved),
+                "unresolved": unresolved,
+            }
+        if state["pending_triggers"]:
+            self.record_info(
+                _SITE_WORKFLOW_TRIGGERS,
+                "WORKFLOW_TRIGGERS",
+                f"{len(state['pending_triggers'])} workflow(s) declare `workflow_run`; {emitted} trigger edge(s) "
+                f"emitted, {unresolved_total} declared name(s) matched nothing.",
+                message_data={"declaring": len(state["pending_triggers"]), "edges": emitted, "unresolved": unresolved_total},
+            )
+
+    def _resolve_workflow_trigger(
+        self, pending: dict[str, Any], state: dict[str, Any], edges: list[dict[str, Any]]
+    ) -> tuple[int, list[str]]:
+        """One declaring workflow → ``(edges emitted, names that matched nothing)``."""
+        block = pending["workflow_run"]
+        properties: dict[str, Any] = {"trigger_event": "workflow_run"}
+        for key in ("types", "branches", "branches_ignore"):
+            if key in block:
+                properties[key] = list(block[key])
+        emitted = 0
+        unresolved: list[str] = []
+        for declared_name in block.get("workflows") or []:
+            sources = state["by_name"].get((pending["repo"], declared_name)) or []
+            if not sources:
+                unresolved.append(declared_name)
+                continue
+            for source in sources:
+                edges.append(
+                    self._edge(
+                        "TRIGGERS_WORKFLOW__github_core",
+                        source,
+                        pending["wf_uuid"],
+                        pending["dims"],
+                        {**properties, "declared_name": declared_name},
+                    )
+                )
+                emitted += 1
+        if unresolved:
+            self.record_warn(
+                _SITE_WORKFLOW_TRIGGER_UNRESOLVED,
+                "WORKFLOW_TRIGGER_UNRESOLVED",
+                f"{pending['repo']}: `workflow_run` names {unresolved!r}, which match no workflow in the "
+                f"repository by display name. No edge; a renamed or deleted upstream workflow, or a "
+                f"trigger that can never fire.",
+                message_data={"repo": pending["repo"], "unresolved": unresolved},
+            )
+        return emitted, unresolved
+
+    def _register_required_checks(
+        self, owner: str, rs_uuid: Any, ruleset_name: str, rules: list[dict[str, Any]], dims: dict[str, str]
+    ) -> None:
+        """Record every context a ruleset's `required_status_checks` rule names — or that it
+        names some and the credential could not read which.
+
+        A rule with no `parameters` is the type-only GraphQL fallback: the detail was refused, the
+        contexts are NOT observable, and the ruleset is counted rather than read as requiring
+        nothing.
+        """
+        state = self._walk_state()
+        for rule in rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            params = rule.get("parameters")
+            if not isinstance(params, dict):
+                state["checks_unobservable"].append({"ruleset": ruleset_name, "owner": owner})
+                continue
+            for check in params.get("required_status_checks") or []:
+                context = str((check or {}).get("context") or "")
+                if not context:
+                    continue
+                entry = state["required_checks"].setdefault(
+                    (owner, context), {"dims": dims, "requirements": {}}
+                )
+                entry["requirements"][str(rs_uuid)] = {
+                    "rs_uuid": rs_uuid,
+                    "integration_id": (check or {}).get("integration_id"),
+                    "strict": bool(params.get("strict_required_status_checks_policy", False)),
+                    "do_not_enforce_on_create": bool(params.get("do_not_enforce_on_create", False)),
+                }
+
+    def _emit_status_checks(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+        """One `status_check` per required (owner, context); `REQUIRES_CHECK` from each ruleset
+        naming it; `PRODUCES_CHECK` from each workflow in the owner's scope declaring a job whose
+        display name is the context (`exact`) or its matrix template — only when the
+        requirement admits an Actions-produced check.
+        """
+        state = self._walk_state()
+        produced = 0
+        unproduced: list[str] = []
+        for (owner, context), entry in sorted(state["required_checks"].items()):
+            check_uuid = status_check_id(owner, context)
+            # The node's dims are DERIVED from the type's defaults plus the owner — never
+            # copied from whichever ruleset happened to name the context first, so a
+            # repository ruleset's `github.repo` can never leak onto the shared node.
+            node_dims = {**StatusCheck.DEFAULT_DIMENSIONS, "github.owner": owner}
+            nodes.append(
+                node_envelope(
+                    entity_id=check_uuid,
+                    entity_type="github_core__status_check",
+                    name=context,
+                    dimensions=node_dims,
+                    fields={"owner_login": owner, "context": context, "name": context, "configuration": {}, "tags": {}},
+                )
+            )
+            # A producer edge says "a workflow job produces a check run with this name" — via GitHub
+            # Actions, integration 15368. Whether that satisfies a GIVEN requirement is read off
+            # that requirement's REQUIRES_CHECK.integration_id: with two rulesets naming one
+            # context, one App-only and one Actions, the node carries producers for the second
+            # and the first still requires an App. Compatibility is per requirement, never a
+            # property of the shared node (PR #62 review).
+            actions_may_produce = False
+            for requirement in entry["requirements"].values():
+                integration = requirement["integration_id"]
+                actions_may_produce |= integration is None or integration == _GITHUB_ACTIONS_INTEGRATION_ID
+                edges.append(
+                    self._edge(
+                        "REQUIRES_CHECK__github_core",
+                        requirement["rs_uuid"],
+                        check_uuid,
+                        entry["dims"],
+                        {
+                            "integration_id": integration,
+                            "strict": requirement["strict"],
+                            "do_not_enforce_on_create": requirement["do_not_enforce_on_create"],
+                        },
+                    )
+                )
+            if not actions_may_produce:
+                continue
+            producers = self._check_producers(owner, context, check_uuid, edges)
+            produced += producers
+            if not producers:
+                unproduced.append(f"{owner}#{context}")
+        for gap in state["checks_unobservable"]:
+            self.record_warn(
+                _SITE_REQUIRED_CHECKS_UNOBSERVABLE,
+                "REQUIRED_CHECKS_UNOBSERVABLE",
+                f"{gap['owner']}: ruleset {gap['ruleset']!r} requires status checks, but WHICH is not observable — "
+                f"the ruleset detail was refused and only the rule type is known. No status_check node was "
+                f"minted; this is not a ruleset with no required checks.",
+                message_data=gap,
+            )
+        if state["required_checks"] or state["checks_unobservable"]:
+            self.record_info(
+                _SITE_STATUS_CHECKS,
+                "STATUS_CHECKS",
+                f"{len(state['required_checks'])} required check context(s), {produced} producer edge(s) from "
+                f"workflow jobs, {len(unproduced)} Actions-producible context(s) with no declared producer in "
+                f"scope ({', '.join(unproduced[:5])}{'…' if len(unproduced) > 5 else ''}), "
+                f"{len(state['checks_unobservable'])} ruleset(s) whose required contexts could not be read.",
+                message_data={
+                    "contexts": len(state["required_checks"]),
+                    "producers": produced,
+                    "unproduced": unproduced,
+                    "unobservable": len(state["checks_unobservable"]),
+                },
+            )
+
+    def _check_producers(self, owner: str, context: str, check_uuid: Any, edges: list[dict[str, Any]]) -> int:
+        """`PRODUCES_CHECK` from every workflow (in the owner's scope) with a job named for the context."""
+        emitted = 0
+        seen: set[tuple[str, str]] = set()
+        for job in self._walk_state()["job_names"]:
+            if job["owner"] != owner:
+                continue
+            confidence = _check_name_confidence(job["job_name"], context)
+            if confidence is None or (str(job["wf_uuid"]), job["job_key"]) in seen:
+                continue
+            seen.add((str(job["wf_uuid"]), job["job_key"]))
+            edges.append(
+                self._edge(
+                    "PRODUCES_CHECK__github_core",
+                    job["wf_uuid"],
+                    check_uuid,
+                    job["dims"],
+                    {"job_key": job["job_key"], "job_name": job["job_name"], "confidence": confidence},
+                )
+            )
+            emitted += 1
+        return emitted
+
+    def _usage_tally(self) -> dict[str, Any]:
+        """The run's action tally, created on first touch.
+
+        Lazy rather than set in `run()` alone because the per-repo walk is exercised directly by
+        tests that build the collector without running it, and a tally that only exists after
+        `run()` would make every such walk raise on its first `uses:` line.
+        """
+        tally = getattr(self, "_action_usage", None)
+        if tally is None:
+            tally = {
+                "actions": set(),
+                "edges": 0,
+                "unpinned": 0,
+                "unobservable": 0,
+                "rest": 0,
+                "unresolved": 0,
+                "not_attempted": 0,
+            }
+            self._action_usage = tally
+        return tally
+
+    def _action_ref_state(self) -> dict[str, Any]:
+        """The run's REST-resolution cache and counters, created on first touch (same reason as
+        `_usage_tally`: the walk is driven directly by tests that never call `run()`)."""
+        state = getattr(self, "_action_ref_resolution", None)
+        if state is None:
+            state = {"cache": {}, "lookups": 0, "skipped": 0}
+            self._action_ref_resolution = state
+        return state
+
+    def _resolve_action_ref_via_rest(
+        self, client: GithubClient, repository_full_name: str, declared_ref: str
+    ) -> tuple[str, str, str]:
+        """What an out-of-scope name IS, and the commit it points at, observed once per run.
+
+        Lookup order mirrors a runner's: a tag named `v4` wins over a branch named `v4`.
+        `GET /repos/{o}/{r}/git/ref/tags/{ref}`, then `.../heads/{ref}` on 404; an annotated tag's
+        object is a tag, not a commit, and is peeled with `GET .../git/tags/{sha}` — the SHA a
+        runner checks out is the commit. Both ride `repository:contents:read` and answer any
+        credential on a public repository, which is what almost every action repository is.
+
+        Every outcome is a named state. `rest`: found. `unresolved`: at neither path — the ref does
+        not exist as written. `unobservable`: refused or failed (private repository, 403, transport)
+        — warned, and NOT evidence about the pin. `not_attempted`: the run's cap was spent.
+        """
+        state = self._action_ref_state()
+        key = (repository_full_name, declared_ref)
+        cached = state["cache"].get(key)
+        if cached is not None:
+            return cached
+        if state["lookups"] >= _ACTION_REF_RESOLUTION_CAP:
+            state["skipped"] += 1
+            result: tuple[str, str, str] = (PIN_UNRESOLVED, "", "not_attempted")
+            state["cache"][key] = result
+            return result
+        if not _SAFE_REPOSITORY_RE.match(repository_full_name) or not _SAFE_REF_RE.match(declared_ref):
+            # Not a shape GitHub itself would accept in `uses:`; it does not exist as written, and it
+            # never becomes a request path.
+            self.record_warn(
+                _SITE_ACTION_REF_MALFORMED,
+                "ACTION_REF_MALFORMED",
+                f"{repository_full_name}@{declared_ref}: not an `owner/repo` plus git refname; no lookup made.",
+                message_data={"action_repo": repository_full_name, "ref": declared_ref},
+            )
+            result = (PIN_UNRESOLVED, "", "unresolved")
+            state["cache"][key] = result
+            return result
+        state["lookups"] += 1
+        encoded = quote(declared_ref, safe="/")
+        result = (PIN_UNRESOLVED, "", "unresolved")
+        for pin_kind, prefix in ((PIN_TAG, "tags"), (PIN_BRANCH, "heads")):
+            try:
+                payload = client.get(f"/repos/{repository_full_name}/git/ref/{prefix}/{encoded}")
+            except GithubAPIError as exc:
+                if exc.status == 404:
+                    continue
+                self.record_warn(
+                    _SITE_ACTION_REF_UNOBSERVABLE,
+                    f"ACTION_REF_UNOBSERVABLE_{exc.status}",
+                    f"{repository_full_name}@{declared_ref}: ref lookup refused or failed ({exc.status}); the pin "
+                    f"kind and resolved commit are NOT observable for this action, which is not evidence it is "
+                    f"unpinned.",
+                    message_data={"action_repo": repository_full_name, "ref": declared_ref, "status": exc.status},
+                )
+                result = (PIN_UNRESOLVED, "", "unobservable")
+                break
+            obj = payload.get("object") or {}
+            sha = str(obj.get("sha") or "")
+            if pin_kind == PIN_TAG and str(obj.get("type") or "") == "tag" and sha:
+                commit = self._peel_annotated_tag(client, repository_full_name, sha)
+                if commit is None:
+                    # The tag exists but its commit could not be established: say so. A tag OBJECT's
+                    # SHA is not what a runner checks out, and must not be recorded as if it were.
+                    self.record_warn(
+                        _SITE_ACTION_REF_UNOBSERVABLE,
+                        "ACTION_REF_UNOBSERVABLE_PEEL",
+                        f"{repository_full_name}@{declared_ref}: the tag is annotated and its commit could not be "
+                        f"read (refused, failed, or nested deeper than {_TAG_PEEL_MAX_DEPTH} tag objects); "
+                        f"pin kind is `tag`, resolved commit NOT observable.",
+                        message_data={"action_repo": repository_full_name, "ref": declared_ref},
+                    )
+                    result = (PIN_TAG, "", "unobservable")
+                    break
+                sha = commit
+            result = (pin_kind, sha, "rest")
+            break
+        state["cache"][key] = result
+        return result
+
+    def _peel_annotated_tag(self, client: GithubClient, repository_full_name: str, tag_sha: str) -> str | None:
+        """The COMMIT behind an annotated tag object, or None when it cannot be established.
+
+        A tag object may point at another tag object; peel until `object.type == "commit"`, at most
+        `_TAG_PEEL_MAX_DEPTH` levels. A refused or failed read, a non-commit at the bottom, or a
+        SHA that is not 40-hex all return None — never the tag object's own SHA dressed as the
+        commit (Codex seat on PR #67).
+        """
+        sha = tag_sha
+        for _ in range(_TAG_PEEL_MAX_DEPTH):
+            if not _SHA40_RE.match(sha):
+                return None
+            try:
+                payload = client.get(f"/repos/{repository_full_name}/git/tags/{sha}")
+            except GithubAPIError:
+                return None
+            obj = payload.get("object") or {}
+            kind = str(obj.get("type") or "")
+            nxt = str(obj.get("sha") or "")
+            if kind == "commit" and _SHA40_RE.match(nxt):
+                return nxt
+            if kind != "tag" or not nxt:
+                return None
+            sha = nxt
+        return None
+
+    def _refs_for(self, repository_full_name: str) -> dict[str, str] | None:
+        """``{ref path: head sha}`` for an in-scope repository, or None when it is not in scope.
+
+        Built from the config layer already fetched, so resolution costs no request. None and
+        an empty dict are different answers: None is "cannot look", {} is "looked, none".
+        """
+        gql = getattr(self, "_config", {}).get(repository_full_name)
+        if gql is None:
+            return None
+        by_repo: dict[str, dict[str, str]] = getattr(self, "_refs_by_repo", None) or {}
+        self._refs_by_repo = by_repo
+        cached = by_repo.get(repository_full_name)
+        if cached is None:
+            refs, _truncated = GithubGraphQLClient.refs(gql)
+            cached = {str(r["ref"]): str(r.get("head_sha") or "") for r in refs}
+            by_repo[repository_full_name] = cached
+        return cached
 
     def _collect_rule_suites(
         self,
@@ -2144,12 +3085,23 @@ class GithubCollector(CollectorBase):
         edges: list[dict[str, Any]],
         notes: dict[str, str],
     ) -> str:
-        """Emit the repository's uploaded artifacts, newest first, joined to the runs in this batch.
+        """Collect the repository's artifacts and join each to the run that uploaded it.
 
-        REST-only (`req-github-core-artifacts`): GraphQL exposes no artifacts. The listing names
-        the run that uploaded each one — GitHub's own attribution, which is why `UPLOADS_ARTIFACT`
-        is reported where `BUILDS_RELEASE` is derived. An artifact whose run is outside the
-        collected window still lands, still carries its `run_id`, and hangs off the repository.
+        Returns the surface's observability state for the repository node (github-core#31:
+        three states on the node the absence is about). REST-only (`req-github-core-artifacts`):
+        GraphQL exposes no artifacts.
+
+        The repository listing rather than the per-run endpoint: one call per page instead of
+        one per run, and each item names its producing run, so `UPLOADS_ARTIFACT` is exact —
+        GitHub's own attribution, which is why it is reported where `BUILDS_RELEASE` is derived.
+        The edge is emitted only when that run is in this batch — the dangling-edge guard would
+        otherwise drop it silently — and the rest are COUNTED, because an artifact of a run
+        outside the collected window is a normal thing, not an error and not nothing. Every
+        artifact hangs off the repository (`STORES_ARTIFACT`), so one whose run is outside the
+        window stays reachable.
+
+        Expired artifacts stay listed with `expired: true`, which is why expiry is a field and
+        absence from the listing is never read as expiry (github-core#14, shape C).
         """
         try:
             payload = client.get(
@@ -2161,61 +3113,48 @@ class GithubCollector(CollectorBase):
                 self.record_warn(
                     _SITE_ARTIFACTS_DEGRADED,
                     f"ARTIFACTS_UNREADABLE_{exc.status}",
-                    f"Artifacts inaccessible for {full_name} — NOT observed, which is not the same as "
-                    f"none uploaded: {exc.body[:120]}",
+                    f"Artifact list inaccessible for {full_name}: {exc.body[:120]}. An empty artifact set "
+                    f"for this repository is NOT observable, not empty.",
                     message_data={"repo": full_name, "status": exc.status},
                 )
                 return _UNOBSERVABLE
             raise
-        items = payload.get("artifacts") or []
-        total = int(payload.get("total_count") or len(items))
         run_uuid_by_id = {run["run_id"]: run["uuid"] for run in run_index}
-        for item in items:
-            art_uuid = actions_artifact_id(full_name, item["id"])
-            producing = item.get("workflow_run") or {}
-            head_sha = str(producing.get("head_sha") or "")
-            head_branch = str(producing.get("head_branch") or "")
-            nodes.append(
-                node_envelope(
-                    entity_id=art_uuid,
-                    entity_type="github_core__actions_artifact",
-                    name=str(item.get("name") or item["id"]),
-                    dimensions=dims,
-                    fields={
-                        "artifact_id": item["id"],
-                        "full_name": full_name,
-                        "name": str(item.get("name") or ""),
-                        "size_in_bytes": item.get("size_in_bytes"),
-                        "digest": str(item.get("digest") or ""),
-                        "expired": item.get("expired"),
-                        "run_id": producing.get("id"),
-                        "head_sha": head_sha,
-                        "head_branch": head_branch,
-                        "created_at": item.get("created_at"),
-                        "updated_at": item.get("updated_at"),
-                        "expires_at": item.get("expires_at"),
-                        "archive_download_url": str(item.get("archive_download_url") or ""),
-                        "configuration": {},
-                        "tags": {},
-                    },
-                )
-            )
+        entries = payload.get("artifacts") or []
+        total = int(payload.get("total_count") or len(entries))
+        linked = 0
+        expired = 0
+        for entry in entries:
+            run_id_int = (entry.get("workflow_run") or {}).get("id")
+            in_batch = run_id_int in run_uuid_by_id
+            expired += int(bool(entry.get("expired", False)))
+            nodes.append(self._artifact_node(full_name, entry, in_batch, dims))
+            art_uuid = actions_artifact_id(full_name, entry["id"])
             edges.append(self._edge("STORES_ARTIFACT__github_core", repo_uuid, art_uuid, dims))
-            run_uuid = run_uuid_by_id.get(producing.get("id"))
-            if run_uuid is not None:
-                edges.append(
-                    self._edge(
-                        "UPLOADS_ARTIFACT__github_core", run_uuid, art_uuid, dims,
-                        properties={"head_branch": head_branch, "head_sha": head_sha},
-                    )
-                )
-        if total > len(items):
+            if in_batch:
+                linked += 1
+                edges.append(self._edge("UPLOADS_ARTIFACT__github_core", run_uuid_by_id[run_id_int], art_uuid, dims))
+        if entries:
+            self.record_info(
+                _SITE_ARTIFACTS_COLLECTED,
+                "ARTIFACTS_COLLECTED",
+                f"{full_name}: {len(entries)} artifact(s), {linked} linked to a run in this batch, "
+                f"{len(entries) - linked} from runs outside the collected window, {expired} expired.",
+                message_data={
+                    "repo": full_name,
+                    "collected": len(entries),
+                    "linked": linked,
+                    "unlinked": len(entries) - linked,
+                    "expired": expired,
+                },
+            )
+        if total > len(entries):
             self.record_warn(
                 _SITE_ARTIFACTS_TRUNCATED,
                 "ARTIFACTS_TRUNCATED",
-                f"{full_name}: collected {len(items)} of {total} artifacts (newest first). Absence "
-                f"of an artifact in this batch is not evidence it expired or was deleted.",
-                message_data={"repo": full_name, "collected": len(items), "total": total},
+                f"{full_name}: collected {len(entries)} of {total} artifacts (newest first). Absence of an "
+                f"artifact in this batch is not evidence it is gone or expired.",
+                message_data={"repo": full_name, "collected": len(entries), "total": total},
             )
         return _OBSERVED
 
@@ -2474,6 +3413,33 @@ class GithubCollector(CollectorBase):
                         properties={"match_kind": "tag_sha", "attested": None},
                     )
                 )
+    @staticmethod
+    def _artifact_node(full_name: str, entry: dict[str, Any], in_batch: bool, dims: dict[str, str]) -> dict[str, Any]:
+        """One artifact envelope from a listing item. `run_in_batch` says whether the
+        UPLOADS_ARTIFACT edge exists or the join is by `run_id` against the grid."""
+        run = entry.get("workflow_run") or {}
+        return node_envelope(
+            entity_id=actions_artifact_id(full_name, entry["id"]),
+            entity_type="github_core__actions_artifact",
+            name=str(entry.get("name") or entry["id"]),
+            dimensions=dims,
+            fields={
+                "full_name": full_name,
+                "artifact_id": entry["id"],
+                "name": str(entry.get("name") or ""),
+                "size_in_bytes": entry.get("size_in_bytes"),
+                "digest": str(entry.get("digest") or ""),
+                "expired": bool(entry.get("expired", False)),
+                "expires_at": entry.get("expires_at"),
+                "created_at": entry.get("created_at"),
+                "updated_at": entry.get("updated_at"),
+                "run_id": run.get("id"),
+                "head_sha": str(run.get("head_sha") or ""),
+                "head_branch": str(run.get("head_branch") or ""),
+                "configuration": {"workflow_run": run, "run_in_batch": in_batch},
+                "tags": {},
+            },
+        )
 
     def _collect_app_installations(
         self,
@@ -2620,6 +3586,10 @@ class GithubCollector(CollectorBase):
         for a platform app detected enabled on ``full_name``."""
         apps_dims = {**repo_dims, "github.surface": "apps"}
         app_uuid = github_app_id(app_meta["slug"])
+        owner = full_name.split("/", 1)[0]
+        html_url = app_meta.get("html_url", "")
+        if self._account_type == "Organization" and app_meta.get("org_html_url"):
+            html_url = app_meta["org_html_url"].format(owner=owner)
         if str(app_uuid) not in self._emitted_app_ids:
             self._emitted_app_ids.add(str(app_uuid))
             nodes.append(
@@ -2632,7 +3602,7 @@ class GithubCollector(CollectorBase):
                         "slug": app_meta["slug"],
                         "name": app_meta["name"],
                         "app_id": None,
-                        "html_url": app_meta.get("html_url", ""),
+                        "html_url": html_url,
                         "description": app_meta.get("description", ""),
                         "configuration": {},
                         "tags": {},
@@ -2763,8 +3733,8 @@ class GithubCollector(CollectorBase):
             refreshed.append(payload)
         return refreshed
 
-    def _fetch_run_jobs(self, client: GithubClient, full_name: str, run_id_int: int) -> list[dict[str, Any]]:
-        """Fetch the jobs list for a specific run.
+    def _fetch_run_jobs(self, client: GithubClient, full_name: str, run_id_int: int) -> list[dict[str, Any]] | None:
+        """Fetch the jobs list for a specific run, or `None` when it was not observable.
 
         Per GitHub docs the endpoint documents only `200 - OK`; no 404
         condition is documented. The HTTP client retries empty-body 404s
@@ -2772,6 +3742,11 @@ class GithubCollector(CollectorBase):
         Real 404s — a JSON body with `{"message": "..."}` — still propagate
         and we graceful-degrade per-run to avoid aborting the whole collection
         on a single quirky run (`req-github-core-collector-5` discipline).
+
+        `None` on that degrade, not `[]`: a run with no jobs (skipped) and a run
+        whose jobs could not be read are different observations, and the run's
+        end time is derived from the jobs (`_run_completed_at`), so the caller
+        has to be able to tell them apart.
         """
         try:
             return client.get_paginated(f"/repos/{full_name}/actions/runs/{run_id_int}/jobs", item_path="jobs")
@@ -2784,7 +3759,7 @@ class GithubCollector(CollectorBase):
                     f"with body: {exc.body[:120] or '(empty)'}. "
                     f"Skipping job collection for this run.",
                 )
-                return []
+                return None
             raise
 
     def _fetch_workflow_config(self, client: GithubClient, full_name: str, path: str) -> tuple[str, dict[str, Any]]:

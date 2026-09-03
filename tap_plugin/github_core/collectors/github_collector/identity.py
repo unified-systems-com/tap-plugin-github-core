@@ -61,6 +61,20 @@ def git_ref_id(full_name: str, ref: str) -> UUID:
     return _id("github_core__git_ref", f"{full_name}#{ref}")
 
 
+def git_commit_id(full_name: str, sha: str) -> UUID:
+    """A commit as observed in ONE repository: `owner/repo` plus the SHA.
+
+    Not the bare SHA, although a commit object is content-addressed: GitHub persists a commit's
+    signature VERIFICATION record per repository *network* ("if the same commit is pushed again
+    to the same repository or to any of its forks, the existing verification record is reused"),
+    so the same SHA in two unrelated networks can legitimately carry two different records, and
+    a SHA-only key would let one repository's verdict overwrite another's (PR #60 review). A
+    repository is inside exactly one network, so this key can never merge two records. The
+    cross-fork join is a follow-on keyed on the network root once `parent` is collected.
+    """
+    return _id("github_core__git_commit", f"{full_name}#{sha.lower()}")
+
+
 def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     """A ruleset, keyed on owner + GitHub's ruleset id.
 
@@ -79,6 +93,16 @@ def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     return _id("github_core__github_ruleset", f"{owner}#{ruleset_id_int}")
 
 
+def status_check_id(owner: str, context: str) -> UUID:
+    """A required check context, keyed on the owner and the context string.
+
+    Owner-scoped like `ruleset_id`: an organization ruleset requires the same context across
+    every repository it protects, and one node with fan-in is the whole point. The context is
+    kept exactly as written — check names are case-sensitive on GitHub.
+    """
+    return _id("github_core__status_check", f"{owner}#{context}")
+
+
 def rule_suite_id(suite_id_int: int | str) -> UUID:
     """A rule suite, keyed on GitHub's own suite id — unique across the platform.
 
@@ -95,6 +119,16 @@ def environment_id(full_name: str, name: str) -> UUID:
 
 def actions_cache_id(full_name: str, cache_id_int: int | str) -> UUID:
     return _id("github_core__actions_cache", f"{full_name}#{cache_id_int}")
+
+
+def actions_artifact_id(full_name: str, artifact_id_int: int | str) -> UUID:
+    """An artifact, keyed on the repository plus GitHub's artifact id.
+
+    The id is platform-global (the same generator as runs and caches), so the repository
+    prefix is belt-and-braces in the same way `ruleset_id`'s owner prefix is — and a natural
+    key cannot change once nodes exist, so it is recorded rather than re-derived.
+    """
+    return _id("github_core__actions_artifact", f"{full_name}#{artifact_id_int}")
 
 
 def app_installation_id(installation_id_int: int | str) -> UUID:
@@ -124,10 +158,6 @@ def release_id(full_name: str, release_id_int: int | str) -> UUID:
     object, or the same object whose `target_sha` changed — rather than being folded together.
     """
     return _id("github_core__github_release", f"{full_name}#{release_id_int}")
-
-
-def actions_artifact_id(full_name: str, artifact_id_int: int | str) -> UUID:
-    return _id("github_core__actions_artifact", f"{full_name}#{artifact_id_int}")
 
 
 def package_id(owner: str, package_type: str, name: str) -> UUID:
@@ -200,6 +230,27 @@ def package_purl(package_type: str, owner: str, name: str, version: str = "") ->
             return f"pkg:maven/{group or owner}/{artifact}{at}?repository_url={host}"
         return f"pkg:{purl_type}/{name}{at}?repository_url={host}"
     return f"pkg:github/{owner}/{name}{at}"
+
+
+def github_action_id(action_path: str) -> UUID:
+    """An action, keyed on the `uses:` path with the ref stripped.
+
+    Platform-global rather than repository-scoped, like `github_app`: `actions/checkout` is
+    ONE node every job on every repository points at, or "which jobs use an unpinned checkout"
+    becomes a string comparison across duplicates. The ref is deliberately NOT here — the same
+    action is pinned differently by different jobs, and the pin belongs to the edge.
+    """
+    return _id("github_core__github_action", action_path)
+
+
+def uses_action_edge_id(job_uuid: UUID, action_uuid: UUID, declared_ref: str) -> UUID:
+    """A `USES_ACTION` edge, keyed on the job, the action AND the ref as written.
+
+    Not the generic `edge_id` (type, source, target): a job that calls the same action at two
+    refs — `actions/checkout@v4` in one step and `actions/checkout@<sha>` in another — is two
+    facts, and an id that ignored the ref would keep only the last one after envelope collapse.
+    """
+    return uuid5(GITHUB_CORE_NAMESPACE, f"edge:USES_ACTION__github_core:{job_uuid}:{action_uuid}:{declared_ref}")
 
 
 def edge_id(edge_type: str, source: UUID, target: UUID) -> UUID:

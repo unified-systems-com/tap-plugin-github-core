@@ -74,10 +74,14 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-models | [Model Set](#model-set) | Implemented | account/repo/workflow/run/job/runner (0001) + synthesized `github_platform` (0002) — seven tables. `oidc_issuer` was extracted to the `identity_core` substrate plugin (dropped here in 0004); github still mints the issuer node via `identity_core.issuer`. |
 | req-github-core-rule-suites | [Rule Suites — Who Actually Bypassed](#rule-suites--who-actually-bypassed) | In Development | 2026-08-28 (settled empirically): enumeration of bypass ACTORS has a documented write-access ceiling, but rule suites answer the adjacent question — who actually bypassed a gate — and return 200 to a read-only App with actor names. Detection where enumeration is refused. |
 | req-github-core-releases | [Releases — The First Output](#releases--the-first-output) | In Development | 2026-09-02 (github-core#31): `github_release` from the config-layer GraphQL query at no extra request, keyed on `owner/repo` + release id; `PUBLISHES_RELEASE` containment, `TARGETS_REF` onto the tag, and a DERIVED `BUILDS_RELEASE` whose `match_kind` labels its own evidence. Three states on the repository node (`outputs_observability`). |
-| req-github-core-artifacts | [Actions Artifacts](#actions-artifacts) | In Development | 2026-09-02 (github-core#31): `actions_artifact` from the REST listing (GraphQL has none), with GitHub's own `workflow_run` attribution as `UPLOADS_ARTIFACT` — the one reported producer edge in the output column. Capped at one page against thousands; the total is always stated. |
 | req-github-core-packages | [GitHub Packages — The Collection Seam](#github-packages--the-collection-seam) | In Development | 2026-09-02 (github-core#31): `github_package` / `github_package_version` carrying a purl, so `supply_chain_core` (vocabulary decision 4) can claim them by identity. **Not observable with the product credential**: GitHub marks the packages endpoints `enabledForGitHubApps: false`; measured as a 400 on the container listing. Recorded as `unobservable`, never zero. Adds `organization:packages:read` to the derived permission set — existing installations must re-accept. |
 | req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
+| req-github-core-actions-used | [Actions Used](#actions-used) | In Development | 2026-09-02 (github-core#45, ranked first by `build-github-corpus`): `github_action` node keyed on the action path, shared across the scope, plus `USES_ACTION` carrying the pin. The parser no longer labels every non-SHA ref `tag`; a mutable name is resolved only against an in-scope repository's refs and is otherwise `unresolved` / `unobservable`. |
+| req-github-core-workflow-chains | [Workflow Chains](#workflow-chains) | In Development | 2026-09-02 (github-core#29, #52): `CALLS_WORKFLOW` (job → reusable workflow, the `USES_ACTION` pin grammar + `secrets_inherit`) and `TRIGGERS_WORKFLOW` (completing → triggered, from `on.workflow_run`), both resolved in a post-pass over the whole scope; an unresolved callee or name is recorded on the node, never fabricated. |
+| req-github-core-artifacts | [Artifacts](#artifacts) | In Development | 2026-09-02 (github-core#55): `actions_artifact` from the repository listing (newest first, capped, total reported) joined by `UPLOADS_ARTIFACT` from the producing run when it is in the batch; `expired` observed, never inferred (shape C). Declared upload/download steps on the job; no download edge — GitHub keeps no record of downloads. |
+| req-github-core-commits | [Commits](#commits) | In Development | 2026-09-02 (github-core#57): `git_commit` keyed on repository + SHA (the verification record is network-scoped), sliced to identity-as-observed and signature state from a `CommitSlice` fragment on the config-layer refs query (no extra request, no extra permission — measured); `POINTS_AT` from each ref, property-free. `signature: null` is `unsigned`; a degraded field is pruned and lands as `unobservable`. |
+| req-github-core-status-checks | [Status Checks](#status-checks) | In Development | 2026-09-02 (github-core#61): `status_check` keyed `<owner>#<context>` from the ruleset detail's `required_status_checks` parameters; `REQUIRES_CHECK` with the rule's qualifiers; `PRODUCES_CHECK` derived from job display names with stated confidence, only toward required contexts an Actions job may produce. A refused detail is counted as not observable, never as no requirement. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -87,6 +91,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-runner | [Runner Semantics](#runner-semantics) | Implemented | Durable runner nodes + matchable EXECUTED_ON + observed-runner-on-job + no-ephemeral-runner-nodes |
 | req-github-core-grid-links | [Existing Grid Links](#existing-grid-links) | Implemented | Enrichment phase + exact-only + warn-only failures + Gryphon read path (via `=~` regex operator); OIDC link verified end-to-end against samsite + AWS |
 | req-github-core-python-deps | [Plugin Python Dependency](#plugin-python-dependency) | Implemented | `PyYAML` is plugin-owned via root uv workspace; first proof of `req-plugin-arch-python-deps` |
+| req-github-core-dependabot-alerts | [Dependabot Alerts](#dependabot-alerts) | Proposed | 2026-09-03: GitHub's own vulnerable-dependency findings, per repository, landed as `dependabot_alert` nodes joined to the `github_action` (by package) and `github_workflow` (by manifest path) they flag. The App already holds `repository:vulnerability_alerts:read` (exploratory); the manifest declaration is what is missing. Not yet observable on our own org; fixture in place. |
 | req-github-core-backlog-references | [Variables And Secret References (Backlog)](#variables-and-secret-references-backlog) | Backlog | Two-source-of-truth model, hotlink contract implication, provenance shape; pick up when critical path |
 | req-github-core-backlog-run-attempts | [Multi-Attempt Run Observation (Backlog)](#multi-attempt-run-observation-backlog) | Backlog | Per-attempt run + job fan-out, re-run-failed-jobs subtlety, HAS_ACTIONS_JOB lifecycle; pick up when critical path |
 | req-github-core-backlog-grid-vocab-links | [Grid-Vocabulary Reference Resolution (Backlog)](#grid-vocabulary-reference-resolution-backlog) | Backlog | Replace the parser's regex shape-guessing with matching against the known grid vocabulary (regions/zones/dist-ids); removes junk refs, recovers `${{ }}`-embedded matches, needs confidence markers |
@@ -96,6 +101,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 ### Plugin Scope
 ----
 RID: `req-github-core-scope`
+
 Status: `Implemented`
 
 `github_core` models GitHub platform objects that matter to deployment and
@@ -116,6 +122,7 @@ surface; those arrive as further manifest sources behind the same scope.
 ### GitHub App Authentication
 ----
 RID: `req-github-core-app-auth`
+
 Status: `Implemented`
 
 A personal access token is a *person's* power in token form: it inherits their role, expires on
@@ -162,6 +169,7 @@ OpenSSL the FIPS posture validates (`spec-fips.md`); no JWT library is introduce
 ### Account Scope
 ----
 RID: `req-github-core-org-scope`
+
 Status: `Implemented`
 
 Pulled by git-serious (git-serious-tap#17, 2026-08-26): a product that observes an
@@ -200,6 +208,7 @@ Two edges laid while the surface is open:
 ### Model Set
 ----
 RID: `req-github-core-models`
+
 Status: `Implemented`
 
 The v0 model set is intentionally small but node-granular. Values that deserve
@@ -315,6 +324,7 @@ must not conflate the two.
 ### Ruleset Collection
 ----
 RID: `req-github-core-ruleset`
+
 Status: `In Development`
 
 A **ruleset** is GitHub's enforcement gate on a set of refs — required status checks,
@@ -392,6 +402,7 @@ vocabulary corpus; the node stands alone until then.
 ### Edge Vocabulary
 ----
 RID: `req-github-core-edges`
+
 Status: `Implemented`
 
 Edges express the GitHub Actions execution spine and dependency references.
@@ -440,6 +451,7 @@ ownership, or runtime control.
 ### Declared Jobs
 ----
 RID: `req-github-core-declared-jobs`
+
 Status: `Implemented`
 
 A job as **written** and a job as **run** are different objects, and the vocabulary corpus found
@@ -465,8 +477,9 @@ The other half — the trigger — is carried onto the job's `configuration` alo
 own permissions, so the question can be adjudicated at one node instead of by walking up.
 
 Steps remain structured data rather than nodes (`step` was rejected on the node test: nothing
-points at a step). Cache usage and action pins are extracted onto the job's `configuration` now;
-`USES_ACTION` and `WRITES_CACHE`/`RESTORES_CACHE` are a later wave.
+points at a step). Cache usage is extracted onto the job's `configuration` now;
+`WRITES_CACHE`/`RESTORES_CACHE` are a later wave. Action pins became `USES_ACTION` edges in
+`req-github-core-actions-used`.
 
 #### Acceptance Criteria
 
@@ -478,9 +491,236 @@ points at a step). Cache usage and action pins are extracted onto the job's `con
 | req-github-core-declared-jobs-4 | Needs Graph Emitted | Implemented | `needs:` becomes `DEPENDS_ON_JOB` edges carrying the dependent's `if:`. A `needs:` naming a job that does not exist emits no edge and keeps the name visible on the node. | Emitted after all jobs in a file are known, since a job may need one declared below it. |
 | req-github-core-declared-jobs-5 | Runner Declaration Canonicalized | Implemented | `runs-on` is stored as a list whichever of the three written forms was used (string, list, `{group, labels}`); a job that declares none stores `null`, not `[]`. | One query shape for "which jobs run on a self-hosted label". |
 
+### Actions Used
+----
+RID: `req-github-core-actions-used`
+Status: `In Development`
+
+A `uses:` line hands a job's token, its checkout and every secret in scope to code in someone
+else's repository, at whatever commit the written ref resolves to on the day. The corpus's
+tag-repoint compromises are that sentence, and until this wave the action was text inside
+`workflow_job.configuration.action_refs` — parsed, present, and unreachable from any other node
+(github-core#45).
+
+`github_action` is keyed on the **action path** (`owner/repo[/subdir]`, or `docker://image`)
+and is platform-global, like `github_app`: `actions/checkout` is one node that every job in scope
+points at. A subdirectory action is its own node (`actions/cache/restore` is not `actions/cache`).
+The ref is not identity — the same action is pinned differently by different jobs — so the pin
+rides on `USES_ACTION`, one edge per (job, action, declared ref), with every step position that
+shares the ref folded into `step_indexes`.
+
+**The pin is stated in three states, never two.** `pin_kind` is `sha` or `digest` when the string
+proves immutability; `tag` or `branch` only when the action's own repository is inside the observed
+scope and the name was matched against its refs (config layer, `req-github-core-refs`, no extra
+request); otherwise **`unresolved`**, with `resolution: unobservable` when the repository is out of
+scope and `resolution: in_scope` when it was in scope and the name matched nothing. The previous
+parser called every non-SHA ref `tag`, which was a declaration that existed and was false —
+presence is not correctness — and `resolution` exists so a reader can tell "pinned to a tag" from
+"pinned to a name nobody looked up". An out-of-scope
+action repository IS looked up (2026-09-03, PR #67): `GET /repos/{o}/{r}/git/ref/tags/{ref}` then
+`.../heads/{ref}` on 404 — the order a runner resolves — with an annotated tag peeled to its commit
+via `GET .../git/tags/{sha}`; a hit is `resolution: rest` with the commit as `resolved_sha`, a miss
+at both paths is `unresolved` (the ref does not exist as written), a refusal or failure is
+`unobservable` and warned, and past the per-run cap the edge says `not_attempted` and the run says
+how many. Both endpoints ride `repository:contents:read`, already in the union, and answer any
+credential on a public repository. One lookup per distinct (repository, ref) per run.
+
+`is_pinned` is carried explicitly (true iff `sha` or `digest`) so the one-bit control every
+action-pinning check asks is not re-derived per view. `resolved_sha` — the SHA itself, or an
+in-scope ref's head commit — has field history, which is the tag-repoint detection, in the same way
+`git_ref.head_sha` history is tag-movement detection.
+
+Absence shapes (github-core#14): the edge is **git-provable** (a commit removing the `uses:` line is
+positive evidence); the node is **derived absence** — relevant while any edge points at it, never
+tombstoned on its own observation. `DEFINED_IN` (action → repository) and `resolves_to_fork` are
+the corpus's next items on this surface and are not built here.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-actions-used-1 | Action Node Is Shared | In Development | Every non-local `uses:` in a collected workflow lands as one `github_action` per action path, platform-global, with no owner/repo dimension. | Same fan-in shape as `github_app`. |
+| req-github-core-actions-used-2 | The Pin Lives On The Edge | In Development | `USES_ACTION` (job → action) carries `declared_ref`, `pin_kind`, `is_pinned`, `resolution`, `step_indexes` and, when known, `resolved_sha`; a job calling the same action at two refs emits two edges. | Edge id includes the declared ref for that reason. |
+| req-github-core-actions-used-3 | A Name Is Never Called A Tag Without Evidence | In Development | A non-SHA ref parses as `unresolved`; it becomes `tag` or `branch` only by matching the in-scope repository's refs (`in_scope`) or by a REST lookup of an out-of-scope one (`rest`); it is `unobservable` only when no lookup answered. | Asserted at the parser and the collector. |
+| req-github-core-actions-used-4 | Docker Steps Are Actions Too | In Development | `docker://image[:tag|@sha256:digest]` lands as a `kind: docker` node; a digest is `digest` and pinned, an image tag is `tag` and not. | |
+| req-github-core-actions-used-5 | The Run Says What It Saw | In Development | The run records the distinct-action count, the usage count, how many usages were unpinned and how many of those were unobservable, so a zero reads as a count and not a silence. | `ACTIONS_USED`, extended 2026-09-03 with the REST states and lookups spent. |
+| req-github-core-actions-used-6 | Out-Of-Scope Refs Resolved Over REST | Implemented | A `tag` or `branch` pin on an out-of-scope action carries the commit it pointed at when observed (`resolution: rest`), tags before heads, an annotated tag peeled; a ref at neither path is `unresolved`; a refused lookup, or an annotated tag whose commit cannot be established (refused, or nested deeper than three tag objects), is `unobservable` and warned — never a blank that reads as unpinned, never a tag object's SHA dressed as the commit. A repository that is not exactly `owner/repo`, or a ref with `..`, an empty segment or a leading slash, is `unresolved` without a request — untrusted `uses:` text never shapes an API path. | `test_action_ref_resolution.py`. OBSERVED 2026-09-03 on `unified-systems-com/git-serious-fixtures`: `actions/download-artifact@v3` → `tag`/`rest`/9bc31d5c…, `actions/checkout@v4` → `tag`/`rest`/11d5960a…; the run record: "5 usage(s) pinned to a mutable name or nothing, of which 2 resolved over REST … 2 REST lookup(s) spent". The fixture's own `actions/hello@does-not-exist` is an IN-scope miss (`pin_kind: unresolved`, `resolution: in_scope`); the REST `unresolved` and `unobservable` states are unit-verified only. |
+| req-github-core-actions-used-7 | REST Budget Bounded And Stated | Implemented | Lookups are cached per (repository, ref) for the run and capped (`_ACTION_REF_RESOLUTION_CAP`); past the cap edges carry `not_attempted` and the run warns with the count; `ACTIONS_USED` reports lookups spent and counts per state. | `test_one_lookup_per_distinct_ref_and_a_cap`. The cap path is unit-verified only. |
+| req-github-core-actions-used-8 | Drift Is Queryable | Proposed | After two observations across which a tag was re-pointed, the `USES_ACTION` edge's `resolved_sha` history shows the move under an unchanged `declared_ref`. | The observation is its own issue, github-core#71, on the fixture's `v1` tag. |
+| req-github-core-actions-used-9 | Publishing Repository Linked | Backlog | `DEFINED_IN` joins the action to a `github_repository` carrying `archived` and `fork`, so an archived or transferred action is a query. | Corpus row; named as the next item. |
+| req-github-core-actions-used-10 | Canonical-Repository Membership | Backlog | A SHA pin is checked to belong to the action's canonical repository rather than a fork in its network (`resolves_to_fork`). | Needs reachability from a branch or tag head; `commits/{sha}` answers for the whole fork network. |
+
+### Workflow Chains
+----
+RID: `req-github-core-workflow-chains`
+Status: `In Development`
+
+Two ways one workflow reaches another, both declared in YAML, both invisible until this wave. A
+**reusable-workflow call** (`jobs.<id>.uses: owner/repo/.github/workflows/x.yml@ref`, or the
+same-repository `./` form) brings another file's jobs, runners and permissions into the caller's
+run and receives whatever secrets the caller passes — every one of them under `secrets: inherit`.
+A **`workflow_run` trigger** (`on: workflow_run: workflows: [<name>]`) fires one workflow on the
+completion of another, in base-repository context, which is GitHub's own recommended shape for
+handling untrusted input and therefore the edge along which a fork's output reaches a workflow that
+holds secrets (github-core#29, #52).
+
+`CALLS_WORKFLOW` sources from the **job**, not the workflow the corpus row named: the call is written
+on the job, the job carries the `permissions` and `secrets` every privilege question needs, and two
+jobs in one file may call two workflows. It carries the `USES_ACTION` pin grammar
+(`req-github-core-actions-used-3`) — a same-repository call is `pin_kind: local`, pinned by
+construction — plus `same_repository` and `secrets_inherit`. `TRIGGERS_WORKFLOW` points from the
+completing workflow to the triggered one (the initiator is the source), resolves display names
+within the repository only, fans out to every workflow sharing the name, and carries `types`,
+`branches` and `branches-ignore` **only as written** — GitHub's `types` default is not filled in.
+The corpus's `conclusion_filter` is not carried: GitHub has no such key, and reading the check out
+of job `if:` expressions would be a guess.
+
+**Resolution is a post-pass**, after every repository in scope is walked, because a callee is named
+by path in a repository that may be walked later, and workflow nodes are keyed on GitHub's numeric
+id. A callee or a name that resolves to nothing produces **no edge and no invented node**; the state
+is recorded on the node the absence is about — `workflow_job.configuration.call_resolution` ∈
+`resolved | unresolved_in_scope | out_of_scope`, `github_workflow.configuration.trigger_resolution`
+— and the run reports the counts (`WORKFLOW_CALLS`, `WORKFLOW_TRIGGERS`). At repos-only scope every
+cross-repository call is `out_of_scope`, and the summary is what keeps that from reading as an estate
+without reusable workflows.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-workflow-chains-1 | Calls Resolve Across The Scope | In Development | A job-level `uses:` naming a workflow collected anywhere in the scope becomes `CALLS_WORKFLOW` job → workflow, resolved after the full walk. | |
+| req-github-core-workflow-chains-2 | An Unresolved Callee Is Recorded, Not Invented | In Development | A callee not on the grid yields no edge and no node; the job's `configuration.call_resolution` states `unresolved_in_scope` or `out_of_scope`, and the run counts both. | Three states, never two. |
+| req-github-core-workflow-chains-3 | The Call Carries Its Pin And Its Secrets Posture | In Development | The edge states `declared_ref`, `pin_kind` (incl. `local`), `is_pinned`, `resolution`, `same_repository`, `secrets_inherit`, and `resolved_sha` when known; the calling job's configuration lists the named secrets passed. Names only, never values. | Pin grammar shared with `USES_ACTION`. |
+| req-github-core-workflow-chains-4 | Triggers Point The Way The Event Flows | In Development | `on.workflow_run.workflows` on B yields `TRIGGERS_WORKFLOW` A → B for every workflow A in the same repository whose stored display name matches; an unmatched name lands on B's `configuration.trigger_resolution` and warns. | |
+| req-github-core-workflow-chains-5 | Filters As Written Only | In Development | `types`, `branches`, `branches_ignore` appear on the edge only when the file declares them; GitHub's defaults are never written. | |
+
+### Artifacts
+----
+RID: `req-github-core-artifacts`
+Status: `In Development`
+
+The output side of a run. `actions_artifact` is collected from the **repository** listing
+(`GET /repos/{o}/{r}/actions/artifacts`, `actions:read`) rather than per run — one call per page
+instead of one per run, and every item names its producing run — newest first, capped per
+repository with the total reported (github-core#55). `UPLOADS_ARTIFACT` (run → artifact) is emitted
+when that run is in the same batch and is exact; artifacts of runs outside the collected window are
+counted and carry `run_id` for a later join, never dropped silently by the dangling-edge guard.
+
+**Expiry is observed, not inferred.** GitHub keeps an expired artifact listed with `expired: true`.
+An artifact is an immutable event with a retention window (github-core#14, shape C): absence from
+the listing — under the cap, or after retention — is never grounds for a tombstone, and a reconciler
+must refuse this type.
+
+**There is no `DOWNLOADS_ARTIFACT`, and the reason is recorded.** GitHub records who uploaded and
+nothing about who downloaded. A declared download (`actions/download-artifact` with `name:` or
+`pattern:`) names a pattern that matches a different artifact on every run; joining it to a concrete
+node would be the inference `req-github-core-caches-4` refuses for caches. The declared upload and
+download steps land on `workflow_job.configuration.artifact_steps`, and the corpus's
+`cross_workflow` is carried there — a `run-id:` or `repository:` input means the step reaches into
+another run's outputs — so the security-relevant bit survives without a guessed edge.
+
+**Reachable, and three states on the repository** (github-core#31). `STORES_ARTIFACT` (repository →
+artifact) is emitted for every artifact that lands, so one whose run is outside the window stays
+reachable from its repository without the `UPLOADS_ARTIFACT` join. A refused listing (403/404) lands
+nothing and records `github_repository.outputs_observability.artifacts = unobservable` with the status
+in `notes.artifacts` — on the node the absence is about, never rendered as a repository that uploads
+nothing — the same three-state field the releases and packages surfaces stamp.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-artifacts-1 | Artifacts Collected From The Repository Listing | In Development | Each item lands as `actions_artifact` keyed on `owner/repo` + artifact id, with name, size, digest, retention state and the producing run's id, head SHA and branch. | Degrades with a warning on 403/404, like caches. |
+| req-github-core-artifacts-2 | Upload Join Is Exact And Batch-Honest | In Development | `UPLOADS_ARTIFACT` is emitted from `workflow_run.id` only when that run is in the batch; the run records linked and unlinked counts. | |
+| req-github-core-artifacts-3 | Expiry Observed, Never Inferred | In Development | `expired` is stored as GitHub reports it; absence from the listing is stated as non-evidence in the truncation warning. | Shape C. |
+| req-github-core-artifacts-4 | Declared Steps Kept, Not Joined | In Development | `actions/upload-artifact` and `actions/download-artifact` steps land on the job's `configuration.artifact_steps` with mode, name/pattern and `cross_workflow`; no edge is emitted from a declaration to an artifact instance. | The gap is named, not papered over. |
+| req-github-core-artifacts-5 | Refused Is Not Empty | In Development | A 403 or 404 records `outputs_observability.artifacts = unobservable` with the status in `notes.artifacts`, warns, and lands nothing. | `tests/test_outputs.py::TestArtifactsLand`. |
+| req-github-core-artifacts-6 | Reachable From The Repository | In Development | Every artifact that lands is joined to its repository by `STORES_ARTIFACT`, in or out of the run window. | `tests/test_artifacts.py`. |
+
+### Commits
+----
+RID: `req-github-core-commits`
+Status: `In Development`
+
+The commit at every collected ref's head, sliced to what a signature question and an identity
+question need and nothing else — no message, tree or parents (github-core#57). It exists because
+a ruleset's `required_signatures` rule asks a question only this node can answer, and because the
+corpus's ranking names "a commit joins refs to signatures" as the convergence case; that is why it
+moved from the friends tier to self.
+
+**Keyed on the repository plus the SHA.** A commit is content-addressed, but GitHub persists the
+signature *verification record* per repository network, so the same SHA in two unrelated networks
+can carry two verdicts and a SHA-only node would merge them (PR #60 review; GitHub docs retrieved
+2026-09-02). The cross-fork join is a follow-on keyed on the network root once `Repository.parent`
+is collected. Author and committer are recorded **as observed** — a login only when GitHub resolved the email, an empty
+login as observed-absent.
+
+**Collected at no additional cost.** A `CommitSlice` fragment on the config-layer refs query's
+targets (and on `Tag.target` for annotated tags) — scalar fields on nodes already requested,
+measured at `rateLimit.cost: 1` on 2026-09-02 — under `repository:contents:read`, the `refs`
+source's own triple.
+
+**The signature has three states, never two.** GitHub's verification `state` when a signature
+exists; `unsigned` when GitHub returned `signature: null`, which is an observed value, with
+`signature_valid: null` rather than false; and `unobservable` when the field was not answered. A
+degraded GraphQL field arrives as `null` beside an `errors[]` entry — indistinguishable from an
+unsigned commit — so the config layer **prunes the key at every errored path** before shaping, an
+absent key lands as `unobservable`, and a body whose `committedDate` was pruned emits no node.
+
+`POINTS_AT` (ref → commit) is property-free: the corpus's `observed_at` duplicates batch provenance
+and `git_ref.head_sha` field history. A moved ref re-derives the relation (github-core#14, shape G);
+under additive-only collection the old edge lingers, and reconciliation, not a flag, is the fix.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-commits-1 | One Node Per Repository And SHA | In Development | Every ref carrying a commit slice yields a `git_commit` keyed on `owner/repo` + SHA and a `POINTS_AT` from the ref; two refs in one repository at one commit share the node. | The verification record is network-scoped, so the key is never wider than a repository. |
+| req-github-core-commits-2 | Signature In Three States | In Development | A signed commit stores GitHub's `state`, kind, validity and signer; `signature: null` stores `unsigned` with `signature_valid: null`; a `signature` key pruned for a field error stores `unobservable`; a ref whose commit slice is absent emits no commit and no edge. | Never false for unsigned or unobservable. |
+| req-github-core-commits-3 | Identity As Observed | In Development | `author_login` / `committer_login` are set only when GitHub resolved the email to an account; the raw name and email are kept alongside. | |
+| req-github-core-commits-4 | No Extra Request Or Permission | In Development | The slice rides the config-layer refs query; the manifest declares `repository:contents:read`, already in the union, and the conformance extract carries the traversed `Commit`, `GitActor` and `GitSignature` fields. | |
+
+### Status Checks
+----
+RID: `req-github-core-status-checks`
+Status: `In Development`
+
+The convergence node between the gate and the machinery (github-core#61). A ruleset's
+`required_status_checks` rule names contexts that must pass; a workflow's job, named the same,
+produces them. `status_check` is keyed **`<owner>#<context>`** — owner-scoped like the ruleset,
+because an organization requirement spans every repository it protects — and **a check nobody
+requires has no node**: every job produces a check run, and one node per job would drown the
+convergence in leaves. The node is the requirement's target; producers are derived toward it.
+
+`REQUIRES_CHECK` (ruleset → check) carries the rule's own qualifiers — `integration_id` (null means
+any source may satisfy it), `strict` and `do_not_enforce_on_create` — and not the corpus's
+`enforcement`, which is a field on the ruleset node. `PRODUCES_CHECK` (workflow → check) is
+**derived from job display names and says so**: `confidence: exact` when the declared name equals
+the context, `matrix_template` when the context is the declared name plus a parenthesised matrix
+expansion. It is emitted only where a requirement admits an Actions-produced check (`integration_id`
+null or 15368); an App's check has the node and the requirement and no producer, pending the App's
+numeric id on the grid.
+
+**The type-only fallback is the state that must not read as "none".** The ruleset detail is
+administration-gated and degrades; when refused, `rules` come from the GraphQL config layer with
+types only, so the contexts are NOT observable. Such a ruleset mints no node, warns
+`REQUIRED_CHECKS_UNOBSERVABLE`, and is counted in the `STATUS_CHECKS` summary — which also lists the
+Actions-producible contexts with no declared producer anywhere in scope. Both resolve in the
+post-pass after the whole scope is walked.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-status-checks-1 | One Node Per Required Context | In Development | Every context named by any ruleset's `required_status_checks` parameters lands as one `status_check` per (owner, context) with a `REQUIRES_CHECK` from each ruleset naming it, carrying the rule's qualifiers. | |
+| req-github-core-status-checks-2 | Unreadable Requirements Are Counted | In Development | A `required_status_checks` rule with no parameters (the type-only fallback) mints nothing, warns per ruleset, and is counted in the run summary. | Shape E. |
+| req-github-core-status-checks-3 | Producers Derived With Stated Confidence | In Development | `PRODUCES_CHECK` from a workflow whose job display name equals the context (`exact`) or is its matrix template (`matrix_template`), only where a requirement admits an Actions check; the summary lists producible contexts with no producer. | |
+| req-github-core-status-checks-4 | No Extra Request Or Permission | In Development | Both edges derive from the `rulesets` and `workflow_yaml` sources already in the manifest. | |
+
 ### Refs
 ----
 RID: `req-github-core-refs`
+
 Status: `Implemented`
 
 A ref is a name and the commit it points at. Branches (`refs/heads/`) and tags (`refs/tags/`) are
@@ -511,6 +751,7 @@ re-tag that swaps only the tag object moves one and not the other.
 ### Rulesets
 ----
 RID: `req-github-core-rulesets`
+
 Status: `Implemented`
 
 A ruleset is the gate: what must be true for a commit to land on a ref. It is a node because many
@@ -530,25 +771,59 @@ repository.
 GitHub returns a ruleset's bypass-actor list only to a caller with **write access to the ruleset**.
 Measured against our own organization on 2026-08-27: an owner-minted fine-grained PAT sees it; a
 GitHub App with `administration: read` does not — REST omits the `bypass_actors` key entirely
-(HTTP 200), while **GraphQL answers with an empty connection and no error at all**. Our own
-rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful zero versus a
-silently filtered connection — is untested and cannot be tested here without adding a bypass actor
-to a live ruleset, which would be a change to our security posture rather than a measurement.
+(HTTP 200), while **GraphQL answers with a truthful `totalCount` and every node redacted to
+`null`** (corrected 2026-09-02 from "an empty connection", which the #11 probe disproved — #22
+item 2). Our own rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful
+zero versus a silently filtered connection — could not be measured against them without changing
+our security posture. It was measured instead on **a probe ruleset carrying one bypass actor,
+created on a personal repository, read with every available credential, and deleted** (#11,
+2026-08-27; the domain article `github_ruleset.md` §Observability records the table): the read-only
+App received `totalCount: 0` on the control rulesets and `totalCount: 1` on the probe, with every
+node `null`. That is the evidence behind treating a counted zero as a fact.
 
 The derivation that follows:
 
 ```
-observable = REST detail carried `bypass_actors`  OR  GraphQL returned a NON-EMPTY list
+observed = REST detail carried `bypass_actors`  OR  GraphQL returned AT LEAST ONE NON-NULL node
+counted  = neither, AND GraphQL carried `bypassActors.totalCount` (every node null, or none)
 ```
 
-A non-empty GraphQL answer proves itself — a filtered connection cannot invent actors. An empty one
-proves nothing. **False presence is impossible here; false absence is the entire risk.**
+A GraphQL answer with a real actor node in it proves itself — a filtered connection cannot invent
+actors — and `[null]` is not such an answer: a list of redactions is `counted`, never `observed`.
+A redacted one still carries its `totalCount`, and that count is truthful: the #11 probe read `0` on the
+controls and `1` on a ruleset carrying exactly one actor. **False presence is impossible here;
+false absence is the entire risk** — and discarding a known count is a false absence.
 
-The three states live on the **ruleset node** (`bypass_observability`, with `bypass_actor_count`
-meaningful only when `observed`), not on the `BYPASSES` edge, because when the answer is *none* or
-*unknown* there are no edges to carry anything and a view reading only edges would render both as
-an empty list. Generalized: *a property that qualifies an absence belongs on the node the absence
-is about, never on the edges that failed to appear.*
+**The `counted` state (decided 2026-09-02; #22 item 1 is the collector work).** A read-only
+credential learns *how many* may bypass, never *who*. That is most of the security value of the
+question, and the client currently throws it away (it filters the null nodes and never reads
+`totalCount`), degrading a known number to "we could not tell". `bypass_observability` therefore
+takes three values:
+
+| State | Meaning | `bypass_actor_count` |
+| --- | --- | --- |
+| `observed` | The list was read by a credential clearing the write bar. An empty list is then a fact. | The list length. |
+| `counted` | GraphQL answered `totalCount` with the identities redacted. | `totalCount`. **A zero here is a truthful zero**, distinguishable from unobservable for the first time. |
+| `unobservable` | Neither transport answered. | `null`. |
+
+Two invariants a consumer may rely on: the count is non-null **if and only if** the state is
+`observed` or `counted`, so nobody can see a number beside the word "unobservable" and believe
+both; and the count lives on the **ruleset node**, never on a node of its own — it is a fact
+about the ruleset, and a node type for a number would be a second copy of a fact that already has
+a home (derive-a-fact-once). The three states live on the ruleset (`bypass_observability`), not on
+the `BYPASSES` edge, because when the answer is *none* or *unknown* there are no edges to carry
+anything and a view reading only edges would render both as an empty list. Generalized: *a
+property that qualifies an absence belongs on the node the absence is about, never on the edges
+that failed to appear.*
+
+Views render the three states distinctly — git-serious's bypass badge
+(`req-git-serious-branch-protection-tiers-bypass-badge`: grey unobservable, yellow counted, neutral
+observed, and red reserved for a bypass that *happened*, which is the rule-suite surface) — and
+the guidance "a credential with write access to the ruleset would name them" rides `absent_note`
+(`req-github-core-app-auth-11`), machine-legible for the third player. `counted` is enough to make
+it work with a read-only credential; gathering and managing the identities under a properly scoped
+credential is the *make-it-right* task (#39 — same collector with a second envelope, or a separate
+collector, is the open question).
 
 **The read-only posture has a hard ceiling here**, and it is published rather than engineered
 around: seeing the exemption list requires write access to the thing being audited, and we do not
@@ -560,13 +835,16 @@ request write.
 | --- | --- | :---: | --- | --- |
 | req-github-core-rulesets-1 | One Node Per Ruleset | Implemented | A ruleset is one node keyed on owner + ruleset id however many repositories it protects, applied by `PROTECTS` edges. | |
 | req-github-core-rulesets-2 | Rule Parameters Retained | Implemented | The rules array carries each rule's parameters as returned (required check contexts among them), falling back to the type-only GraphQL list when the REST detail is unreadable — and warning when it does. | The gate view needs the contexts, not just the rule types. |
-| req-github-core-rulesets-bypass | Bypass Observability Is Recorded | Implemented | `bypass_observability` is `observed` only when REST carried the key or GraphQL returned a non-empty list; otherwise `unobservable` with a **null** actor count. A run warns per unobservable ruleset. | The failure guarded against is rendering "we could not look" as "nobody can bypass". |
+| req-github-core-rulesets-bypass | Bypass Observability Is Recorded | Implemented | `bypass_observability` is `observed` only when REST carried the key or GraphQL returned a non-empty list; otherwise `unobservable` with a **null** actor count. A run warns per unobservable ruleset. | The failure guarded against is rendering "we could not look" as "nobody can bypass". Superseded in part by `-bypass-2`: the redacted-nodes case becomes `counted`, not `unobservable`. |
+| req-github-core-rulesets-bypass-2 | Counted Is A State | Approved for Development | When GraphQL returns `bypassActors.totalCount` with the nodes redacted, `bypass_observability` is `counted` and `bypass_actor_count` equals `totalCount` — stored as `0` when it is zero, never `null`. The model enum and both schemas gain the value. | #22 item 1. Fixture: `{"totalCount": 1, "nodes": [null]}` → counted, 1. |
+| req-github-core-rulesets-bypass-3 | Count Never Beside Unobservable | Approved for Development | `bypass_actor_count` is non-null if and only if `bypass_observability` is `observed` or `counted`; a test asserts the invariant over every emitted ruleset. | The reader must not be able to see a number and the word "unobservable" and believe both. |
 | req-github-core-rulesets-3 | Unmodelled Actors Are Counted | Implemented | Bypass actors with no node type yet (teams, organization-admin roles) are kept as data on the ruleset and counted, never dropped. | Understating who can bypass is the one direction that must never happen. |
 | req-github-core-rulesets-4 | Ref Resolution Is Additive | Implemented | Condition patterns are stored verbatim (`~DEFAULT_BRANCH`, `~ALL`, globs) AND resolved against observed refs into `PROTECTS` edges with `match_kind: resolved`. A pattern matching nothing is an answer, not a failure. | Intent and effect are both queryable. |
 
 ### Environments
 ----
 RID: `req-github-core-environments`
+
 Status: `Implemented`
 
 A deployment environment is where protection rules — required reviewers, wait timers, branch
@@ -589,6 +867,7 @@ policy; that field is left `null` (unobserved) rather than defaulted, because de
 ### Caches
 ----
 RID: `req-github-core-caches`
+
 Status: `Implemented`
 
 Five incidents turn on the Actions cache, including the two most recent: an entry written by a job
@@ -615,6 +894,7 @@ The join is a named gap. `WRITES_CACHE` / `RESTORES_CACHE` wait for it.
 ### App Installations
 ----
 RID: `req-github-core-app-installations`
+
 Status: `Implemented`
 
 The registered application and its installation into an account are different objects: one App is
@@ -653,6 +933,7 @@ repositories and then shows you one row about itself. Read-only, like everything
 ### Rule Suites — Who Actually Bypassed
 ----
 RID: `req-github-core-rule-suites`
+
 Status: `In Development`
 
 `req-github-core-ruleset` records **who may bypass** a gate, and hits a documented ceiling: GitHub
@@ -745,39 +1026,6 @@ property that qualifies an absence belongs on the node the absence is about (the
 | req-github-core-releases-3 | Producer Derived And Labelled | In Development | `BUILDS_RELEASE` is emitted per collected run matching by `tag_ref` or `same_commit`, carrying `match_kind` and `head_sha`; runs with `event == release` are never joined as producers. | The only place a run→release claim is made, and it names its own evidence. |
 | req-github-core-releases-4 | Refused Is Not Empty | In Development | A repos-only scope, or a GraphQL response without the `releases` field, records `outputs_observability.releases = unobservable` with the reason, warns, and lands no release nodes; truncation past the page cap is reported with the total. | Same three-state discipline as `bypass_observability`. |
 
-### Actions Artifacts
-----
-RID: `req-github-core-artifacts`
-Status: `In Development`
-
-Eleven sources in the vocabulary corpus name the artifact, and one incident (ArtiPACKED) is made
-of nothing else. **REST-only**: GitHub's GraphQL API exposes no artifacts, as it exposes no runs.
-`GET /repos/{owner}/{repo}/actions/artifacts` reads at `repository:actions:read`, already in the
-derived union, and is marked `enabledForGitHubApps: true` — measured 2026-09-02 as `200`,
-`total_count: 3636` on the product repository.
-
-**GitHub attributes the upload.** Each artifact names the `workflow_run` that uploaded it, with
-its `head_sha` and `head_branch`. That makes `UPLOADS_ARTIFACT` the one *reported* producer edge
-in the output column, where `BUILDS_RELEASE` and `BUILDS_PACKAGE_VERSION` are derived. The corpus
-sources this edge on the declared job (`workflow_job`, from `actions/upload-artifact` steps);
-that is the declaration side and needs the step parser, so it stays open, and this build lands
-the execution side on the run rather than pointing the corpus's edge at the wrong source.
-`DOWNLOADS_ARTIFACT` is not built: GitHub exposes no download log.
-
-**The cap is the rule.** One page of one hundred, newest first, against thousands. The run
-warns with GitHub's `total_count` and states that absence in the batch is not evidence of expiry
-or deletion. `STORES_ARTIFACT` keeps every collected artifact reachable from its repository even
-when its run is outside the window; `run_id` on the node is always true.
-
-#### Acceptance Criteria
-
-| ACID | Title | Status | Description | Notes |
-| --- | --- | :---: | --- | --- |
-| req-github-core-artifacts-1 | Artifact Model Declared | In Development | An `actions_artifact` node keyed on `owner/repo` + artifact id carries `name`, `size_in_bytes`, `digest`, `expired`, `run_id`, `head_sha`, `head_branch`, timestamps and the archive URL; joined to its repository by `STORES_ARTIFACT`. | `models/actions_artifact.py`; `tests/test_outputs.py::TestArtifactsLand`. |
-| req-github-core-artifacts-2 | Upload Attributed By GitHub | In Development | `UPLOADS_ARTIFACT` is emitted from the run named by the artifact's `workflow_run` to the artifact, carrying `head_branch` and `head_sha`, only when that run is in the collected window; otherwise the artifact still lands with its `run_id`. | Reported, not derived. |
-| req-github-core-artifacts-3 | Truncation Stated | In Development | When `total_count` exceeds the page, the run warns with both numbers and states that absence is not evidence of deletion. | 3,636 on one repository at capture. |
-| req-github-core-artifacts-4 | Refused Is Not Empty | In Development | A 403 or 404 records `outputs_observability.artifacts = unobservable` with the status, warns, and lands nothing. | |
-
 ### GitHub Packages — The Collection Seam
 ----
 RID: `req-github-core-packages`
@@ -843,6 +1091,7 @@ edge's presence is a claim by the tagger — anyone with registry push can tag a
 ### GitHub Apps
 ----
 RID: `req-github-core-app`
+
 Status: `Implemented`
 
 A `github_app` node models a GitHub App or first-party platform app enabled on
@@ -878,6 +1127,7 @@ prefix map.
 ### Dimension Strategy
 ----
 RID: `req-github-core-dimensions`
+
 Status: `Implemented`
 
 GitHub is treated as its own platform environment. The plugin uses flat,
@@ -931,6 +1181,7 @@ than an invisible member of the config layer.
 ### Collector Secret Kinds
 ----
 RID: `req-github-core-secret`
+
 Status: `Implemented`
 
 The first credential mode is a Personal Access Token. `github_core` owns the
@@ -1005,6 +1256,7 @@ Do not pre-build it; wait for the trigger.
 ### Collector Runtime
 ----
 RID: `req-github-core-collector`
+
 Status: `Implemented`
 
 The collector is a standard `CollectorBase` subclass registered by
@@ -1024,7 +1276,9 @@ Collection policy:
 
 - First population per repo collects the latest `initial_run_limit` workflow runs.
 - Later runs collect workflow runs created since the latest
-  `github_actions_run.created_at` already on the grid for that repo.
+  `github_actions_run.run_started_at` already on the grid for that repo
+  (`req-github-core-collector-3`; `created_at` became a column in github-core#47
+  and the boundary deliberately did not move with it).
 - The collector always refreshes previously non-terminal runs/jobs until they
   reach a terminal state.
 - Runner-config collection degrades with a structured warning on permission
@@ -1062,6 +1316,7 @@ Collection policy:
 ### Collection And Link Manifests
 ----
 RID: `req-github-core-manifests`
+
 Status: `Implemented`
 
 The collector uses two declarative JSON manifests, both schema-validated at
@@ -1093,6 +1348,7 @@ installation interprets GitHub data against the grid."
 ### Workflow File Parsing
 ----
 RID: `req-github-core-workflow-parse`
+
 Status: `Implemented`
 
 Workflow parsing is v0 because the demo needs to explain the deployment
@@ -1162,6 +1418,7 @@ flags it as a near-soon implementation target for the next GitHub-focused pass.
 ### Runner Semantics
 ----
 RID: `req-github-core-runner`
+
 Status: `Implemented`
 
 GitHub runners have two relevant shapes:
@@ -1190,6 +1447,7 @@ in v0.
 ### Existing Grid Links
 ----
 RID: `req-github-core-grid-links`
+
 Status: `Implemented`
 
 The collector always attempts to resolve exact links from collected GitHub
@@ -1307,6 +1565,7 @@ future capability deferred with the rest of variable/secret-ref work in
 ### Plugin Python Dependency
 ----
 RID: `req-github-core-python-deps`
+
 Status: `Implemented`
 
 `PyYAML` is approved for this plugin's workflow-file parser and should be
@@ -1327,9 +1586,90 @@ justified by and documented with `github_core`.
 | req-github-core-python-deps-2 | Plugin-Owned Declaration | Implemented | The dependency is declared in plugin-local Python dependency metadata, not `tap-plugin.toml`. | First proof of `req-plugin-arch-python-deps`; landed via root `[tool.uv.workspace]`. |
 | req-github-core-python-deps-3 | No Isolation Claim | Implemented | The spec does not claim runtime isolation from other installed Python packages. | |
 
+### Dependabot Alerts
+----
+RID: `req-github-core-dependabot-alerts`
+
+Status: `Proposed`
+
+GitHub already computes one class of finding for us: a Dependabot alert names a package in a
+manifest, the advisory that affects it, the vulnerable range and the first patched version, and
+its lifecycle (`open`, `dismissed` with a reason, `fixed`, `auto_dismissed`). For the Actions
+ecosystem the "package" is an action and the "manifest" is a workflow file — exactly the two nodes
+`req-github-core-actions-used` put on the grid. The prior-art verdict is CONSUME
+(`doc-git-serious-cicd-security-prior-art.md` §2.11): land them in the same finding shape zizmor
+uses, with the scanner as a dimension, so two sources' disagreement about one workflow is a query.
+
+**Shape.** One `dependabot_alert` node per (repository, alert number), all states — a fixed alert
+is history, not noise, and "no open alerts" is only meaningful beside "N fixed". Fields carry the
+alert's own facts (state, ecosystem, package, manifest path, scope, advisory ids and severity,
+vulnerable range, first patched version, the lifecycle timestamps, dismissal reason and comment)
+with the raw alert kept in `configuration`. Two edges, property-free by construction: `FLAGS_ACTION`
+(alert → `github_action`, joined on the package name being the action path) and `FLAGS_WORKFLOW`
+(alert → `github_workflow`, joined on `manifest_path` being the workflow's path). An alert whose
+package is not on the grid as an action (a pip package, say) lands with no `FLAGS_ACTION` edge and
+its ecosystem as the reason. Dimensions: the repository's, plus `github.surface: security` (a new
+value, documented in the surface dimension article when built).
+
+**Endpoint and permission.** `GET /repos/{owner}/{repo}/dependabot/alerts` (all four states,
+paginated) at **`repository:vulnerability_alerts:read`** — the App permission GitHub labels
+*Dependabot alerts*, and the first permission this plugin adds beyond the union it held on
+2026-09-03. `permission_failure: degrade_with_warning`: a 403 is a per-repository NOT OBSERVABLE
+state, recorded and warned, never an empty list — the three-state rule (`none` / `some` / `not
+observable`) applies per repository. The organization endpoint (`GET /orgs/{org}/dependabot/alerts`)
+would cost one request per hundred alerts instead of one per repository, but GitHub documents it for
+an owner or security manager and the App's standing there is unverified; the per-repository call
+is the v0 path and the org call an optimisation to measure.
+
+**Two facts to state rather than discover later.** (1) GitHub raises Actions alerts only for
+actions referenced by a *version tag*, never for SHA pins ("alerts are only generated for actions
+that use semantic versioning, not SHA versioning" — the alerts page, retrieved 2026-09-03). An
+absent alert on a SHA-pinned action is therefore no evidence about that action, and the panel that
+shows alerts beside `USES_ACTION` pins must say so. (2) The REST documentation's `ecosystem` enum
+lists `composer, go, maven, npm, nuget, pip, pub, rubygems, rust` and no Actions value, while the
+product documentation says Actions alerts exist. Our own organization carried 29 alerts on
+2026-09-03, all `pip`, all `fixed` — the Actions value has NOT been observed. So the collector must
+not filter server-side on an ecosystem value nobody has seen: it collects every alert, records the
+ecosystem values it observed, and joins `FLAGS_ACTION` on the package name. The first run against
+a repository with an Actions alert settles the enum, and that observation is pinned into the
+collection manifest at that point, not before.
+
+**Done-test needs an alert to exist — the fixture is in place.** `unified-systems-com/git-serious-fixtures`
+(created 2026-09-03, topic `tap-fixture`, Dependabot alerts on, automated security fixes off so
+nothing "fixes" the fixture) references `actions/download-artifact@v3` by tag in a job that never
+runs; the Actions-ecosystem alert it produces is the known answer for ACID 8, and the same repository
+carries the tag-drift fixture for `req-github-core-actions-used-8`. Until the alert is observed on a
+running instance, this requirement does not leave `Proposed`.
+
+**App permission — already held, not yet declared.** The installed `git-serious-exploratory` App
+(installation 157103378 on `unified-systems-com`, read 2026-09-03 via `GET /orgs/{org}/installations`)
+already carries `vulnerability_alerts: read` — along with `security_events: read` and
+`secret_scanning_alerts: read` — as *exploratory* grants from the App's creation. What is missing is
+the declaration: the collection manifest source must name `repository:vulnerability_alerts:read` so
+the permission becomes *derived* rather than exploratory, and any adopter's App minted from the
+manifest gains it. For an adopter whose App predates the declaration, the installation does not
+receive a new permission silently — an organization owner approves it under the App's installation
+settings — and until then the collector reads 403 and reports the surface as not observable.
+Code-scanning alerts (`repository:security_events:read`, also already held) are the same shape one
+step later and are NOT declared here.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-dependabot-alerts-1 | One Node Per Alert, All States | Proposed | Every alert the endpoint returns for a repository in scope lands as a `dependabot_alert` keyed on (repository, number), in every lifecycle state, with the raw alert in `configuration`. | A fixed alert is history. |
+| req-github-core-dependabot-alerts-2 | Refusal Is A Named State | Proposed | A 403 (permission not granted, or granted after installation and not yet approved) records the repository's alert surface as NOT OBSERVABLE with a warning; the batch never carries an empty alert set that reads as clean. | Per repository, three states. |
+| req-github-core-dependabot-alerts-3 | Flagged Action Joined | Proposed | An alert whose package name is an action path on the grid gets a `FLAGS_ACTION` edge to that `github_action`; one whose package is not an action lands with no such edge and its ecosystem visible. | Join on `github_action.action_path`. |
+| req-github-core-dependabot-alerts-4 | Flagged Workflow Joined | Proposed | An alert whose `manifest_path` is a collected workflow's path gets a `FLAGS_WORKFLOW` edge to that `github_workflow`. | Join on `github_workflow.path`. |
+| req-github-core-dependabot-alerts-5 | Ecosystem Observed, Not Assumed | Proposed | No server-side ecosystem filter until the Actions value has been observed on a real alert; the run records the set of ecosystem values it saw. | The documented enum omits Actions. |
+| req-github-core-dependabot-alerts-6 | SHA-Pin Blind Spot Stated | Proposed | Wherever alerts are shown beside `USES_ACTION` pins, a SHA-pinned action with no alert is rendered as "not covered by Dependabot", never as clean. | Product documentation, retrieved 2026-09-03. |
+| req-github-core-dependabot-alerts-7 | Permission Declared And Derived | Proposed | The collection manifest source declares `repository:vulnerability_alerts:read`; the App manifest the skill renders gains *Dependabot alerts: Read-only* from that declaration alone. | Never hand-listed. |
+| req-github-core-dependabot-alerts-8 | Observed On A Running Instance | Proposed | At least one Actions-ecosystem alert lands with both edges on a running instance. | The done-test; needs a repository that carries one. |
+
 ### Variables And Secret References (Backlog)
 ----
 RID: `req-github-core-backlog-references`
+
 Status: `Backlog`
 
 GitHub Actions variables (`vars.X`) and secret references (`secrets.X`) are
@@ -1469,6 +1809,7 @@ not in API). Future panel work, not part of model shape.
 ### Multi-Attempt Run Observation (Backlog)
 ----
 RID: `req-github-core-backlog-run-attempts`
+
 Status: `Backlog`
 
 GitHub workflow runs can be re-run, producing multiple "attempts" — each
@@ -1574,6 +1915,7 @@ the demo doesn't hit it, and the fix lives here.
 ### Grid-Vocabulary Reference Resolution (Backlog)
 ----
 RID: `req-github-core-backlog-grid-vocab-links`
+
 Status: `Backlog`
 
 The v0 parser (`_categorize_refs` in `parser.py`) extracts grid-link candidates
@@ -1649,6 +1991,7 @@ Invert the pipeline. Instead of shape-classify-then-match:
 ### GitHub App Relationships (Backlog)
 ----
 RID: `req-github-core-backlog-app-relationships`
+
 Status: `Backlog`
 
 `req-github-core-app` models that an app is *enabled on* a repo (`ENABLED_ON`).
@@ -1669,6 +2012,7 @@ These are deferred until there is a concrete graph consumer; v0 stops at presenc
 ### v0 Non-Goals
 ----
 RID: `req-github-core-nongoals`
+
 Status: `Implemented`
 
 Out of scope for v0:

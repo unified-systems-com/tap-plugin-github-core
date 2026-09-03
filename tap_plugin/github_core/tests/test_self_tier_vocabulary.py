@@ -295,9 +295,13 @@ class TestDeclaredJobParsing:
         assert cache["restore_keys"] == ["a-", "b-"]
         assert cache["mode"] == "restore_and_write"
 
-    def test_a_tag_pin_is_recorded_as_a_tag_because_a_tag_can_move(self, jobs) -> None:
+    def test_a_name_pin_is_unresolved_because_the_string_cannot_say_tag_from_branch(self, jobs) -> None:
+        """`@v4` used to parse as `tag`. Nothing in the string says so — `@main` parsed the same
+        way — and a declaration that exists and is false is worse than none. The collector
+        upgrades it to `tag`/`branch` only against an in-scope repository's refs
+        (req-github-core-actions-used-3)."""
         refs = {r["action"]: r for r in jobs["build"]["action_refs"]}
-        assert refs["actions/checkout"]["pin_kind"] == "tag"
+        assert refs["actions/checkout"]["pin_kind"] == "unresolved"
         assert refs["actions/cache"]["pin_kind"] == "sha"
 
     def test_an_unpinned_action_is_named_as_such(self) -> None:

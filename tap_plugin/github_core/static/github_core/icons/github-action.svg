@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- TAP-drawn (not an Octicon: GitHub retired `github-action` from Octicons; see NOTICE). A
+     puzzle-piece-shaped block — code that plugs into a job from outside — drawn to sit with
+     the Octicons family used elsewhere in this set. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>GitHub Action</title>
+  <path fill="#1f2328" d="M9.25 2.5a2.25 2.25 0 0 1 2.2 1.75H14.5A2 2 0 0 1 16.5 6.25v2.55a2.25 2.25 0 1 1 0 4.4v2.55a2 2 0 0 1-2 2h-2.55a2.25 2.25 0 1 1-4.4 0H5A2 2 0 0 1 3 15.75V13.2a2.25 2.25 0 1 1 0-4.4V6.25A2 2 0 0 1 5 4.25h2.05A2.25 2.25 0 0 1 9.25 2.5Zm0 1.5a.75.75 0 0 0-.75.75v1H5a.5.5 0 0 0-.5.5v3.5h-1a.75.75 0 1 0 0 1.5h1v4.5a.5.5 0 0 0 .5.5h3.5v1a.75.75 0 1 0 1.5 0v-1h4.5a.5.5 0 0 0 .5-.5v-3.5h1a.75.75 0 1 0 0-1.5h-1V6.25a.5.5 0 0 0-.5-.5H10v-1a.75.75 0 0 0-.75-.75Z"/>
+</svg>

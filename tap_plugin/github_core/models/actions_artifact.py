@@ -1,8 +1,11 @@
-"""Actions artifact — a file a workflow run uploaded and GitHub is holding.
+"""Actions artifact — a file set a workflow run uploaded, with the retention GitHub gives it.
 
-Eleven sources name it in the vocabulary corpus (as *artifact*); one incident, ArtiPACKED,
-turns entirely on it (a checkout directory uploaded with its credentials still inside). The
-node is the observed upload; the declared `actions/upload-artifact` step stays on the job.
+The output side of a pipeline, as an observed event: a run happened and left this behind.
+Eleven surveyed sources model an *artifact*; the machinery view's output column renders
+"not yet collected" without it (github-core#31, #55). The load-bearing fields are
+`digest` — the content hash that lets a downloaded artifact be matched to the one that
+was uploaded — and `expired`, which GitHub reports as a state rather than by removing the
+row.
 """
 
 from typing import Any, ClassVar
@@ -13,7 +16,18 @@ from tap_grid.models import BaseModel
 
 
 class ActionsArtifact(BaseModel):
-    """One artifact as GitHub reports it: name, size, digest, expiry, and the run that made it.
+    """One artifact as the repository-level listing reports it.
+
+    An **immutable event with a retention window** (github-core#14, shape C): the upload
+    happened once, at a timestamp, and does not stop having happened when retention ends.
+    GitHub keeps the row listed with `expired: true`, so expiry is observed, never inferred
+    from absence — and absence from a listing is never grounds for a tombstone here.
+
+    The declared side — a job's `actions/upload-artifact` and `actions/download-artifact`
+    steps — lives on `workflow_job.configuration.artifact_steps`. GitHub records who
+    uploaded (the run on `UPLOADS_ARTIFACT`) and nothing about who downloaded, so the
+    corpus's `DOWNLOADS_ARTIFACT` has no observable target and is not built; the
+    declaration carries `cross_workflow` instead (`req-github-core-artifacts`).
 
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-artifacts)
     """
@@ -21,77 +35,76 @@ class ActionsArtifact(BaseModel):
     ENTITY_TYPE: ClassVar[str] = "github_core__actions_artifact"
     ENTITY_NAME: ClassVar[str] = "Actions Artifact"
     ENTITY_DESCRIPTION: ClassVar[str] = (
-        "A file a workflow run uploaded — its name, size, content digest, expiry, and the run and "
-        "ref that produced it."
+        "A file set a workflow run uploaded — its name, size, content digest and retention state. "
+        "The output of a run, as GitHub recorded it."
     )
     ENTITY_ICON: ClassVar[str] = "actions-artifact"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
+        # Something that HAPPENED: an execution-side object, like the run that produced it.
+        "github.observation": "execution",
         "github.platform": "github.com",
         "github.surface": "actions",
-        # A by-product of a run, like a cache entry: it exists because a workflow executed.
-        "github.observation": "execution",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {
         "tap_viz": {
-            "shape": "round-rectangle",
-            "colors": {"fill": "#FFFFFF", "border": "#8250DF", "label": "#1F2328"},
+            "shape": "round-tag",
+            "colors": {"fill": "#DAFBE1", "border": "#1A7F37", "label": "#1F2328"},
         }
     }
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
-        "artifact_id": {"type": ["integer", "null"]},
         "full_name": {"type": "string", "minLength": 1},
+        "artifact_id": {"type": ["integer", "null"]},
         "name": {"type": "string"},
         "size_in_bytes": {"type": ["integer", "null"]},
         "digest": {"type": "string"},
-        "expired": {"type": ["boolean", "null"]},
+        "expired": {"type": "boolean"},
+        "expires_at": {"type": ["string", "null"]},
+        "created_at": {"type": ["string", "null"]},
+        "updated_at": {"type": ["string", "null"]},
         "run_id": {"type": ["integer", "null"]},
         "head_sha": {"type": "string"},
         "head_branch": {"type": "string"},
-        "created_at": {"type": ["string", "null"]},
-        "updated_at": {"type": ["string", "null"]},
-        "expires_at": {"type": ["string", "null"]},
-        "archive_download_url": {"type": "string"},
         "configuration": {"type": "object"},
         "tags": {"type": "object"},
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "artifact_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "artifact_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "size_in_bytes": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "digest": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "expired": {"validation": "jsonschema", "schema": {"type": ["boolean", "null"]}},
+        "expired": {"validation": "jsonschema", "schema": {"type": "boolean"}},
+        "expires_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
+        "created_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
+        "updated_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
         "run_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "head_sha": {"validation": "jsonschema", "schema": {"type": "string"}},
         "head_branch": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "created_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
-        "updated_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
-        "expires_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
-        "archive_download_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
     CREATE_REQUIRED: ClassVar[list[str]] = ["full_name", "artifact_id"]
 
-    artifact_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     full_name = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    artifact_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     name = models.CharField(max_length=512, blank=True, default="", db_index=True)
     size_in_bytes = models.BigIntegerField(null=True, blank=True)
-    #: `sha256:<hex>` of the uploaded content, as GitHub reports it. Empty when not returned.
-    digest = models.CharField(max_length=128, blank=True, default="")
-    expired = models.BooleanField(null=True, blank=True)
-    #: The run that uploaded it — GitHub's own attribution, not a derivation.
-    run_id = models.BigIntegerField(null=True, blank=True, db_index=True)
-    head_sha = models.CharField(max_length=64, blank=True, default="")
-    #: The ref the producing run was on. `refs/pull/...` heads do not appear here — GitHub
-    #: reports the bare branch name — so a pull-request artifact reads as its source branch.
-    head_branch = models.CharField(max_length=512, blank=True, default="")
+    # `sha256:<64 hex>` of the archive content as GitHub computed it at upload. Empty when GitHub
+    # did not report one (older artifacts predate the field), which is different from unknown.
+    digest = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    # Retention state as GitHub REPORTS it. An expired artifact stays listed; this flag is the
+    # observed lifecycle, and absence from a listing is never read as expiry.
+    expired = models.BooleanField(default=False)
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(null=True, blank=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
-    archive_download_url = models.URLField(max_length=512, blank=True, default="")
+    # The producing run, as the listing's `workflow_run` names it. Kept as a column so the join
+    # to `github_actions_run` is exact whether or not that run was in the collected window.
+    run_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    head_sha = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    head_branch = models.CharField(max_length=512, blank=True, default="")
     configuration = models.JSONField(default=dict, blank=True)
     tags = models.JSONField(default=dict, blank=True)
 
@@ -99,7 +112,7 @@ class ActionsArtifact(BaseModel):
         db_table = "github_core__actions_artifact"
 
     def get_name(self) -> str:
-        return self.name or (str(self.artifact_id) if self.artifact_id else "")
+        return self.name or (str(self.artifact_id) if self.artifact_id is not None else "")
 
     def __str__(self) -> str:
         return self.get_name()

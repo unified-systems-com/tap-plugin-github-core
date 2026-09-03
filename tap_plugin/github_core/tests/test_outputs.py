@@ -297,7 +297,8 @@ class TestArtifactsLand:
         expected = sum(1 for a in _ARTIFACTS["artifacts"] if a["workflow_run"]["id"] == in_batch["run_id"])
         assert len(uploads) == expected >= 1
         assert uploads[0]["edge"]["from_entity_id"] == str(in_batch["uuid"]), "the run uploaded; it is the source"
-        assert uploads[0]["edge"]["properties"]["head_branch"] == _FIRST_ARTIFACT["workflow_run"]["head_branch"]
+        # The ref is a field on the artifact, which IS the event; the edge carries no copy (#55).
+        assert uploads[0]["edge"]["properties"] == {}
 
     @pytest.mark.spec("req-github-core-artifacts-2")
     def test_an_artifact_whose_run_is_outside_the_window_still_lands(self) -> None:
@@ -316,7 +317,7 @@ class TestArtifactsLand:
 
 
 class TestArtifactsRefusedIsNotEmpty:
-    @pytest.mark.spec("req-github-core-artifacts-4")
+    @pytest.mark.spec("req-github-core-artifacts-5")
     @pytest.mark.parametrize("status", [403, 404])
     def test_a_refusal_is_unobservable_and_recorded(self, status: int) -> None:
         collector = _collector()

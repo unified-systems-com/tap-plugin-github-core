@@ -19,8 +19,9 @@ EDGES_DIR = Path(github_models.__file__).parent.parent / "edges"
 # ActionsCache is a BYPRODUCT of a run, not configuration someone wrote — it exists
 # because a workflow executed and wrote it.
 # The OUTPUTS (github-core#31) are all products of execution: a release was published, an
-# artifact was uploaded by a run, a package version was pushed. A release rides the config-layer
-# GraphQL transport, and transport is not layer.
+# artifact was uploaded by a run (github-core#14 shape C — an immutable event), a package
+# version was pushed. A release rides the config-layer GraphQL transport, and transport is
+# not layer.
 EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "RuleSuite",
                     "GithubRelease", "ActionsArtifact", "GithubPackage", "GithubPackageVersion"}
 # SCOPED_TO is sourced on actions_cache, which is execution — the layer follows the

@@ -9,3 +9,19 @@ Modifications: wrapped in a padded viewBox and given an explicit GitHub-ink
 fill (#1f2328) so they render correctly as cytoscape badge background-images.
 The github-platform icon uses the `mark-github` glyph (the GitHub logo /
 mark), used here nominatively to denote the GitHub platform.
+
+github-action.svg is TAP-drawn, not derived from Octicons: GitHub retired the
+`github-action` glyph from the set (absent from the icons/ directory at v19.15.1;
+inventoried from the directory, not keywords.json, which still lists it). Drawn to
+sit with the Octicons family — same 24-unit grid, same #1f2328 ink — with a <title>.
+
+actions-artifact.svg is derived from the Octicons `package` glyph at v19.15.1 — the icon
+GitHub itself uses for a run's uploaded artifacts — with the same padded viewBox, explicit
+#1f2328 fill and <title> as the rest of the derived set.
+
+git-commit.svg is derived from the Octicons `git-commit` glyph at v19.15.1, with the same
+padded viewBox, explicit #1f2328 fill and <title> as the rest of the derived set.
+
+status-check.svg is derived from the Octicons `check-circle` glyph at v19.15.1 — the glyph
+GitHub renders beside a passing required check — with the same padded viewBox, explicit
+#1f2328 fill and <title> as the rest of the derived set.

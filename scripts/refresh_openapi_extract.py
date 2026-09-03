@@ -69,7 +69,9 @@ GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
     # to things that are genuinely NOT field selections — keywords, arguments, aliases and
     # connection plumbing — rather than hiding real fields behind a name-match.
     "GitObject": ("oid",),
-    "Commit": ("oid",),
+    "Commit": ("oid", "committedDate", "authoredDate", "author", "committer", "signature"),
+    "GitActor": ("name", "email", "user"),
+    "GitSignature": ("isValid", "state", "wasSignedByGitHub", "signer"),
     "RepositoryRuleConditions": ("refName",),
     "RefNameConditionTarget": ("include", "exclude"),
     "RepositoryRule": ("type",),
@@ -185,6 +187,12 @@ def _graphql_extract() -> dict:
     }
 
 
+def _app_permissions_extract(spec: dict) -> dict:
+    """Every App permission key GitHub's description enumerates, with its allowed levels."""
+    props = spec["components"]["schemas"]["app-permissions"]["properties"]
+    return {key: {"levels": list(prop.get("enum", [])), "description": prop.get("description", "")} for key, prop in props.items()}
+
+
 def build() -> dict:
     commit = _resolve_commit(SPEC_REPO, SPEC_BRANCH)
     url = f"https://raw.githubusercontent.com/{SPEC_REPO}/{commit}/{SPEC_PATH}"
@@ -230,6 +238,12 @@ def build() -> dict:
         "spec_url": f"https://raw.githubusercontent.com/{SPEC_REPO}/{commit}/{SPEC_PATH}",
         "paths": out,
         "graphql": _graphql_extract(),
+        # The App-permission CATALOGUE: `components.schemas.app-permissions` is the one
+        # place GitHub enumerates every fine-grained App permission and its levels. The
+        # ledger (github_app_permissions.json) must classify every key here — a key GitHub
+        # adds shows up as an unclassified entry and fails the ledger test, which is the
+        # "have they added permissions we should consider" check made mechanical.
+        "app_permissions": _app_permissions_extract(spec),
     }
 
 

@@ -76,9 +76,10 @@ neutral substrate when one is extracted, not in `github_core`.
 | `github_actions_job` | yes | self | exists | the *executed* job. Slug retained (slugs are identity and never rename); its relationship to `workflow_job` is stated below |
 | **`git_ref`** | **yes** | **self** | **reshaped** | 12 sources. Replaces the never-built `git_branch`: branch **and tag** in one type, because tag movement is the detection for three incidents and rulesets already target `branch\|tag\|push` |
 | `github_ruleset` | no | self | proposed | 7 sources; the gate itself |
-| `status_check` | no | self | proposed | 6 sources; convergence node — required by rulesets, produced by workflows/apps |
-| `github_action` | no | self | proposed | 4 sources, and one carries `is_pinned` — the same property we proposed independently |
+| `status_check` | no | self | **exists** (2026-09-02, #61) | 6 sources; convergence node — required by rulesets, produced by workflows/apps. Keyed `<owner>#<context>`; **a check nobody requires has no node** (every job produces one; the node is the requirement's target). The App producer waits on the App's numeric id |
+| `github_action` | no | self | **exists** (2026-09-02, #45) | 4 sources, and one carries `is_pinned` — the same property we proposed independently. Keyed on the action path, platform-global; the pin lives on the edge |
 | `actions_secret` | partial | self | proposed | **11 sources**; 12 incidents |
+| `dependabot_alert` | partial | self | proposed (2026-09-03) | GitHub's own vulnerable-dependency finding; CONSUME per the prior-art verdict. Joins the action and the workflow it flags (`req-github-core-dependabot-alerts`). Neutral shape is *finding*; the source is GitHub's |
 | **`actions_cache`** | neutral-capable | **self** | **new** | 5 incidents including the two most recent. Convergence node: written by a low-trust job, restored by a privileged one |
 | `app_installation` | no | self | proposed | 7 sources. **Splits the existing `github_app`**: the registered application and the grant are different objects |
 | `pull_request` | yes | self | proposed | 10 sources |
@@ -87,11 +88,11 @@ neutral substrate when one is extracted, not in `github_core`.
 | `github_runner` | no | self | exists | 9 sources |
 | `github_app` | no | self | exists | keeps the *application*; the grant moves to `app_installation` |
 | `identity_core__oidc_issuer` | yes | self | exists | we are ahead here — the published GitHub graph has no OIDC issuer at all |
-| `git_commit` | **yes** | friends | **new** | 7 sources (as *revision*); narrow slice only — not a full commit history |
+| `git_commit` | **yes** | **self** (pulled forward) | **exists** (2026-09-02, #57) | 7 sources (as *revision*); narrow slice only — not a full commit history. Pulled from friends because signature state is a `required_signatures` ruleset input. Keyed on repository + SHA — the verification record is persisted per repository NETWORK (PR #60 review), so a SHA-only node could merge two verdicts; signature in three states (`state` / `unsigned` / `unobservable`) |
 | `github_team` | no | friends | proposed | 10 sources |
 | `credential_grant` → `identity_core` | **yes** | friends | **new** | **9 standards + 15 incidents.** One node with a `kind` enum, not four thin types — otherwise the one query the standards ask for verbatim requires a UNION |
 | `runner_group` | no | friends | **new** | the published graph is ahead of us on runner scope |
-| `actions_artifact` | neutral-capable | friends | **In Development** (2026-09-02, github-core#31) | 11 sources (as *artifact*). The execution side; GitHub attributes each upload to its run |
+| `actions_artifact` | neutral-capable | **self** (pulled forward) | **exists** (2026-09-02, #55) | 11 sources (as *artifact*). Pulled from friends to self by the machinery view's outputs column (#31). Keyed `<full_name>#<artifact_id>`; `digest` and `expired` are the load-bearing fields; Shape C (immutable event with a retention window) |
 | `webhook` | neutral-capable | friends | proposed | 4 standards |
 | `package` / `package_version` | **yes** | friends | **new** — collected via `github_package` / `github_package_version` (In Development 2026-09-02, decision 5) | **14 incidents, 10 sources.** Identity is a **purl** (the strongest convergence in the whole sweep). Decision 4 stands for identity; github_core owns the COLLECTION seam and carries the purl |
 | `identity_core__principal` | **yes** | later | **new** | the *robot / non-human actor* concept clears the 3-source bar |
@@ -120,14 +121,15 @@ properties must justify why it needs none.
 | `INSTANCE_OF_JOB` | actions_job → workflow_job | friends | new | `{run_attempt}` — the declaration↔execution bridge |
 | **`HAS_REF`** | repository → git_ref | self | new | — (drift lives in the ref's `head_sha` field history) |
 | **`BYPASSES`** | account\|team\|app → ruleset | self | new | `{actor_type, bypass_mode, observable, source}` — **`observable: false` distinguishes "nobody can bypass" from "we cannot see"**, which a blank cell cannot |
-| `REQUIRES_CHECK` | ruleset → status_check | self | proposed | `{enforcement}` |
-| `PRODUCES_CHECK` | workflow\|app → status_check | self | proposed | `{confidence}` — honest about inference |
-| `USES_ACTION` | workflow_job → github_action | self | proposed | `{pin_kind, pinned_sha, declared_ref, resolves_to_fork}` — pinned by SHA, tag or branch, and does the SHA belong to the canonical repo |
+| `REQUIRES_CHECK` | ruleset → status_check | self | **exists** (2026-09-02, #61) | `{integration_id, strict, do_not_enforce_on_create}` — the rule's own qualifiers. **`enforcement` dropped**: it is a field on the ruleset node, and a copy would disagree the day a ruleset is switched to evaluate. Shape E: a refused detail is counted as not observable, never as no requirement |
+| `PRODUCES_CHECK` | workflow → status_check (app: follow-on) | self | **exists** (2026-09-02, #61) | `{job_key, job_name, confidence ∈ exact \| matrix_template}` — honest about inference; derived from job display names only where the requirement admits an Actions check (`integration_id` null or 15368) |
+| `USES_ACTION` | workflow_job → github_action | self | **exists** (2026-09-02, #45) | `{declared_ref, pin_kind, is_pinned, resolved_sha, resolution, step_indexes}` — pinned by SHA, digest, tag or branch, **or `unresolved`**: tag-versus-branch is not observable from the string, and is resolved only when the action's repository is in scope (`resolution` says which). `resolves_to_fork` dropped — needs the fork graph, not derivable; named in the article |
 | **`REFERENCES_SECRET`** | workflow_job → actions_secret | self | proposed | `{step_index, trigger_events, checks_out_pr_head, interpolates_into_run, top_level_permissions}` — **the adjudication properties**: shape versus exploitability |
 | **`WRITES_CACHE`** / **`RESTORES_CACHE`** | workflow_job → actions_cache | self | new | `{step_index, ref_scope, fork_reachable}` / `{step_index, ref_scope, privileged}` — is the writer reachable by an outsider, does the reader hold publish rights |
-| `CALLS_WORKFLOW` | workflow → workflow | self | proposed | `{pin_kind, ref}` |
-| `TRIGGERS_WORKFLOW` | workflow → workflow | self | proposed | `{trigger_event, conclusion_filter}` |
+| `CALLS_WORKFLOW` | **workflow_job** → workflow | self | **exists** (2026-09-02, #29) | `{declared_ref, pin_kind, is_pinned, resolution, resolved_sha, same_repository, secrets_inherit}` — the `USES_ACTION` pin grammar plus whether the caller forwards every secret. **Source corrected to the job**: the call is written on the job, which carries the `permissions` and `secrets` the question needs, and two jobs in one file can call two workflows. Callee not on the grid → no edge; `call_resolution` on the job (three states) |
+| `TRIGGERS_WORKFLOW` | workflow → workflow | self | **exists** (2026-09-02, #52) | `{trigger_event, declared_name, types, branches, branches_ignore}` — completing → triggered, from the target's `on.workflow_run`. **`conclusion_filter` dropped**: GitHub has no such key; the check lives in job `if:` expressions and extracting it is a guess. Filters carried only as written — GitHub's `types` default is not filled in |
 | **`DEFINED_IN`** | github_action → repository | self | new | — enables owner-transfer and archived-action detection |
+| `FLAGS_ACTION` / `FLAGS_WORKFLOW` | dependabot_alert → github_action / github_workflow | self | proposed (2026-09-03) | — property-free: the finding's facts are on the alert node; the edge is the join on package name / manifest path |
 | `HAS_REPO_PERMISSION` | account\|team → repository | self | proposed | `{permission, affiliation, granted_via}` — **four sources independently reify permission provenance**; carry it from day one |
 | `MEMBER_OF_ORG` | account → account | self | proposed | `{role}` |
 | `OPENS_PULL_REQUEST` | account\|app → pull_request | friends | proposed | `{author_association}` |
@@ -136,9 +138,10 @@ properties must justify why it needs none.
 | `HOLDS_CREDENTIAL` / `GRANTS_ACCESS_TO` | principal → grant → repository | friends | new | `{permission, granted_at, last_used_at}` — grant timestamps are a standardised property |
 | `REGISTERED_ON` / `MEMBER_OF_RUNNER_GROUP` | runner → repo\|account, runner → group | friends | new | `{first_seen, scope}` — "a runner appeared where none had been" |
 | `BUILDS_PACKAGE_VERSION` | run → package_version | friends | **In Development** (2026-09-02) | `{attested, match_kind}` — **its absence is the finding**: a registry version with no run behind it is how five incidents read. Built as run → `github_package_version`, derived from the `sha-<short>` tag convention; `match_kind` names the derivation so an absence outside it is read as a limit first |
-| `POINTS_AT` | git_ref → git_commit | friends | new | `{observed_at}` |
+| `POINTS_AT` | git_ref → git_commit | self | **exists** (2026-09-02, #57) | — (**`observed_at` dropped**: batch provenance and `git_ref.head_sha` field history already keep it; a second copy would disagree on the first re-run). Shape G: a moved ref re-derives the relation |
 | `FETCHES_FROM` | workflow_job → web_host | friends | new | `{url_pattern, piped_to_shell, digest_pinned}` |
-| `UPLOADS_ARTIFACT` / `DOWNLOADS_ARTIFACT` | workflow_job → artifact | friends | `UPLOADS_ARTIFACT` **In Development** (2026-09-02) as run → artifact; `DOWNLOADS_ARTIFACT` new | `{cross_workflow}` — the declared-job form. The built form is the EXECUTION side (run → artifact, `{head_branch, head_sha}`, GitHub's own attribution); the declared side needs the step parser and stays open |
+| `UPLOADS_ARTIFACT` | **run** → artifact | self | **exists** (2026-09-02, #55) | — (exact, from the listing's `workflow_run.id`; every candidate property is a field on the artifact, which IS the event). **Source corrected to the run**: the listing names the run, not the job |
+| ~~`DOWNLOADS_ARTIFACT`~~ | ~~workflow_job → artifact~~ | — | **rejected 2026-09-02** | **No observable target.** GitHub records the uploader and nothing about downloads; a declared download names a pattern, and the node is one concrete id — joining them is the inference `req-github-core-caches-4` refuses. `cross_workflow` survives on the job's `configuration.artifact_steps` (a `run-id`/`repository` input), where it is derivable |
 | **`PUBLISHES_RELEASE`** / **`BUILDS_RELEASE`** / **`TARGETS_REF`** | repo → release; run → release; release → git_ref | self-lite | **In Development** (2026-09-02, github-core#31) | `BUILDS_RELEASE {match_kind, head_sha}` — DERIVED (GitHub records the author, never the run) and labelled; `TARGETS_REF {tag_name}` — both ends carry the commit they resolved to, so a tag moved under a release is a query |
 | **`STORES_ARTIFACT`** / **`PUBLISHES_PACKAGE`** / **`PUBLISHES_PACKAGE_VERSION`** | repo → artifact; account\|repo → package; package → version | friends | **In Development** (2026-09-02) | containment; `PUBLISHES_PACKAGE {link_kind}` distinguishes the unconditional owner edge from GitHub's optional repository link |
 | `LINKED_IDENTITY` | account → principal | later | new | `{confidence, evidence}` |
@@ -210,7 +213,9 @@ readable catalogue, a collector can land it on the grid so "what changed" become
    to a field at `self`; revisit at `friends`** if anything needs to point at one.
 2. ~~Where `package_version` lives.~~ **Settled:** `supply_chain_core` (see decisions above). **Collection seam settled 2026-09-02 (decision 5):** github_core collects and carries the purl; identity stays with decision 4. **Still open:** the packages surface is unobservable with the App credential (`enabledForGitHubApps: false`, measured as a 400) — whether re-accepting `organization_packages: read` changes that is unmeasured, and a classic PAT with `read:packages` is the only credential GitHub documents.
 3. ~~**`BYPASSES` observability.**~~ **SETTLED EMPIRICALLY 2026-08-27, and the answer is worse than
-   expected.** GitHub returns `bypass_actors` only to a caller with **write access to the ruleset**.
+   expected.** **Addendum 2026-09-02:** less bad than measured — a read credential gets GraphQL's
+   `totalCount` with the nodes redacted (#11 probe, #22), so `bypass_observability` gains a `counted`
+   state and the count rides the ruleset node; see `spec-github-core-v0.md` §Bypass observability. GitHub returns `bypass_actors` only to a caller with **write access to the ruleset**.
    Measured against our own org, and **read the next paragraph before relying on the comparison**:
    an owner-minted fine-grained PAT sees it; a **GitHub App with `administration: read` does not**
    (`bypass_actors` absent from the ruleset detail, HTTP 200).

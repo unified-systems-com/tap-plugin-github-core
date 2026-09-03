@@ -1,0 +1,50 @@
+{
+  "slug": "TRIGGERS_WORKFLOW__github_core",
+  "name": "Triggers Workflow",
+  "description": "The completion of one workflow fires another (`on: workflow_run: workflows: [<name>]`). Points from the workflow that completes to the workflow that runs as a result, even though the declaration lives on the target: the source's run is what initiates the target's. This is the two-stage shape GitHub's own docs recommend for untrusted input — an unprivileged `pull_request` stage whose completion fires a privileged base-repository stage — and therefore the edge along which a fork's data reaches a workflow that holds secrets.",
+  "sources": [
+    "github_core__github_workflow"
+  ],
+  "targets": [
+    "github_core__github_workflow"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "required": [
+      "trigger_event",
+      "declared_name"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "trigger_event": {
+        "type": "string",
+        "enum": ["workflow_run"],
+        "description": "The event class. An enum of one today so a later cross-workflow trigger (`repository_dispatch`, a `workflow_dispatch` fired by another workflow's job) can join without renaming the edge."
+      },
+      "declared_name": {
+        "type": "string",
+        "description": "The upstream workflow's display name exactly as the target's file wrote it. Kept so a rename of the upstream shows as drift here rather than as a silently dead trigger."
+      },
+      "types": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "`types:` as written (`completed`, `requested`, `in_progress`). Absent when the file omits it — GitHub then defaults to requested and completed, and that default is NOT written here because the file did not declare it."
+      },
+      "branches": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "`branches:` filter as written on the upstream run's head branch; absent when omitted."
+      },
+      "branches_ignore": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "`branches-ignore:` as written; absent when omitted."
+      }
+    }
+  }
+}
