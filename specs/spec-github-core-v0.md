@@ -72,6 +72,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-app-auth | [GitHub App Authentication](#github-app-authentication) | In Development | 2026-08-27: the App is the product credential — its permissions are DERIVED from the collection manifest, it is created per-instance from a manifest so the operator holds their own key, and two surfaces git-serious needs are App-only (organization PAT grants, installed Apps) |
 | req-github-core-org-scope | [Account Scope](#account-scope) | Implemented | 2026-08-26 (pulled by git-serious): the envelope names an `owner`; the collector enumerates its repositories (org, user fallback), `repos` becomes an optional include-filter, and the run records the enumeration incl. walk completeness. Repos-only envelopes remain valid as the degenerate run config |
 | req-github-core-models | [Model Set](#model-set) | Implemented | account/repo/workflow/run/job/runner (0001) + synthesized `github_platform` (0002) — seven tables. `oidc_issuer` was extracted to the `identity_core` substrate plugin (dropped here in 0004); github still mints the issuer node via `identity_core.issuer`. |
+| req-github-core-rule-suites | [Rule Suites — Who Actually Bypassed](#rule-suites--who-actually-bypassed) | In Development | 2026-08-28 (settled empirically): enumeration of bypass ACTORS has a documented write-access ceiling, but rule suites answer the adjacent question — who actually bypassed a gate — and return 200 to a read-only App with actor names. Detection where enumeration is refused. |
 | req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
@@ -92,6 +93,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 ### Plugin Scope
 ----
 RID: `req-github-core-scope`
+
 Status: `Implemented`
 
 `github_core` models GitHub platform objects that matter to deployment and
@@ -112,6 +114,7 @@ surface; those arrive as further manifest sources behind the same scope.
 ### GitHub App Authentication
 ----
 RID: `req-github-core-app-auth`
+
 Status: `Implemented`
 
 A personal access token is a *person's* power in token form: it inherits their role, expires on
@@ -158,6 +161,7 @@ OpenSSL the FIPS posture validates (`spec-fips.md`); no JWT library is introduce
 ### Account Scope
 ----
 RID: `req-github-core-org-scope`
+
 Status: `Implemented`
 
 Pulled by git-serious (git-serious-tap#17, 2026-08-26): a product that observes an
@@ -196,6 +200,7 @@ Two edges laid while the surface is open:
 ### Model Set
 ----
 RID: `req-github-core-models`
+
 Status: `Implemented`
 
 The v0 model set is intentionally small but node-granular. Values that deserve
@@ -311,6 +316,7 @@ must not conflate the two.
 ### Ruleset Collection
 ----
 RID: `req-github-core-ruleset`
+
 Status: `In Development`
 
 A **ruleset** is GitHub's enforcement gate on a set of refs — required status checks,
@@ -388,6 +394,7 @@ vocabulary corpus; the node stands alone until then.
 ### Edge Vocabulary
 ----
 RID: `req-github-core-edges`
+
 Status: `Implemented`
 
 Edges express the GitHub Actions execution spine and dependency references.
@@ -436,6 +443,7 @@ ownership, or runtime control.
 ### Declared Jobs
 ----
 RID: `req-github-core-declared-jobs`
+
 Status: `Implemented`
 
 A job as **written** and a job as **run** are different objects, and the vocabulary corpus found
@@ -477,6 +485,7 @@ points at a step). Cache usage and action pins are extracted onto the job's `con
 ### Refs
 ----
 RID: `req-github-core-refs`
+
 Status: `Implemented`
 
 A ref is a name and the commit it points at. Branches (`refs/heads/`) and tags (`refs/tags/`) are
@@ -507,6 +516,7 @@ re-tag that swaps only the tag object moves one and not the other.
 ### Rulesets
 ----
 RID: `req-github-core-rulesets`
+
 Status: `Implemented`
 
 A ruleset is the gate: what must be true for a commit to land on a ref. It is a node because many
@@ -526,25 +536,59 @@ repository.
 GitHub returns a ruleset's bypass-actor list only to a caller with **write access to the ruleset**.
 Measured against our own organization on 2026-08-27: an owner-minted fine-grained PAT sees it; a
 GitHub App with `administration: read` does not — REST omits the `bypass_actors` key entirely
-(HTTP 200), while **GraphQL answers with an empty connection and no error at all**. Our own
-rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful zero versus a
-silently filtered connection — is untested and cannot be tested here without adding a bypass actor
-to a live ruleset, which would be a change to our security posture rather than a measurement.
+(HTTP 200), while **GraphQL answers with a truthful `totalCount` and every node redacted to
+`null`** (corrected 2026-09-02 from "an empty connection", which the #11 probe disproved — #22
+item 2). Our own rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful
+zero versus a silently filtered connection — could not be measured against them without changing
+our security posture. It was measured instead on **a probe ruleset carrying one bypass actor,
+created on a personal repository, read with every available credential, and deleted** (#11,
+2026-08-27; the domain article `github_ruleset.md` §Observability records the table): the read-only
+App received `totalCount: 0` on the control rulesets and `totalCount: 1` on the probe, with every
+node `null`. That is the evidence behind treating a counted zero as a fact.
 
 The derivation that follows:
 
 ```
-observable = REST detail carried `bypass_actors`  OR  GraphQL returned a NON-EMPTY list
+observed = REST detail carried `bypass_actors`  OR  GraphQL returned AT LEAST ONE NON-NULL node
+counted  = neither, AND GraphQL carried `bypassActors.totalCount` (every node null, or none)
 ```
 
-A non-empty GraphQL answer proves itself — a filtered connection cannot invent actors. An empty one
-proves nothing. **False presence is impossible here; false absence is the entire risk.**
+A GraphQL answer with a real actor node in it proves itself — a filtered connection cannot invent
+actors — and `[null]` is not such an answer: a list of redactions is `counted`, never `observed`.
+A redacted one still carries its `totalCount`, and that count is truthful: the #11 probe read `0` on the
+controls and `1` on a ruleset carrying exactly one actor. **False presence is impossible here;
+false absence is the entire risk** — and discarding a known count is a false absence.
 
-The three states live on the **ruleset node** (`bypass_observability`, with `bypass_actor_count`
-meaningful only when `observed`), not on the `BYPASSES` edge, because when the answer is *none* or
-*unknown* there are no edges to carry anything and a view reading only edges would render both as
-an empty list. Generalized: *a property that qualifies an absence belongs on the node the absence
-is about, never on the edges that failed to appear.*
+**The `counted` state (decided 2026-09-02; #22 item 1 is the collector work).** A read-only
+credential learns *how many* may bypass, never *who*. That is most of the security value of the
+question, and the client currently throws it away (it filters the null nodes and never reads
+`totalCount`), degrading a known number to "we could not tell". `bypass_observability` therefore
+takes three values:
+
+| State | Meaning | `bypass_actor_count` |
+| --- | --- | --- |
+| `observed` | The list was read by a credential clearing the write bar. An empty list is then a fact. | The list length. |
+| `counted` | GraphQL answered `totalCount` with the identities redacted. | `totalCount`. **A zero here is a truthful zero**, distinguishable from unobservable for the first time. |
+| `unobservable` | Neither transport answered. | `null`. |
+
+Two invariants a consumer may rely on: the count is non-null **if and only if** the state is
+`observed` or `counted`, so nobody can see a number beside the word "unobservable" and believe
+both; and the count lives on the **ruleset node**, never on a node of its own — it is a fact
+about the ruleset, and a node type for a number would be a second copy of a fact that already has
+a home (derive-a-fact-once). The three states live on the ruleset (`bypass_observability`), not on
+the `BYPASSES` edge, because when the answer is *none* or *unknown* there are no edges to carry
+anything and a view reading only edges would render both as an empty list. Generalized: *a
+property that qualifies an absence belongs on the node the absence is about, never on the edges
+that failed to appear.*
+
+Views render the three states distinctly — git-serious's bypass badge
+(`req-git-serious-branch-protection-tiers-bypass-badge`: grey unobservable, yellow counted, neutral
+observed, and red reserved for a bypass that *happened*, which is the rule-suite surface) — and
+the guidance "a credential with write access to the ruleset would name them" rides `absent_note`
+(`req-github-core-app-auth-11`), machine-legible for the third player. `counted` is enough to make
+it work with a read-only credential; gathering and managing the identities under a properly scoped
+credential is the *make-it-right* task (#39 — same collector with a second envelope, or a separate
+collector, is the open question).
 
 **The read-only posture has a hard ceiling here**, and it is published rather than engineered
 around: seeing the exemption list requires write access to the thing being audited, and we do not
@@ -556,13 +600,16 @@ request write.
 | --- | --- | :---: | --- | --- |
 | req-github-core-rulesets-1 | One Node Per Ruleset | Implemented | A ruleset is one node keyed on owner + ruleset id however many repositories it protects, applied by `PROTECTS` edges. | |
 | req-github-core-rulesets-2 | Rule Parameters Retained | Implemented | The rules array carries each rule's parameters as returned (required check contexts among them), falling back to the type-only GraphQL list when the REST detail is unreadable — and warning when it does. | The gate view needs the contexts, not just the rule types. |
-| req-github-core-rulesets-bypass | Bypass Observability Is Recorded | Implemented | `bypass_observability` is `observed` only when REST carried the key or GraphQL returned a non-empty list; otherwise `unobservable` with a **null** actor count. A run warns per unobservable ruleset. | The failure guarded against is rendering "we could not look" as "nobody can bypass". |
+| req-github-core-rulesets-bypass | Bypass Observability Is Recorded | Implemented | `bypass_observability` is `observed` only when REST carried the key or GraphQL returned a non-empty list; otherwise `unobservable` with a **null** actor count. A run warns per unobservable ruleset. | The failure guarded against is rendering "we could not look" as "nobody can bypass". Superseded in part by `-bypass-2`: the redacted-nodes case becomes `counted`, not `unobservable`. |
+| req-github-core-rulesets-bypass-2 | Counted Is A State | Approved for Development | When GraphQL returns `bypassActors.totalCount` with the nodes redacted, `bypass_observability` is `counted` and `bypass_actor_count` equals `totalCount` — stored as `0` when it is zero, never `null`. The model enum and both schemas gain the value. | #22 item 1. Fixture: `{"totalCount": 1, "nodes": [null]}` → counted, 1. |
+| req-github-core-rulesets-bypass-3 | Count Never Beside Unobservable | Approved for Development | `bypass_actor_count` is non-null if and only if `bypass_observability` is `observed` or `counted`; a test asserts the invariant over every emitted ruleset. | The reader must not be able to see a number and the word "unobservable" and believe both. |
 | req-github-core-rulesets-3 | Unmodelled Actors Are Counted | Implemented | Bypass actors with no node type yet (teams, organization-admin roles) are kept as data on the ruleset and counted, never dropped. | Understating who can bypass is the one direction that must never happen. |
 | req-github-core-rulesets-4 | Ref Resolution Is Additive | Implemented | Condition patterns are stored verbatim (`~DEFAULT_BRANCH`, `~ALL`, globs) AND resolved against observed refs into `PROTECTS` edges with `match_kind: resolved`. A pattern matching nothing is an answer, not a failure. | Intent and effect are both queryable. |
 
 ### Environments
 ----
 RID: `req-github-core-environments`
+
 Status: `Implemented`
 
 A deployment environment is where protection rules — required reviewers, wait timers, branch
@@ -585,6 +632,7 @@ policy; that field is left `null` (unobserved) rather than defaulted, because de
 ### Caches
 ----
 RID: `req-github-core-caches`
+
 Status: `Implemented`
 
 Five incidents turn on the Actions cache, including the two most recent: an entry written by a job
@@ -611,6 +659,7 @@ The join is a named gap. `WRITES_CACHE` / `RESTORES_CACHE` wait for it.
 ### App Installations
 ----
 RID: `req-github-core-app-installations`
+
 Status: `Implemented`
 
 The registered application and its installation into an account are different objects: one App is
@@ -646,9 +695,59 @@ repositories and then shows you one row about itself. Read-only, like everything
 | req-github-core-app-installations-4 | Account Inventory Preferred, Fallback Named | Implemented | The collector reads `/orgs/{owner}/installations` (which Apps reach this account) and falls back to `/app/installations` (its own installation) only when refused — warning that the absence of other Apps is then not evidence there are none, and recording which scope the answer came from. | Requires `organization:administration:read`; declared in the collection manifest so the App's permission set derives it rather than carrying it as an unexplained extra. |
 | req-github-core-app-installations-3 | Repository Selection Retained | Implemented | `repository_selection: all` is stored as-is: such an installation follows the account into new repositories without anyone granting it again. | |
 
+### Rule Suites — Who Actually Bypassed
+----
+RID: `req-github-core-rule-suites`
+
+Status: `In Development`
+
+`req-github-core-ruleset` records **who may bypass** a gate, and hits a documented ceiling: GitHub
+returns `bypass_actors` only to a caller with **write** access to the ruleset, "to prevent leaking
+sensitive information". A read-only App is refused (REST omits the key; GraphQL returns a truthful
+`totalCount` with `nodes: [null]`), and so is a fine-grained PAT on the history endpoint. That is a
+limitation to publish, not to engineer around — the rationale tracks, since naming who may bypass a
+control turns those accounts into targets.
+
+**A different question is fully answerable.** `GET /repos/{owner}/{repo}/rulesets/rule-suites`
+returns **200 to a read-only App installation token** and names the actor of every push evaluated
+against the repository's rulesets — including the ones whose result was `bypass`. Measured against
+`unified-systems-com/tap` on 2026-08-28: ten bypass events in a month, each carrying `actor_name`,
+`actor_id`, `ref`, `before_sha`/`after_sha`, `pushed_at`, and per-rule evaluations naming the
+ruleset gone around.
+
+So the product can say **who did, when, on which ref, and which control they went around**, even
+where it cannot say who is permitted to. Enumeration and detection are different facts, and the
+second is the one a security product is usually asked for.
+
+**The actor is a `github_account`, deliberately.** The API gives a login and a numeric id, and
+nothing more: it may be a person, a bot, or a machine account, and the collector does not know
+which. `github_account` is exactly that primitive — an account, user-or-organization merged on
+purpose (`req-github-core-account`) — so claiming more would be inventing an identity we did not
+observe. `identity_core__principal` may later carry the human-versus-robot distinction; this does
+not pre-empt it.
+
+**A rule suite is an occurrence, not a change.** The vocabulary corpus rejects
+"change / snapshot / audit-event types" because the grid already carries field-level history — and
+that ruling is right and does **not** apply here. It governs changes to objects we collect ("this
+ruleset's enforcement moved to `evaluate`"), which history handles. A rule suite is an event in the
+world that we observed, in the same category as `github_actions_run`: it has GitHub-assigned
+identity, a timestamp, and facts that point at it. Modelling it duplicates nothing.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-rule-suites-1 | Suite Model Declared | In Development | A `github_rule_suite` node carries GitHub's suite `id`, `result`, `ref`, `before_sha`, `after_sha`, `pushed_at`, `actor_login`, and the evaluations that failed or were bypassed. | Keyed on the suite id, which is GitHub-assigned and stable. |
+| req-github-core-rule-suites-2 | Actor Is An Account, Not An Identity | In Development | The pusher is emitted as a `github_account` keyed on `actor_name`, joined by `TRIGGERED_EVALUATION`. The collector does not classify it as human or machine, because the API does not say. | `actor_id` rides as a field so a login rename is detectable, matching `req-github-core-account`. |
+| req-github-core-rule-suites-3 | The Bypassed Control Is Named | In Development | Each evaluation whose `rule_source.type` is `ruleset` produces a `BYPASSED` edge from the suite to that `github_ruleset`, carrying the `rule_type` that was gone around. | This is the join that makes the event actionable rather than a log line. |
+| req-github-core-rule-suites-4 | Bypass Is The Collected Subset | In Development | Collection filters to `rule_suite_result=bypass`. A passing suite is a routine push and lands nothing; the `result` field is kept so the model can widen without a migration. | ~47 suites/day on one repository — collecting every push evaluation would swamp the grid for no finding. |
+| req-github-core-rule-suites-5 | The Window Is Explicit, Always | In Development | Every call sets `time_period` explicitly. Omitting it silently defaults to `day`, so a repository with a month of bypasses reads as a quiet one. | Measured: `day` 47, `week` 100+, `month` 100+ on one repository. An absence rendering as a finished answer, arriving through a query default. |
+| req-github-core-rule-suites-6 | Refused Is Not Empty | In Development | A refusal degrades with a warning and records that the surface was unreachable; it never lands zero bypass events as though none occurred. | Same three-state discipline as `bypass_observability`. |
+
 ### GitHub Apps
 ----
 RID: `req-github-core-app`
+
 Status: `Implemented`
 
 A `github_app` node models a GitHub App or first-party platform app enabled on
@@ -684,6 +783,7 @@ prefix map.
 ### Dimension Strategy
 ----
 RID: `req-github-core-dimensions`
+
 Status: `Implemented`
 
 GitHub is treated as its own platform environment. The plugin uses flat,
@@ -737,6 +837,7 @@ than an invisible member of the config layer.
 ### Collector Secret Kinds
 ----
 RID: `req-github-core-secret`
+
 Status: `Implemented`
 
 The first credential mode is a Personal Access Token. `github_core` owns the
@@ -811,6 +912,7 @@ Do not pre-build it; wait for the trigger.
 ### Collector Runtime
 ----
 RID: `req-github-core-collector`
+
 Status: `Implemented`
 
 The collector is a standard `CollectorBase` subclass registered by
@@ -830,7 +932,9 @@ Collection policy:
 
 - First population per repo collects the latest `initial_run_limit` workflow runs.
 - Later runs collect workflow runs created since the latest
-  `github_actions_run.created_at` already on the grid for that repo.
+  `github_actions_run.run_started_at` already on the grid for that repo
+  (`req-github-core-collector-3`; `created_at` became a column in github-core#47
+  and the boundary deliberately did not move with it).
 - The collector always refreshes previously non-terminal runs/jobs until they
   reach a terminal state.
 - Runner-config collection degrades with a structured warning on permission
@@ -868,6 +972,7 @@ Collection policy:
 ### Collection And Link Manifests
 ----
 RID: `req-github-core-manifests`
+
 Status: `Implemented`
 
 The collector uses two declarative JSON manifests, both schema-validated at
@@ -899,6 +1004,7 @@ installation interprets GitHub data against the grid."
 ### Workflow File Parsing
 ----
 RID: `req-github-core-workflow-parse`
+
 Status: `Implemented`
 
 Workflow parsing is v0 because the demo needs to explain the deployment
@@ -968,6 +1074,7 @@ flags it as a near-soon implementation target for the next GitHub-focused pass.
 ### Runner Semantics
 ----
 RID: `req-github-core-runner`
+
 Status: `Implemented`
 
 GitHub runners have two relevant shapes:
@@ -996,6 +1103,7 @@ in v0.
 ### Existing Grid Links
 ----
 RID: `req-github-core-grid-links`
+
 Status: `Implemented`
 
 The collector always attempts to resolve exact links from collected GitHub
@@ -1113,6 +1221,7 @@ future capability deferred with the rest of variable/secret-ref work in
 ### Plugin Python Dependency
 ----
 RID: `req-github-core-python-deps`
+
 Status: `Implemented`
 
 `PyYAML` is approved for this plugin's workflow-file parser and should be
@@ -1136,6 +1245,7 @@ justified by and documented with `github_core`.
 ### Variables And Secret References (Backlog)
 ----
 RID: `req-github-core-backlog-references`
+
 Status: `Backlog`
 
 GitHub Actions variables (`vars.X`) and secret references (`secrets.X`) are
@@ -1275,6 +1385,7 @@ not in API). Future panel work, not part of model shape.
 ### Multi-Attempt Run Observation (Backlog)
 ----
 RID: `req-github-core-backlog-run-attempts`
+
 Status: `Backlog`
 
 GitHub workflow runs can be re-run, producing multiple "attempts" — each
@@ -1380,6 +1491,7 @@ the demo doesn't hit it, and the fix lives here.
 ### Grid-Vocabulary Reference Resolution (Backlog)
 ----
 RID: `req-github-core-backlog-grid-vocab-links`
+
 Status: `Backlog`
 
 The v0 parser (`_categorize_refs` in `parser.py`) extracts grid-link candidates
@@ -1455,6 +1567,7 @@ Invert the pipeline. Instead of shape-classify-then-match:
 ### GitHub App Relationships (Backlog)
 ----
 RID: `req-github-core-backlog-app-relationships`
+
 Status: `Backlog`
 
 `req-github-core-app` models that an app is *enabled on* a repo (`ENABLED_ON`).
@@ -1475,6 +1588,7 @@ These are deferred until there is a concrete graph consumer; v0 stops at presenc
 ### v0 Non-Goals
 ----
 RID: `req-github-core-nongoals`
+
 Status: `Implemented`
 
 Out of scope for v0:

@@ -1,0 +1,2997 @@
+{
+ "octicons_tag": "v19.15.1",
+ "source": "https://api.github.com/repos/primer/octicons/contents/icons?ref=v19.15.1",
+ "rule": "Base names are icons/*.svg with the -12/-16/-24/-48/-96 size suffix stripped (647 files -> 332 names). Style variants (-fill/-filled, accessibility-inset; 21) and feed-* activity variants (19) inherit their parent glyph's classification, leaving 292 distinct concepts. Class a (GitHub domain concept): the glyph's primary job on github.com is to name a GitHub object, product, or object state with an API/object model - repositories, git objects, pull requests, issues, projects, discussions, Actions, packages, security features, apps, accounts/teams, sponsors, gist, wiki, notifications, codespaces, copilot. Class b (UI chrome): navigation, layout, generic verbs and editing controls. Class c (other): file-type glyphs, markdown formatting, reactions, and brand-neutral miscellany. Only class a enters the hit-rate denominator; family groups state variants under one concept.",
+ "glyphs": [
+  {
+   "name": "accessibility",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "accessibility-inset",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "ai-model",
+   "class": "a",
+   "family": "copilot",
+   "product_area": "apps-ai",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "alert",
+   "class": "a",
+   "family": "alert/advisory",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "alert-fill",
+   "class": "a",
+   "family": "alert/advisory",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "apps",
+   "class": "a",
+   "family": "app/integration",
+   "product_area": "apps-ai",
+   "tap_type": "github_core__github_app",
+   "tap_status": "exists"
+  },
+  {
+   "name": "archive",
+   "class": "a",
+   "family": "repository",
+   "product_area": "source-git",
+   "tap_type": "github_core__github_repository",
+   "tap_status": "field"
+  },
+  {
+   "name": "arrow-both",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-down",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-down-left",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-down-right",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-left",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-right",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-switch",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-up",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-up-left",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "arrow-up-right",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "beaker",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bell",
+   "class": "a",
+   "family": "notifications",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bell-fill",
+   "class": "a",
+   "family": "notifications",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bell-slash",
+   "class": "a",
+   "family": "notifications",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "blocked",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_job",
+   "tap_status": "field"
+  },
+  {
+   "name": "bold",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "book",
+   "class": "a",
+   "family": "wiki/docs",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bookmark",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bookmark-fill",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bookmark-filled",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bookmark-slash",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bookmark-slash-fill",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "briefcase",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "broadcast",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "browser",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "bug",
+   "class": "a",
+   "family": "alert/advisory",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "cache",
+   "class": "a",
+   "family": "cache",
+   "product_area": "actions",
+   "tap_type": "github_core__actions_cache",
+   "tap_status": "exists"
+  },
+  {
+   "name": "calendar",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "check",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "check-circle",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__status_check",
+   "tap_status": "planned"
+  },
+  {
+   "name": "check-circle-fill",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__status_check",
+   "tap_status": "planned"
+  },
+  {
+   "name": "checkbox",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "checklist",
+   "class": "a",
+   "family": "tasklist",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "chevron-down",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "chevron-left",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "chevron-right",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "chevron-up",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "circle",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "circle-slash",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "clock",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "clock-fill",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "cloud",
+   "class": "a",
+   "family": "deployment",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_job",
+   "tap_status": "field"
+  },
+  {
+   "name": "cloud-offline",
+   "class": "a",
+   "family": "deployment",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_job",
+   "tap_status": "field"
+  },
+  {
+   "name": "code",
+   "class": "a",
+   "family": "code",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "code-of-conduct",
+   "class": "a",
+   "family": "license/policy",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "code-review",
+   "class": "a",
+   "family": "code-review",
+   "product_area": "pull-requests",
+   "tap_type": null,
+   "tap_status": "edge"
+  },
+  {
+   "name": "code-square",
+   "class": "a",
+   "family": "code",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "codescan",
+   "class": "a",
+   "family": "code-scanning",
+   "product_area": "security",
+   "tap_type": "github_core__github_app",
+   "tap_status": "exists"
+  },
+  {
+   "name": "codescan-checkmark",
+   "class": "a",
+   "family": "code-scanning",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "codespaces",
+   "class": "a",
+   "family": "codespaces",
+   "product_area": "apps-ai",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "columns",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "command-palette",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "comment",
+   "class": "a",
+   "family": "comment",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "comment-discussion",
+   "class": "a",
+   "family": "discussion",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "container",
+   "class": "a",
+   "family": "runner/compute",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_job",
+   "tap_status": "field"
+  },
+  {
+   "name": "copilot",
+   "class": "a",
+   "family": "copilot",
+   "product_area": "apps-ai",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "copilot-error",
+   "class": "a",
+   "family": "copilot",
+   "product_area": "apps-ai",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "copilot-warning",
+   "class": "a",
+   "family": "copilot",
+   "product_area": "apps-ai",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "copy",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "cpu",
+   "class": "a",
+   "family": "runner/compute",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_job",
+   "tap_status": "field"
+  },
+  {
+   "name": "credit-card",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "cross-reference",
+   "class": "a",
+   "family": "issue-relations",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "dash",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "database",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "dependabot",
+   "class": "a",
+   "family": "dependabot",
+   "product_area": "packages",
+   "tap_type": "github_core__github_app",
+   "tap_status": "exists"
+  },
+  {
+   "name": "desktop-download",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "device-camera",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "device-camera-video",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "device-desktop",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "device-mobile",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "devices",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "diamond",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "diff",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "diff-added",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "diff-ignored",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "diff-modified",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "diff-removed",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "diff-renamed",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "discussion-closed",
+   "class": "a",
+   "family": "discussion",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "discussion-duplicate",
+   "class": "a",
+   "family": "discussion",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "discussion-outdated",
+   "class": "a",
+   "family": "discussion",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "dot",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "dot-fill",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "download",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "duplicate",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "ellipsis",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "eye",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "eye-closed",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-discussion",
+   "class": "a",
+   "family": "discussion",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-forked",
+   "class": "a",
+   "family": "fork",
+   "product_area": "source-git",
+   "tap_type": "FORKED_FROM",
+   "tap_status": "rejected"
+  },
+  {
+   "name": "feed-heart",
+   "class": "a",
+   "family": "sponsors",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-issue-closed",
+   "class": "a",
+   "family": "issue",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-issue-draft",
+   "class": "a",
+   "family": "issue",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-issue-open",
+   "class": "a",
+   "family": "issue",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-issue-reopen",
+   "class": "a",
+   "family": "issue",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-merged",
+   "class": "a",
+   "family": "merge",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-person",
+   "class": "a",
+   "family": "account/person",
+   "product_area": "people",
+   "tap_type": "github_core__github_account",
+   "tap_status": "exists"
+  },
+  {
+   "name": "feed-plus",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-public",
+   "class": "a",
+   "family": "repository",
+   "product_area": "source-git",
+   "tap_type": "github_core__github_repository",
+   "tap_status": "exists"
+  },
+  {
+   "name": "feed-pull-request-closed",
+   "class": "a",
+   "family": "pull-request",
+   "product_area": "pull-requests",
+   "tap_type": "github_core__pull_request",
+   "tap_status": "planned"
+  },
+  {
+   "name": "feed-pull-request-draft",
+   "class": "a",
+   "family": "pull-request",
+   "product_area": "pull-requests",
+   "tap_type": "github_core__pull_request",
+   "tap_status": "planned"
+  },
+  {
+   "name": "feed-pull-request-open",
+   "class": "a",
+   "family": "pull-request",
+   "product_area": "pull-requests",
+   "tap_type": "github_core__pull_request",
+   "tap_status": "planned"
+  },
+  {
+   "name": "feed-repo",
+   "class": "a",
+   "family": "repository",
+   "product_area": "source-git",
+   "tap_type": "github_core__github_repository",
+   "tap_status": "exists"
+  },
+  {
+   "name": "feed-rocket",
+   "class": "a",
+   "family": "deployment",
+   "product_area": "actions",
+   "tap_type": "github_core__deployment",
+   "tap_status": "planned"
+  },
+  {
+   "name": "feed-star",
+   "class": "a",
+   "family": "star",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "feed-tag",
+   "class": "a",
+   "family": "tag",
+   "product_area": "source-git",
+   "tap_type": "github_core__git_ref",
+   "tap_status": "exists"
+  },
+  {
+   "name": "feed-trophy",
+   "class": "a",
+   "family": "achievements",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-added",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "file-badge",
+   "class": "a",
+   "family": "attestation",
+   "product_area": "security",
+   "tap_type": "BUILDS_PACKAGE_VERSION",
+   "tap_status": "planned"
+  },
+  {
+   "name": "file-binary",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-code",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-diff",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "file-directory",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-directory-fill",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-directory-open-fill",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-directory-symlink",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-media",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-moved",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "file-removed",
+   "class": "a",
+   "family": "diff/file-change",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "file-submodule",
+   "class": "a",
+   "family": "submodule",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-symlink-file",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "file-zip",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "filter",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "filter-remove",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "fiscal-host",
+   "class": "a",
+   "family": "sponsors",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "flame",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "fold",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "fold-down",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "fold-up",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "gear",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "gift",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "git-branch",
+   "class": "a",
+   "family": "branch",
+   "product_area": "source-git",
+   "tap_type": "github_core__git_ref",
+   "tap_status": "exists"
+  },
+  {
+   "name": "git-commit",
+   "class": "a",
+   "family": "commit",
+   "product_area": "source-git",
+   "tap_type": "github_core__git_commit",
+   "tap_status": "planned"
+  },
+  {
+   "name": "git-compare",
+   "class": "a",
+   "family": "compare",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "git-merge",
+   "class": "a",
+   "family": "merge",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "git-merge-queue",
+   "class": "a",
+   "family": "merge-queue",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "git-pull-request",
+   "class": "a",
+   "family": "pull-request",
+   "product_area": "pull-requests",
+   "tap_type": "github_core__pull_request",
+   "tap_status": "planned"
+  },
+  {
+   "name": "git-pull-request-closed",
+   "class": "a",
+   "family": "pull-request",
+   "product_area": "pull-requests",
+   "tap_type": "github_core__pull_request",
+   "tap_status": "planned"
+  },
+  {
+   "name": "git-pull-request-draft",
+   "class": "a",
+   "family": "pull-request",
+   "product_area": "pull-requests",
+   "tap_type": "github_core__pull_request",
+   "tap_status": "planned"
+  },
+  {
+   "name": "globe",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "goal",
+   "class": "a",
+   "family": "project",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "grabber",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "graph",
+   "class": "a",
+   "family": "insights",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "hash",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "heading",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "heart",
+   "class": "a",
+   "family": "sponsors",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "heart-fill",
+   "class": "a",
+   "family": "sponsors",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "history",
+   "class": "a",
+   "family": "history/versions",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "field"
+  },
+  {
+   "name": "home",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "home-fill",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "horizontal-rule",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "hourglass",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_run",
+   "tap_status": "field"
+  },
+  {
+   "name": "hubot",
+   "class": "a",
+   "family": "account/person",
+   "product_area": "people",
+   "tap_type": "identity_core__principal",
+   "tap_status": "planned"
+  },
+  {
+   "name": "id-badge",
+   "class": "a",
+   "family": "account/person",
+   "product_area": "people",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "image",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "inbox",
+   "class": "a",
+   "family": "notifications",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "infinity",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "info",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "issue-closed",
+   "class": "a",
+   "family": "issue",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "issue-draft",
+   "class": "a",
+   "family": "issue",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "issue-opened",
+   "class": "a",
+   "family": "issue",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "issue-reopened",
+   "class": "a",
+   "family": "issue",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "issue-tracked-by",
+   "class": "a",
+   "family": "issue-relations",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "issue-tracks",
+   "class": "a",
+   "family": "issue-relations",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "italic",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "iterations",
+   "class": "a",
+   "family": "project",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "kebab-horizontal",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "key",
+   "class": "a",
+   "family": "secret/credential",
+   "product_area": "security",
+   "tap_type": "github_core__actions_secret",
+   "tap_status": "planned"
+  },
+  {
+   "name": "key-asterisk",
+   "class": "a",
+   "family": "secret/credential",
+   "product_area": "security",
+   "tap_type": "identity_core__credential_grant",
+   "tap_status": "planned"
+  },
+  {
+   "name": "law",
+   "class": "a",
+   "family": "license/policy",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "light-bulb",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "link",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "link-external",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "list-ordered",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "list-unordered",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "location",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "lock",
+   "class": "a",
+   "family": "lock/visibility",
+   "product_area": "security",
+   "tap_type": "github_core__github_repository",
+   "tap_status": "field"
+  },
+  {
+   "name": "log",
+   "class": "a",
+   "family": "log",
+   "product_area": "actions",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "logo-gist",
+   "class": "a",
+   "family": "gist",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "logo-github",
+   "class": "a",
+   "family": "platform",
+   "product_area": null,
+   "tap_type": "github_core__github_platform",
+   "tap_status": "exists"
+  },
+  {
+   "name": "mail",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "mark-github",
+   "class": "a",
+   "family": "platform",
+   "product_area": null,
+   "tap_type": "github_core__github_platform",
+   "tap_status": "exists"
+  },
+  {
+   "name": "markdown",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "megaphone",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "mention",
+   "class": "a",
+   "family": "mention",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "meter",
+   "class": "a",
+   "family": "timing",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_run",
+   "tap_status": "field"
+  },
+  {
+   "name": "milestone",
+   "class": "a",
+   "family": "milestone",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "mirror",
+   "class": "a",
+   "family": "clone/mirror",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "moon",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "mortar-board",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "move-to-bottom",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "move-to-end",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "move-to-start",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "move-to-top",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "multi-select",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "mute",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "no-entry",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "no-entry-fill",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "north-star",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "note",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "number",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "organization",
+   "class": "a",
+   "family": "account/person",
+   "product_area": "people",
+   "tap_type": "github_core__github_account",
+   "tap_status": "exists"
+  },
+  {
+   "name": "package",
+   "class": "a",
+   "family": "package",
+   "product_area": "packages",
+   "tap_type": "supply_chain_core__package",
+   "tap_status": "planned"
+  },
+  {
+   "name": "package-dependencies",
+   "class": "a",
+   "family": "package",
+   "product_area": "packages",
+   "tap_type": "supply_chain_core__package",
+   "tap_status": "planned"
+  },
+  {
+   "name": "package-dependents",
+   "class": "a",
+   "family": "package",
+   "product_area": "packages",
+   "tap_type": "supply_chain_core__package",
+   "tap_status": "planned"
+  },
+  {
+   "name": "paintbrush",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "paper-airplane",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "paperclip",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "passkey-fill",
+   "class": "a",
+   "family": "secret/credential",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "paste",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "pencil",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "people",
+   "class": "a",
+   "family": "team",
+   "product_area": "people",
+   "tap_type": "github_core__github_team",
+   "tap_status": "planned"
+  },
+  {
+   "name": "person",
+   "class": "a",
+   "family": "account/person",
+   "product_area": "people",
+   "tap_type": "github_core__github_account",
+   "tap_status": "exists"
+  },
+  {
+   "name": "person-add",
+   "class": "a",
+   "family": "account/person",
+   "product_area": "people",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "person-fill",
+   "class": "a",
+   "family": "account/person",
+   "product_area": "people",
+   "tap_type": "github_core__github_account",
+   "tap_status": "exists"
+  },
+  {
+   "name": "pin",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "pin-slash",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "pivot-column",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "play",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_run",
+   "tap_status": "exists"
+  },
+  {
+   "name": "plug",
+   "class": "a",
+   "family": "app/integration",
+   "product_area": "apps-ai",
+   "tap_type": "github_core__app_installation",
+   "tap_status": "exists"
+  },
+  {
+   "name": "plus",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "plus-circle",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "project",
+   "class": "a",
+   "family": "project",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "project-roadmap",
+   "class": "a",
+   "family": "project",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "project-symlink",
+   "class": "a",
+   "family": "project",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "project-template",
+   "class": "a",
+   "family": "project",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "pulse",
+   "class": "a",
+   "family": "insights",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "question",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "quote",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "read",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "redo",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "rel-file-path",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "reply",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "repo",
+   "class": "a",
+   "family": "repository",
+   "product_area": "source-git",
+   "tap_type": "github_core__github_repository",
+   "tap_status": "exists"
+  },
+  {
+   "name": "repo-clone",
+   "class": "a",
+   "family": "clone/mirror",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "repo-delete",
+   "class": "a",
+   "family": "repository",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "repo-deleted",
+   "class": "a",
+   "family": "repository",
+   "product_area": "source-git",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "repo-forked",
+   "class": "a",
+   "family": "fork",
+   "product_area": "source-git",
+   "tap_type": "FORKED_FROM",
+   "tap_status": "rejected"
+  },
+  {
+   "name": "repo-locked",
+   "class": "a",
+   "family": "repository",
+   "product_area": "source-git",
+   "tap_type": "github_core__github_repository",
+   "tap_status": "field"
+  },
+  {
+   "name": "repo-pull",
+   "class": "a",
+   "family": "push/fetch",
+   "product_area": "source-git",
+   "tap_type": "github_core__github_workflow",
+   "tap_status": "field"
+  },
+  {
+   "name": "repo-push",
+   "class": "a",
+   "family": "push/fetch",
+   "product_area": "source-git",
+   "tap_type": "github_core__github_workflow",
+   "tap_status": "field"
+  },
+  {
+   "name": "repo-template",
+   "class": "a",
+   "family": "repository",
+   "product_area": "source-git",
+   "tap_type": "github_core__github_repository",
+   "tap_status": "field"
+  },
+  {
+   "name": "report",
+   "class": "a",
+   "family": "alert/advisory",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "rocket",
+   "class": "a",
+   "family": "deployment",
+   "product_area": "actions",
+   "tap_type": "github_core__deployment",
+   "tap_status": "planned"
+  },
+  {
+   "name": "rows",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "rss",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "ruby",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "screen-full",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "screen-normal",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "search",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "server",
+   "class": "a",
+   "family": "runner/compute",
+   "product_area": "actions",
+   "tap_type": "github_core__github_runner",
+   "tap_status": "exists"
+  },
+  {
+   "name": "share",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "share-android",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "shield",
+   "class": "a",
+   "family": "security-shield",
+   "product_area": "security",
+   "tap_type": "github_core__github_ruleset",
+   "tap_status": "exists"
+  },
+  {
+   "name": "shield-check",
+   "class": "a",
+   "family": "security-shield",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "shield-lock",
+   "class": "a",
+   "family": "security-shield",
+   "product_area": "security",
+   "tap_type": "github_core__github_ruleset",
+   "tap_status": "exists"
+  },
+  {
+   "name": "shield-slash",
+   "class": "a",
+   "family": "security-shield",
+   "product_area": "security",
+   "tap_type": "BYPASSES",
+   "tap_status": "edge"
+  },
+  {
+   "name": "shield-x",
+   "class": "a",
+   "family": "security-shield",
+   "product_area": "security",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sidebar-collapse",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sidebar-expand",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sign-in",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sign-out",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "single-select",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "skip",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_job",
+   "tap_status": "field"
+  },
+  {
+   "name": "skip-fill",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_job",
+   "tap_status": "field"
+  },
+  {
+   "name": "sliders",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "smiley",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sort-asc",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sort-desc",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sparkle-fill",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sparkles-fill",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sponsor-tiers",
+   "class": "a",
+   "family": "sponsors",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "square",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "square-circle",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "square-fill",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "squirrel",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "stack",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "star",
+   "class": "a",
+   "family": "star",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "star-fill",
+   "class": "a",
+   "family": "star",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "stop",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_run",
+   "tap_status": "field"
+  },
+  {
+   "name": "stopwatch",
+   "class": "a",
+   "family": "timing",
+   "product_area": "actions",
+   "tap_type": "github_core__github_actions_run",
+   "tap_status": "field"
+  },
+  {
+   "name": "strikethrough",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sun",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "sync",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "tab",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "tab-external",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "table",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "tag",
+   "class": "a",
+   "family": "tag",
+   "product_area": "source-git",
+   "tap_type": "github_core__git_ref",
+   "tap_status": "exists"
+  },
+  {
+   "name": "tasklist",
+   "class": "a",
+   "family": "tasklist",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "telescope",
+   "class": "a",
+   "family": "explore",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "telescope-fill",
+   "class": "a",
+   "family": "explore",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "terminal",
+   "class": "a",
+   "family": "runner/compute",
+   "product_area": "actions",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "three-bars",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "thumbsdown",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "thumbsup",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "tools",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "tracked-by-closed-completed",
+   "class": "a",
+   "family": "issue-relations",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "tracked-by-closed-not-planned",
+   "class": "a",
+   "family": "issue-relations",
+   "product_area": "issues-planning",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "trash",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "triangle-down",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "triangle-left",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "triangle-right",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "triangle-up",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "trophy",
+   "class": "a",
+   "family": "achievements",
+   "product_area": "discussions-social",
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "typography",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "undo",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "unfold",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "unlink",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "unlock",
+   "class": "a",
+   "family": "lock/visibility",
+   "product_area": "security",
+   "tap_type": "github_core__github_repository",
+   "tap_status": "field"
+  },
+  {
+   "name": "unmute",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "unread",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "unverified",
+   "class": "a",
+   "family": "signing",
+   "product_area": "security",
+   "tap_type": "github_core__git_commit",
+   "tap_status": "planned"
+  },
+  {
+   "name": "upload",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "verified",
+   "class": "a",
+   "family": "signing",
+   "product_area": "security",
+   "tap_type": "github_core__git_commit",
+   "tap_status": "planned"
+  },
+  {
+   "name": "versions",
+   "class": "a",
+   "family": "history/versions",
+   "product_area": "source-git",
+   "tap_type": "supply_chain_core__package_version",
+   "tap_status": "planned"
+  },
+  {
+   "name": "video",
+   "class": "c",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "webhook",
+   "class": "a",
+   "family": "app/integration",
+   "product_area": "apps-ai",
+   "tap_type": "github_core__webhook",
+   "tap_status": "planned"
+  },
+  {
+   "name": "workflow",
+   "class": "a",
+   "family": "workflow",
+   "product_area": "actions",
+   "tap_type": "github_core__github_workflow",
+   "tap_status": "exists"
+  },
+  {
+   "name": "x",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "x-circle",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__status_check",
+   "tap_status": "planned"
+  },
+  {
+   "name": "x-circle-fill",
+   "class": "a",
+   "family": "run/job-state",
+   "product_area": "actions",
+   "tap_type": "github_core__status_check",
+   "tap_status": "planned"
+  },
+  {
+   "name": "zap",
+   "class": "a",
+   "family": "dispatch",
+   "product_area": "actions",
+   "tap_type": "github_core__github_workflow",
+   "tap_status": "field"
+  },
+  {
+   "name": "zoom-in",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  },
+  {
+   "name": "zoom-out",
+   "class": "b",
+   "family": null,
+   "product_area": null,
+   "tap_type": null,
+   "tap_status": "none"
+  }
+ ],
+ "tap_types": [
+  {
+   "type": "github_core__github_platform",
+   "kind": "node",
+   "octicon": "mark-github",
+   "note": "in use"
+  },
+  {
+   "type": "github_core__github_account",
+   "kind": "node",
+   "octicon": "person",
+   "note": "in use; organization for orgs"
+  },
+  {
+   "type": "github_core__github_repository",
+   "kind": "node",
+   "octicon": "repo",
+   "note": "in use"
+  },
+  {
+   "type": "github_core__github_workflow",
+   "kind": "node",
+   "octicon": "workflow",
+   "note": "in use"
+  },
+  {
+   "type": "github_core__github_actions_run",
+   "kind": "node",
+   "octicon": "play",
+   "note": "hand-drawn triangle ~ play"
+  },
+  {
+   "type": "github_core__github_actions_job",
+   "kind": "node",
+   "octicon": null,
+   "note": "GitHub renders jobs by status only; nearest terminal"
+  },
+  {
+   "type": "github_core__workflow_job",
+   "kind": "node",
+   "octicon": null,
+   "note": "TAP-invented: declared job; github-action glyph retired at v19"
+  },
+  {
+   "type": "github_core__git_ref",
+   "kind": "node",
+   "octicon": "git-branch",
+   "note": "+tag; no single ref glyph"
+  },
+  {
+   "type": "github_core__github_ruleset",
+   "kind": "node",
+   "octicon": "shield-lock",
+   "note": "hand-drawn shield"
+  },
+  {
+   "type": "github_core__github_environment",
+   "kind": "node",
+   "octicon": null,
+   "note": "rocket is deployment not the gate"
+  },
+  {
+   "type": "github_core__github_runner",
+   "kind": "node",
+   "octicon": "server",
+   "note": "hand-drawn; Octicon available"
+  },
+  {
+   "type": "github_core__github_app",
+   "kind": "node",
+   "octicon": "apps",
+   "note": "hand-drawn grid duplicates Octicon"
+  },
+  {
+   "type": "github_core__app_installation",
+   "kind": "node",
+   "octicon": "plug",
+   "note": "hand-drawn plug duplicates Octicon"
+  },
+  {
+   "type": "github_core__actions_cache",
+   "kind": "node",
+   "octicon": "cache",
+   "note": "hand-drawn bucket; Octicon exists"
+  },
+  {
+   "type": "identity_core__oidc_issuer",
+   "kind": "node",
+   "octicon": "key",
+   "note": "shared type; hand-drawn key"
+  },
+  {
+   "type": "HOSTS_ACCOUNT",
+   "kind": "edge",
+   "octicon": null,
+   "note": "containment"
+  },
+  {
+   "type": "OWNS_REPO",
+   "kind": "edge",
+   "octicon": null,
+   "note": "containment"
+  },
+  {
+   "type": "DEFINES_WORKFLOW",
+   "kind": "edge",
+   "octicon": null,
+   "note": "containment"
+  },
+  {
+   "type": "EXECUTES_WORKFLOW",
+   "kind": "edge",
+   "octicon": "play",
+   "note": ""
+  },
+  {
+   "type": "HAS_ACTIONS_JOB",
+   "kind": "edge",
+   "octicon": null,
+   "note": "containment"
+  },
+  {
+   "type": "EXECUTED_ON",
+   "kind": "edge",
+   "octicon": "server",
+   "note": ""
+  },
+  {
+   "type": "ENABLED_ON",
+   "kind": "edge",
+   "octicon": "plug",
+   "note": ""
+  },
+  {
+   "type": "REFERENCES_RESOURCE",
+   "kind": "edge",
+   "octicon": "cross-reference",
+   "note": "or link"
+  },
+  {
+   "type": "FEDERATES_VIA",
+   "kind": "edge",
+   "octicon": "key",
+   "note": "or link-external"
+  },
+  {
+   "type": "DEFINES_JOB",
+   "kind": "edge",
+   "octicon": null,
+   "note": "containment"
+  },
+  {
+   "type": "DEPENDS_ON_JOB",
+   "kind": "edge",
+   "octicon": "package-dependencies",
+   "note": ""
+  },
+  {
+   "type": "HAS_REF",
+   "kind": "edge",
+   "octicon": "git-branch",
+   "note": ""
+  },
+  {
+   "type": "PROTECTS",
+   "kind": "edge",
+   "octicon": "shield-lock",
+   "note": ""
+  },
+  {
+   "type": "BYPASSES",
+   "kind": "edge",
+   "octicon": "shield-slash",
+   "note": "exact"
+  },
+  {
+   "type": "HAS_ENVIRONMENT",
+   "kind": "edge",
+   "octicon": "rocket",
+   "note": ""
+  },
+  {
+   "type": "USES_ENVIRONMENT",
+   "kind": "edge",
+   "octicon": "rocket",
+   "note": ""
+  },
+  {
+   "type": "HAS_CACHE",
+   "kind": "edge",
+   "octicon": "cache",
+   "note": ""
+  },
+  {
+   "type": "SCOPED_TO",
+   "kind": "edge",
+   "octicon": "git-branch",
+   "note": "weak"
+  },
+  {
+   "type": "HAS_INSTALLATION",
+   "kind": "edge",
+   "octicon": "plug",
+   "note": ""
+  },
+  {
+   "type": "INSTALLED_ON",
+   "kind": "edge",
+   "octicon": "plug",
+   "note": ""
+  },
+  {
+   "type": "github_core__status_check",
+   "kind": "planned",
+   "octicon": "check-circle",
+   "note": "self; also x-circle"
+  },
+  {
+   "type": "github_core__github_action",
+   "kind": "planned",
+   "octicon": null,
+   "note": "self; github-action retired"
+  },
+  {
+   "type": "github_core__actions_secret",
+   "kind": "planned",
+   "octicon": "key",
+   "note": "self"
+  },
+  {
+   "type": "github_core__pull_request",
+   "kind": "planned",
+   "octicon": "git-pull-request",
+   "note": "self"
+  },
+  {
+   "type": "github_core__github_release",
+   "kind": "planned",
+   "octicon": null,
+   "note": "self-lite; GitHub uses tag"
+  },
+  {
+   "type": "github_core__git_commit",
+   "kind": "planned",
+   "octicon": "git-commit",
+   "note": "friends; +verified/unverified"
+  },
+  {
+   "type": "github_core__github_team",
+   "kind": "planned",
+   "octicon": "people",
+   "note": "friends"
+  },
+  {
+   "type": "identity_core__credential_grant",
+   "kind": "planned",
+   "octicon": "key-asterisk",
+   "note": "friends; partial"
+  },
+  {
+   "type": "github_core__runner_group",
+   "kind": "planned",
+   "octicon": null,
+   "note": "friends; nearest server/stack"
+  },
+  {
+   "type": "github_core__actions_artifact",
+   "kind": "planned",
+   "octicon": null,
+   "note": "friends; nearest file-zip/package"
+  },
+  {
+   "type": "github_core__webhook",
+   "kind": "planned",
+   "octicon": "webhook",
+   "note": "friends"
+  },
+  {
+   "type": "supply_chain_core__package",
+   "kind": "planned",
+   "octicon": "package",
+   "note": "friends"
+  },
+  {
+   "type": "supply_chain_core__package_version",
+   "kind": "planned",
+   "octicon": "versions",
+   "note": "friends"
+  },
+  {
+   "type": "identity_core__principal",
+   "kind": "planned",
+   "octicon": "hubot",
+   "note": "later"
+  },
+  {
+   "type": "github_core__deployment",
+   "kind": "planned",
+   "octicon": "rocket",
+   "note": "later"
+  },
+  {
+   "type": "github_core__rule_suite",
+   "kind": "node",
+   "octicon": "shield-check",
+   "note": "rule-suite evaluation result (PR #19); shield-check / shield-x by outcome"
+  },
+  {
+   "type": "BYPASSED_RULE",
+   "kind": "edge",
+   "octicon": "shield-slash",
+   "note": "an actor bypassed a rule in an evaluation"
+  },
+  {
+   "type": "EVALUATED_ON_REF",
+   "kind": "edge",
+   "octicon": "git-branch",
+   "note": "the ref the suite evaluated against"
+  },
+  {
+   "type": "EXEMPTS_ACTOR",
+   "kind": "edge",
+   "octicon": "shield-slash",
+   "note": "ruleset exemption; absence ≠ no bypass (credential-shaped)"
+  },
+  {
+   "type": "TRIGGERED_EVALUATION",
+   "kind": "edge",
+   "octicon": "play",
+   "note": "the push/run that triggered the evaluation"
+  }
+ ],
+ "classified_on": "2026-09-02",
+ "note": "Hand-authored classification (build-github-corpus Step 2). Add a glyphs row for every unclassified live name the coverage script prints; add a tap_types row for every unmapped TAP type. Never generate rows automatically."
+}

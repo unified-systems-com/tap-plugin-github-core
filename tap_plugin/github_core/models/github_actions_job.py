@@ -33,6 +33,7 @@ class GithubActionsJob(BaseModel):
         "name": {"type": "string"},
         "status": {"type": "string"},
         "conclusion": {"type": "string"},
+        "created_at": {"type": ["string", "null"]},
         "started_at": {"type": ["string", "null"]},
         "completed_at": {"type": ["string", "null"]},
         "html_url": {"type": "string"},
@@ -60,6 +61,7 @@ class GithubActionsJob(BaseModel):
     name = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=32, blank=True, default="")
     conclusion = models.CharField(max_length=32, blank=True, default="")
+    created_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     html_url = models.URLField(max_length=512, blank=True, default="")

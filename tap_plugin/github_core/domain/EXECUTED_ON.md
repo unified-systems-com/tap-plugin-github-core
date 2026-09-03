@@ -53,7 +53,7 @@ This is the same failure shape the corpus settled empirically for ruleset bypass
 
 ## Prior Art
 
-- `specs/spec-github-core-vocabulary.md` (2026-08-27) — the `BYPASSES` ruling that `observable: false` must distinguish "nobody can" from "we cannot see", which is the discipline this edge's absence demands.
+- `specs/spec-github-core-vocabulary.md` (2026-08-27) — the `EXEMPTS_ACTOR` ruling that `observable: false` must distinguish "nobody can" from "we cannot see", which is the discipline this edge's absence demands.
 - `git-serious-tap/docs/doc-git-serious-cicd-security-prior-art.md` §3.9–3.10 (2026-08-27) — the runners endpoint permission level and the self-hosted-runner conditions.
 - `specs/spec-github-core-v0.md` `req-github-core-runner` (2026-08-27) — matchable-only emission and the no-ephemeral-runner-nodes rule.
 - GitHub REST API, version `2022-11-28` — Workflow Jobs and Self-hosted runners endpoints.

@@ -1,0 +1,325 @@
+{
+  "_comment": "The App-permission LEDGER (spec-github-core-app-permissions.md). Every key GitHub's OpenAPI description enumerates (github_openapi_extract.json → app_permissions, refreshed by scripts/refresh_openapi_extract.py) must appear here in exactly one state: requested (derived from a manifest source — the ONLY way into the App), exploratory (granted on the installed App without a source; must gain one or be dropped — `until` names the resolver), recommended (read; add when its consuming source lands), deferred (a real need behind a feature not on the fence), declined (never, with the reason), not_applicable (write-only, user-to-server, enterprise). No entry may request write. A key GitHub adds is UNCLASSIFIED and fails tests/test_app_permission_ledger.py — that is the 'have they added permissions we should consider' check, made mechanical. Hand-maintained; the test enforces completeness and consistency with the manifest. Keys GitHub exposes in the UI but omits from the OpenAPI schema (observed 2026-09-02: repository_advisories) carry `catalogue_absent` with the evidence; the verify_app skill diffs the LIVE App's permissions against this ledger, which is the second drift source.",
+  "reviewed": "2026-09-02 (App 29 read, installation accepted, probes measured)",
+  "permissions": {
+    "actions": {
+      "state": "requested",
+      "level": "read",
+      "why": "Workflows, runs, jobs, caches — the execution layer.",
+      "sources": [
+        "caches",
+        "jobs",
+        "runs",
+        "workflows"
+      ]
+    },
+    "administration": {
+      "state": "requested",
+      "level": "read",
+      "why": "Rulesets and repository runners — the gate and where jobs run.",
+      "sources": [
+        "rule_suite_detail",
+        "rule_suites",
+        "rulesets",
+        "runners"
+      ]
+    },
+    "artifact_metadata": {
+      "state": "deferred",
+      "level": "read",
+      "why": "Build artifact metadata records — a new surface whose contents must be understood before it is requested.",
+      "until": "assessed against #31's artifact model"
+    },
+    "attestations": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Artifact attestations (SLSA provenance): the `attested` property on BUILDS_PACKAGE_VERSION, whose absence is the finding."
+    },
+    "checks": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Check runs and suites: what the gate required and what answered — the required-checks half of why-isn't-this-merging."
+    },
+    "code_quality": {
+      "state": "deferred",
+      "level": "read",
+      "why": "Code-quality data — new surface; assess.",
+      "until": "assessed"
+    },
+    "codespaces": {
+      "state": "declined",
+      "level": null,
+      "why": "Developer environments, not the pipeline."
+    },
+    "contents": {
+      "state": "requested",
+      "level": "read",
+      "why": "Workflow YAML, refs, and (once #31 lands) releases.",
+      "sources": [
+        "refs",
+        "workflow_yaml"
+      ]
+    },
+    "custom_properties_for_organizations": {
+      "state": "recommended",
+      "level": "read",
+      "why": "The organisation's custom-property VALUES — the UI's 'Custom properties' control under Organization permissions maps to this key (observed on the App 2026-09-02 after George granted it). Rulesets target repositories by property; the values are what resolves which rulesets apply."
+    },
+    "dependabot_secrets": {
+      "state": "deferred",
+      "level": "read",
+      "why": "Dependabot secret names; lower value than the two above.",
+      "until": "REFERENCES_SECRET lands"
+    },
+    "deployments": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Deployments and their statuses: what shipped where — the left edge of the machinery."
+    },
+    "discussions": {
+      "state": "declined",
+      "level": null,
+      "why": "Not a pipeline fact."
+    },
+    "email_addresses": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "User-to-server."
+    },
+    "enterprise_custom_properties_for_organizations": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "Enterprise-scoped; no enterprise."
+    },
+    "environments": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Environment protection rules, reviewers and deployment branch policy — the fields the environment node holds as null today for want of a transport (req-github-core-environments-3)."
+    },
+    "followers": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "User-to-server."
+    },
+    "git_ssh_keys": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "User-to-server."
+    },
+    "gpg_keys": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "User-to-server."
+    },
+    "interaction_limits": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "Moderation setting; not observed."
+    },
+    "issues": {
+      "state": "deferred",
+      "level": "read",
+      "why": "Not a pipeline fact; waiting-on-me may want it later.",
+      "until": "waiting-on-me"
+    },
+    "members": {
+      "state": "exploratory",
+      "level": "read",
+      "why": "Teams and members: bypass actors and CODEOWNERS resolve to teams; who-owns-this needs it.",
+      "until": "a who-owns-this / bypass-actor source consumes it (git-serious spec who-owns-this; github-core #39)"
+    },
+    "merge_queues": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Merge queue state: the other half of why-isn't-this-merging."
+    },
+    "metadata": {
+      "state": "requested",
+      "level": "read",
+      "why": "Mandatory for any App; repository listing and identity.",
+      "sources": [
+        "account",
+        "config_layer",
+        "environments",
+        "owner_repos",
+        "repository"
+      ]
+    },
+    "organization_administration": {
+      "state": "requested",
+      "level": "read",
+      "why": "App installations on the organisation — the robots with commit rights.",
+      "sources": [
+        "app_installations"
+      ]
+    },
+    "organization_announcement_banners": {
+      "state": "declined",
+      "level": null,
+      "why": "Not a pipeline fact."
+    },
+    "organization_copilot_agent_settings": {
+      "state": "declined",
+      "level": null,
+      "why": "Same."
+    },
+    "organization_copilot_seat_management": {
+      "state": "declined",
+      "level": null,
+      "why": "Seat management is licensing, not the pipeline; the Copilot agents' runs are already visible as dynamic workflows."
+    },
+    "organization_custom_org_roles": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Custom organisation roles, same reasoning."
+    },
+    "organization_custom_properties": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Custom-property DEFINITIONS at the organisation level (the values ride custom_properties_for_organizations and repository_custom_properties). A definition explains a property a repository has not set yet — the difference between 'unset' and 'no such property'. Granted read 2026-09-02; kept."
+    },
+    "organization_custom_roles": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Custom repository roles: bypass actors are often role ids (RepositoryRole 5 in the #11 probe) — resolve them to names."
+    },
+    "organization_events": {
+      "state": "recommended",
+      "level": "read",
+      "why": "The organisation activity stream: below Enterprise there is no audit log, and this is the nearest thing to 'what changed since last week'."
+    },
+    "organization_hooks": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Organisation webhooks, same reasoning at the org level."
+    },
+    "organization_packages": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Organisation-scoped packages, including ghcr images not linked to a repository. The catalogue lists it, but GitHub's App-settings UI exposes no organisation-level packages permission (observed 2026-09-02): repository `packages: read` on an all-repositories installation reaches packages linked to a repository, and an unlinked package stays NOT OBSERVABLE until GitHub exposes this key — record the gap, do not render it as none. Same measurement applies: no UI control, and the org container listing is closed to Apps regardless.",
+      "until": "#31"
+    },
+    "organization_personal_access_token_requests": {
+      "state": "deferred",
+      "level": "read",
+      "why": "Pending PAT requests, the pair to the grants above.",
+      "until": "the PAT-grants source lands"
+    },
+    "organization_personal_access_tokens": {
+      "state": "exploratory",
+      "level": "read",
+      "why": "Fine-grained PAT grants on the organisation — an App-only surface, the second half of 'who can change our code'.",
+      "until": "a PAT-grants source lands (self-describing-credential spec, github-core #15)"
+    },
+    "organization_plan": {
+      "state": "recommended",
+      "level": "read",
+      "why": "The plan tier decides which surfaces can exist at all (audit log, some ruleset features): the difference between 'none' and 'not observable on this plan'."
+    },
+    "organization_projects": {
+      "state": "declined",
+      "level": null,
+      "why": "Same."
+    },
+    "organization_secrets": {
+      "state": "deferred",
+      "level": "read",
+      "why": "Organisation secret names, same reasoning.",
+      "until": "REFERENCES_SECRET lands"
+    },
+    "organization_self_hosted_runners": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Organisation-level self-hosted runners — where jobs execute; repository runners already come via administration."
+    },
+    "organization_user_blocking": {
+      "state": "declined",
+      "level": null,
+      "why": "Not a pipeline fact."
+    },
+    "packages": {
+      "state": "recommended",
+      "level": "read",
+      "why": "GitHub Packages published from the pipeline — the outputs column (decided 2026-09-02). MEASURED 2026-09-02 with `packages: read` granted and accepted (installation token, 29 permissions): `GET /orgs/{org}/packages?package_type=container` still answers 400 'Invalid argument' while ghcr images exist (npm/docker list 200 empty); `GET /orgs/{org}/packages/container/{name}/versions` answers 200 by name. Enumeration of container packages is closed to Apps; detail by known name is open. The collector must record enumeration as NOT OBSERVABLE and may resolve names it can derive (publish workflows, envelope hints) — never render the 400 as 'no packages'.",
+      "until": "#31"
+    },
+    "pages": {
+      "state": "deferred",
+      "level": "read",
+      "why": "Pages builds and configuration: a deployment output for static-site repositories (samsite-shaped).",
+      "until": "a Pages output source"
+    },
+    "profile": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "User-to-server; the App observes an organisation and never acts as a user."
+    },
+    "pull_requests": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Pull requests, reviews, approvals: the admission gate's subject; waiting-on-me and why-isn't-this-merging."
+    },
+    "repository_advisories": {
+      "state": "recommended",
+      "level": "read",
+      "catalogue_absent": "Present in GitHub's App-settings UI as 'Repository security advisories' and on the App (observed via GET /app, 2026-09-02); ABSENT from components.schemas.app-permissions in the OpenAPI description. The catalogue is incomplete; the live App is the second source.",
+      "why": "Repository security advisories and private vulnerability reports — the intake side of processing a security incident, alongside Dependabot and secret-scanning alerts. Added by George 2026-09-02; kept."
+    },
+    "repository_custom_properties": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Rulesets target repositories by custom property; without the values, which rulesets apply cannot be resolved."
+    },
+    "repository_hooks": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Repository webhooks: outbound integrations are third parties past the event horizon, and a webhook to the wrong host is a finding."
+    },
+    "repository_projects": {
+      "state": "declined",
+      "level": null,
+      "why": "Project boards are planning, not the pipeline."
+    },
+    "secret_scanning_alerts": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Secret-scanning alerts: the secret-in-code-detection feature (table stakes, security axis). Sensitive read."
+    },
+    "secrets": {
+      "state": "deferred",
+      "level": "read",
+      "why": "Lists secret NAMES only, never values — resolves `${{ secrets.X }}` references (REFERENCES_SECRET). Reads as sensitive to reviewers; add with the secret-reference edge, with the names-only fact stated.",
+      "until": "REFERENCES_SECRET lands"
+    },
+    "security_events": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Code-scanning alerts: the OUTPUT of the CodeQL dynamic workflow, and the alert surface of the security axis. Sensitive read — say so in the App's review table."
+    },
+    "single_file": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "An alternative to contents for a single path; contents is already held."
+    },
+    "starring": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "User-to-server."
+    },
+    "statuses": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Commit statuses: the older check API that Codacy, Sonar and other third parties still post; required checks can be statuses."
+    },
+    "vulnerability_alerts": {
+      "state": "recommended",
+      "level": "read",
+      "why": "Dependabot alerts on the repositories the pipeline builds from. github_core's to request (decided 2026-09-02): security incidents are processed here, not held until a supply-chain product exists — the identity of the vulnerable package may later be a supply_chain_core purl, but the alert is a GitHub fact on a GitHub repository."
+    },
+    "workflows": {
+      "state": "not_applicable",
+      "level": null,
+      "why": "Write-only (updating workflow files). Never."
+    }
+  }
+}

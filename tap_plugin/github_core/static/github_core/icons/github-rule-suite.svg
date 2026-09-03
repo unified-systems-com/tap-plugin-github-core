@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. The same shield as github-ruleset, breached: an arrow passing THROUGH it
+     rather than a check inside it. A ruleset is the gate; a rule suite is a push that went
+     around it. The shield outline is deliberately identical so the pair reads as related at
+     a glance, and the break in its right edge is where the arrow went. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>Rule Suite</title>
+  <path fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"
+        d="M12 2.9 20 5.6v6.2c0 1.5-.4 2.9-1.1 4.2M12 2.9 4 5.6v6.2c0 4.4 3.4 7.7 8 9.3 1.3-.5 2.5-1 3.6-1.8"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linecap="round"
+        stroke-linejoin="round" d="M7.6 15.2 18.4 7.4M15.3 7.1h3.4v3.4"/>
+</svg>

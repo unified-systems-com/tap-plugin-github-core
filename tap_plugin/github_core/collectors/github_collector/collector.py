@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import fnmatch
 import logging
+from datetime import datetime
 from typing import Any, ClassVar
 
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
@@ -50,6 +51,7 @@ from .identity import (
     platform_id,
     repository_id,
     ruleset_id,
+    rule_suite_id,
     run_id,
     ruleset_id,
     runner_id,
@@ -98,6 +100,8 @@ _SITE_REFS_TRUNCATED = "8334"
 _SITE_RULESET_BYPASS_UNOBSERVABLE = "d75a"
 _SITE_RULESET_DETAIL_DEGRADED = "21d1"
 _SITE_CACHE_DEGRADED = "21fd"
+_SITE_RULE_SUITE_DEGRADED = "3095"
+_SITE_RULE_SUITE_FOUND = "3b60"
 _SITE_CACHES_TRUNCATED = "0f41"
 _SITE_INSTALLATIONS_UNREACHABLE = "1825"
 _SITE_INSTALLATIONS_COLLECTED = "c3d0"
@@ -140,10 +144,23 @@ _DOCS = (
 # anything we don't recognize is safer treated as "keep watching."
 _TERMINAL_RUN_STATUSES: frozenset[str] = frozenset({"completed"})
 
+# `configuration.completed_at_source` on a run node — which of the three states in
+# `GithubCollector._run_completed_at` produced its `completed_at` (github-core#46).
+COMPLETED_AT_FROM_JOBS = "jobs"
+COMPLETED_AT_FROM_UPDATED_AT = "updated_at"
+COMPLETED_AT_IN_FLIGHT = "in_flight"
+
 # How many cache entries to pull per repository. GitHub returns them most-recently-accessed
 # first, so a cap keeps the freshest — and the collector says how many it left, because a
 # truncated cache list that reads as complete would make "no cache from that ref" a wrong answer.
 _CACHE_LIMIT_PER_REPO = 100
+#: Rule suites collected per repository per run. Bypasses only, so this is a ceiling on
+#: FINDINGS rather than on traffic — a repository with more than this many bypasses in the
+#: window has a bigger problem than truncation.
+_RULE_SUITE_LIMIT_PER_REPO = 100
+#: ALWAYS sent. Omitting `time_period` makes GitHub default to `day`, so a repository with a
+#: month of bypasses reads as a quiet one (req-github-core-rule-suites-5).
+_RULE_SUITE_WINDOW = "month"
 
 # Ruleset condition tokens GitHub uses in place of a ref pattern.
 _REF_TOKEN_DEFAULT_BRANCH = "~DEFAULT_BRANCH"  # nosec B105 — GitHub ref token, not a secret
@@ -167,6 +184,36 @@ _OIDC_ISSUER_URL = "https://token.actions.githubusercontent.com"
 
 class GithubCollectorError(Exception):
     """Unrecoverable error during the github_core collection run."""
+
+
+def _iso_datetime(value: Any) -> datetime | None:
+    """Parse a GitHub timestamp (`2026-09-01T18:11:47Z`), or `None` when it is not one.
+
+    A degrade, not an abort: the per-repo boundary in `collect` catches only
+    `GithubAPIError`, so an unparseable stamp raising here would fail the whole
+    collection over one job. The caller treats `None` as "no usable end".
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+def _login_of(user: Any) -> str:
+    """The `login` of a GitHub user object, or `""` when the payload carried none.
+
+    Runs name their `actor` and `triggering_actor` as full user objects; the node
+    stores the login alone (github-core#47). `""` is observed-empty, which is what
+    an absent or null actor is: the payload was read and named nobody.
+    """
+    if not isinstance(user, dict):
+        return ""
+    return str(user.get("login") or "")
+
+
+def _owner_of(full_name: str) -> str:
+    """`owner` from `owner/repo`. Ruleset identity keys on the owner, not the repository."""
+    return full_name.partition("/")[0]
 
 
 class GithubCollector(CollectorBase):
@@ -443,6 +490,9 @@ class GithubCollector(CollectorBase):
         # Account type of the observed owner ("Organization" | "User"), learned when
         # the account node is emitted; steers owner-scoped app URLs.
         self._account_type: str = ""
+        #: Actor logins already emitted as accounts this run. One person bypassing in
+        #: nineteen repositories is ONE account node, not nineteen.
+        self._emitted_actor_logins: set[str] = set()
         # Rulesets are singletons too, and far more fan-in than apps: an
         # organization-sourced ruleset is reported by every repository it governs
         # (measured: 6 rulesets across 60 attachments on a 19-repo org).
@@ -999,75 +1049,12 @@ class GithubCollector(CollectorBase):
             client, full_name, already_fetched_run_ids={r["id"] for r in run_payloads}
         )
         run_payloads.extend(refreshed)
+        # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
+        # the same job payloads, and at account scope a second walk is one extra API call per
+        # RUN — the single largest cost in the whole collection.
         jobs_by_run: dict[int, list[dict[str, Any]]] = {}
         for r in run_payloads:
-            run_uuid = run_id(full_name, r["id"])
-            wf_ref_uuid = workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
-            nodes.append(
-                node_envelope(
-                    entity_id=run_uuid,
-                    entity_type="github_core__github_actions_run",
-                    name=f"Run #{r.get('run_number', r['id'])}",
-                    dimensions=observation_dims,
-                    fields={
-                        "full_name": full_name,
-                        "run_id": r["id"],
-                        "run_number": r.get("run_number"),
-                        "event": r.get("event", ""),
-                        "status": r.get("status", ""),
-                        "conclusion": r.get("conclusion") or "",
-                        "head_sha": r.get("head_sha", ""),
-                        "head_branch": r.get("head_branch", ""),
-                        "run_started_at": r.get("run_started_at"),
-                        "completed_at": r.get("updated_at"),
-                        "html_url": r.get("html_url", ""),
-                        "configuration": {
-                            "workflow_id": r.get("workflow_id"),
-                            "raw_payload_keys": sorted(r.keys()),
-                        },
-                        "tags": {},
-                    },
-                )
-            )
-            if wf_ref_uuid is not None:
-                edges.append(self._edge("EXECUTES_WORKFLOW__github_core", run_uuid, wf_ref_uuid, observation_dims))
-
-            # jobs for this run (latest-attempt endpoint per req-github-core-collector-8).
-            # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
-            # the same payloads, and at account scope a second walk is one extra API call per RUN
-            # — the single largest cost in the whole collection.
-            jobs = self._fetch_run_jobs(client, full_name, r["id"])
-            jobs_by_run[r["id"]] = jobs
-            for j in jobs:
-                j_uuid = job_id(full_name, j["id"])
-                j_display_name = j.get("name") or str(j["id"])
-                nodes.append(
-                    node_envelope(
-                        entity_id=j_uuid,
-                        entity_type="github_core__github_actions_job",
-                        name=j_display_name,
-                        dimensions=observation_dims,
-                        fields={
-                            "full_name": full_name,
-                            "job_id": j["id"],
-                            "name": j_display_name,
-                            "status": j.get("status", ""),
-                            "conclusion": j.get("conclusion") or "",
-                            "started_at": j.get("started_at"),
-                            "completed_at": j.get("completed_at"),
-                            "html_url": j.get("html_url", ""),
-                            "configuration": {
-                                "runner_id": j.get("runner_id"),
-                                "runner_name": j.get("runner_name"),
-                                "runner_group_id": j.get("runner_group_id"),
-                                "labels": j.get("labels") or [],
-                                "steps": j.get("steps") or [],
-                            },
-                            "tags": {},
-                        },
-                    )
-                )
-                edges.append(self._edge("HAS_ACTIONS_JOB__github_core", run_uuid, j_uuid, observation_dims))
+            jobs_by_run[r["id"]] = self._emit_run_with_jobs(client, full_name, r, observation_dims, nodes, edges)
 
         # runners (graceful-degrade on 403 per req-github-core-collector-5)
         try:
@@ -1110,6 +1097,9 @@ class GithubCollector(CollectorBase):
         # stored cache entries (REST; graceful-degrade like runners). Observation dimensions:
         # a cache entry is something that HAPPENED, not something declared.
         self._collect_caches(client, full_name, repo_uuid, observation_dims, ref_uuid_by_ref, nodes, edges)
+        # Bypass EVENTS. Deliberately after refs: EVALUATED_ON resolves against ref_uuid_by_ref,
+        # and a suite naming a ref we did not collect simply carries no edge.
+        self._collect_rule_suites(client, full_name, observation_dims, ref_uuid_by_ref, nodes, edges)
 
         # EXECUTED_ON edges (only when an observed job runner_id matches a durable runner node).
         # Reuses the job payloads collected above — the runner nodes simply were not known yet
@@ -1125,6 +1115,153 @@ class GithubCollector(CollectorBase):
     # ---------- helpers ----------
 
     # ---------- configuration-layer emitters ----------
+
+    def _emit_run_with_jobs(
+        self,
+        client: GithubClient,
+        full_name: str,
+        r: dict[str, Any],
+        observation_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Emit one run node, its latest-attempt job nodes, and the edges between them.
+
+        The jobs are fetched FIRST (latest-attempt endpoint per
+        req-github-core-collector-8) because the run's end time is derived from
+        them — see `_run_completed_at` (github-core#46). Returns the job payloads
+        (empty when the endpoint degraded) so the caller can hold them for the
+        EXECUTED_ON pass without a second walk.
+
+        Args:
+            client: The REST client for this collection.
+            full_name: `owner/repo` of the run's repository.
+            r: The run payload as GitHub returned it.
+            observation_dims: Dimensions stamped on every execution node.
+            nodes: Node envelopes to append to.
+            edges: Edge envelopes to append to.
+
+        Returns:
+            The run's job payloads; `[]` when they were not observable.
+        """
+        run_uuid = run_id(full_name, r["id"])
+        wf_ref_uuid = workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
+        jobs = self._fetch_run_jobs(client, full_name, r["id"])
+        completed_at, completed_at_source = self._run_completed_at(r, jobs)
+        nodes.append(
+            node_envelope(
+                entity_id=run_uuid,
+                entity_type="github_core__github_actions_run",
+                name=f"Run #{r.get('run_number', r['id'])}",
+                dimensions=observation_dims,
+                fields={
+                    "full_name": full_name,
+                    "run_id": r["id"],
+                    "run_number": r.get("run_number"),
+                    "event": r.get("event", ""),
+                    "status": r.get("status", ""),
+                    "conclusion": r.get("conclusion") or "",
+                    "head_sha": r.get("head_sha", ""),
+                    "head_branch": r.get("head_branch", ""),
+                    "created_at": r.get("created_at"),
+                    "run_started_at": r.get("run_started_at"),
+                    "completed_at": completed_at,
+                    "run_attempt": r.get("run_attempt"),
+                    # Logins only (github-core#47): the actor objects carry avatar URLs, node
+                    # ids and a dozen API links — the login is the join key and the answer.
+                    "actor_login": _login_of(r.get("actor")),
+                    "triggering_actor_login": _login_of(r.get("triggering_actor")),
+                    "html_url": r.get("html_url", ""),
+                    "configuration": {
+                        "workflow_id": r.get("workflow_id"),
+                        "raw_payload_keys": sorted(r.keys()),
+                        "completed_at_source": completed_at_source,
+                    },
+                    "tags": {},
+                },
+            )
+        )
+        if wf_ref_uuid is not None:
+            edges.append(self._edge("EXECUTES_WORKFLOW__github_core", run_uuid, wf_ref_uuid, observation_dims))
+
+        for j in jobs or []:
+            j_uuid = job_id(full_name, j["id"])
+            j_display_name = j.get("name") or str(j["id"])
+            nodes.append(
+                node_envelope(
+                    entity_id=j_uuid,
+                    entity_type="github_core__github_actions_job",
+                    name=j_display_name,
+                    dimensions=observation_dims,
+                    fields={
+                        "full_name": full_name,
+                        "job_id": j["id"],
+                        "name": j_display_name,
+                        "status": j.get("status", ""),
+                        "conclusion": j.get("conclusion") or "",
+                        "created_at": j.get("created_at"),
+                        "started_at": j.get("started_at"),
+                        "completed_at": j.get("completed_at"),
+                        "html_url": j.get("html_url", ""),
+                        "configuration": {
+                            "runner_id": j.get("runner_id"),
+                            "runner_name": j.get("runner_name"),
+                            "runner_group_id": j.get("runner_group_id"),
+                            "labels": j.get("labels") or [],
+                            "steps": j.get("steps") or [],
+                        },
+                        "tags": {},
+                    },
+                )
+            )
+            edges.append(self._edge("HAS_ACTIONS_JOB__github_core", run_uuid, j_uuid, observation_dims))
+        return jobs or []
+
+    @staticmethod
+    def _run_completed_at(r: dict[str, Any], jobs: list[dict[str, Any]] | None) -> tuple[str | None, str]:
+        """Establish a run's end time honestly (github-core#46).
+
+        GitHub's run payload carries no `completed_at`. Its `updated_at` moves on
+        re-run, on artifact and log events and on check-suite updates, so a run
+        that was touched later reads as having taken hours. The end the run
+        actually had is the latest `completed_at` over its jobs.
+
+        Three states, never two — the second element names which one applies:
+
+        - `COMPLETED_AT_FROM_JOBS`: derived, `max(job.completed_at)` over the
+          collected latest-attempt jobs.
+        - `COMPLETED_AT_FROM_UPDATED_AT`: approximated from the payload's
+          `updated_at`, because the run is complete but its end was not
+          observable from the jobs: the jobs endpoint degraded, the run has no
+          jobs (a skipped run), or the listing still carried a job without a
+          parseable end — the listing is eventually consistent, and a maximum
+          over the jobs that HAVE finished would understate the run. An upper
+          bound, not a measurement.
+        - `COMPLETED_AT_IN_FLIGHT`: null, because the run has not reached a
+          terminal status. No end time exists yet; a partial `max` over the jobs
+          that have finished would be a lie.
+
+        Args:
+            r: The run payload as GitHub returned it.
+            jobs: The run's job payloads, or `None` when they were not observable.
+
+        Returns:
+            `(completed_at, source)` — the ISO timestamp (or `None`) and the
+            source label recorded beside it in `configuration.completed_at_source`.
+        """
+        if r.get("status") not in _TERMINAL_RUN_STATUSES:
+            return None, COMPLETED_AT_IN_FLIGHT
+        ends: list[tuple[datetime, str]] = []
+        for j in jobs or []:
+            parsed = _iso_datetime(j.get("completed_at"))
+            if parsed is None:
+                # One job without a usable end makes the whole listing a non-measurement.
+                ends = []
+                break
+            ends.append((parsed, j["completed_at"]))
+        if ends:
+            return max(ends)[1], COMPLETED_AT_FROM_JOBS
+        return r.get("updated_at"), COMPLETED_AT_FROM_UPDATED_AT
 
     def _emit_refs(
         self,
@@ -1444,7 +1581,7 @@ class GithubCollector(CollectorBase):
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
-        """Emit one BYPASSES edge per actor we can name, and say what we could not name."""
+        """Emit one EXEMPTS_ACTOR edge per actor we can name, and say what we could not name."""
         for actor in observability["actors"]:
             app_uuid = github_app_id(actor["slug"])
             if str(app_uuid) not in self._emitted_app_ids:
@@ -1469,10 +1606,13 @@ class GithubCollector(CollectorBase):
                 )
             edges.append(
                 edge_envelope(
-                    entity_id=edge_id("BYPASSES__github_core", app_uuid, rs_uuid),
-                    edge_type="BYPASSES__github_core",
-                    source_id=app_uuid,
-                    target_id=rs_uuid,
+                    # Ruleset -> actor. The exemption is something the RULESET declares
+                    # (it is an entry in its own bypass_actors list); nobody initiates a
+                    # permission, so the declaring object is the source.
+                    entity_id=edge_id("EXEMPTS_ACTOR__github_core", rs_uuid, app_uuid),
+                    edge_type="EXEMPTS_ACTOR__github_core",
+                    source_id=rs_uuid,
+                    target_id=app_uuid,
                     dimensions=dims,
                     properties={
                         "actor_type": "Integration",
@@ -1680,6 +1820,170 @@ class GithubCollector(CollectorBase):
                         properties={"condition": str(job.get("if") or "")},
                     )
                 )
+
+    def _collect_rule_suites(
+        self,
+        client: GithubClient,
+        full_name: str,
+        dims: dict[str, str],
+        ref_uuid_by_ref: dict[str, Any],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """Collect pushes that went AROUND a ruleset rather than satisfying it.
+
+        The complement to `_emit_rulesets` (`req-github-core-rule-suites`). That records who MAY
+        bypass and hits a documented ceiling — GitHub returns `bypass_actors` only to a caller with
+        write access. This records who DID, and answers a read-only App with names.
+
+        Only `bypass` results are requested. A passing suite is a routine push (~47/day on one
+        active repository); landing every one would swamp the grid for no finding.
+        """
+        try:
+            suites = client.get_paginated(
+                f"/repos/{full_name}/rulesets/rule-suites",
+                params={
+                    "rule_suite_result": "bypass",
+                    # Explicit, always. The default is `day` (req-github-core-rule-suites-5).
+                    "time_period": _RULE_SUITE_WINDOW,
+                    "per_page": str(_RULE_SUITE_LIMIT_PER_REPO),
+                },
+            )
+        except GithubAPIError as exc:
+            if exc.status in (403, 404):
+                # Refused is not empty. Landing nothing here would say "no one bypassed anything",
+                # which is the most reassuring reading of a permission failure.
+                self.record_warn(
+                    _SITE_RULE_SUITE_DEGRADED,
+                    f"RULE_SUITES_UNREADABLE_{exc.status}",
+                    f"Rule suites inaccessible for {full_name} — bypass events NOT observed, "
+                    f"which is not the same as none occurring: {exc.body[:120]}",
+                    message_data={"repo": full_name, "status": exc.status},
+                )
+                return
+            raise
+
+        for suite in suites:
+            suite_uuid = rule_suite_id(suite["id"])
+            actor_login = str(suite.get("actor_name") or "")
+            ref = str(suite.get("ref") or "")
+            bypassed = self._bypassed_rules(client, full_name, suite)
+            nodes.append(
+                node_envelope(
+                    entity_id=suite_uuid,
+                    entity_type="github_core__rule_suite",
+                    name=f"{actor_login or 'unknown actor'} bypassed {ref.rsplit('/', 1)[-1] or 'a ref'}",
+                    dimensions=dims,
+                    fields={
+                        "suite_id": suite["id"],
+                        "full_name": full_name,
+                        "result": str(suite.get("result") or ""),
+                        "ref": ref,
+                        "actor_login": actor_login,
+                        "actor_id": suite.get("actor_id"),
+                        "before_sha": str(suite.get("before_sha") or ""),
+                        "after_sha": str(suite.get("after_sha") or ""),
+                        "pushed_at": suite.get("pushed_at"),
+                        "bypassed_rules": bypassed,
+                        "configuration": {},
+                        "tags": {},
+                    },
+                )
+            )
+            if actor_login:
+                # An ACCOUNT, not an identity: GitHub says login and id, never whether the login
+                # belongs to a person, a bot or a machine account (req-github-core-rule-suites-2).
+                actor_uuid = account_id(actor_login)
+                if actor_login not in self._emitted_actor_logins:
+                    self._emitted_actor_logins.add(actor_login)
+                    nodes.append(
+                        node_envelope(
+                            entity_id=actor_uuid,
+                            entity_type="github_core__github_account",
+                            name=actor_login,
+                            dimensions={**dims, "github.surface": "accounts"},
+                            fields={
+                                "login": actor_login,
+                                "github_id": suite.get("actor_id"),
+                                # Unobserved, not "User": this surface does not say which.
+                                "account_type": "",
+                                "html_url": f"https://github.com/{actor_login}",
+                                "configuration": {},
+                                "tags": {},
+                            },
+                        )
+                    )
+                edges.append(
+                    self._edge(
+                        # Account -> suite: the push is what happened, and the account is
+                        # what initiated it. The passive form had the initiator as target.
+                        "TRIGGERED_EVALUATION__github_core", actor_uuid, suite_uuid, dims,
+                        properties={"actor_id": suite.get("actor_id")},
+                    )
+                )
+            ref_uuid = ref_uuid_by_ref.get(ref)
+            if ref_uuid is not None:
+                edges.append(
+                    self._edge(
+                        "EVALUATED_ON_REF__github_core", suite_uuid, ref_uuid, dims,
+                        properties={
+                            "before_sha": str(suite.get("before_sha") or ""),
+                            "after_sha": str(suite.get("after_sha") or ""),
+                        },
+                    )
+                )
+            for rule in bypassed:
+                if rule.get("ruleset_id") is None:
+                    continue
+                edges.append(
+                    self._edge(
+                        "BYPASSED_RULE__github_core",
+                        suite_uuid,
+                        ruleset_id(_owner_of(full_name), rule["ruleset_id"]),
+                        dims,
+                        properties={
+                            "rule_type": str(rule.get("rule_type") or ""),
+                            "enforcement": str(rule.get("enforcement") or ""),
+                            "details": str(rule.get("details") or ""),
+                        },
+                    )
+                )
+        if suites:
+            self.record_info(
+                _SITE_RULE_SUITE_FOUND,
+                "RULE_SUITES_BYPASS",
+                f"{len(suites)} bypass event(s) on {full_name} in the last {_RULE_SUITE_WINDOW}.",
+                message_data={"repo": full_name, "count": len(suites), "window": _RULE_SUITE_WINDOW},
+            )
+
+    def _bypassed_rules(
+        self, client: GithubClient, full_name: str, suite: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """The rules a suite did not satisfy, from its detail. Degrades to [] with the list intact.
+
+        The list endpoint says a bypass happened; only the detail says WHICH control was gone
+        around, which is what turns the event from a log line into a finding.
+        """
+        try:
+            detail = client.get(f"/repos/{full_name}/rulesets/rule-suites/{suite['id']}")
+        except GithubAPIError:
+            return []
+        out: list[dict[str, Any]] = []
+        for evaluation in detail.get("rule_evaluations") or []:
+            if evaluation.get("result") == "pass":
+                continue
+            source = evaluation.get("rule_source") or {}
+            out.append(
+                {
+                    "rule_type": evaluation.get("rule_type"),
+                    "enforcement": evaluation.get("enforcement"),
+                    "result": evaluation.get("result"),
+                    "ruleset_id": source.get("id") if source.get("type") == "ruleset" else None,
+                    "ruleset_name": source.get("name"),
+                    "details": evaluation.get("details"),
+                }
+            )
+        return out
 
     def _collect_caches(
         self,
@@ -1933,13 +2237,16 @@ class GithubCollector(CollectorBase):
         source_uuid: Any,
         target_uuid: Any,
         dimensions: dict[str, str],
+        properties: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """One edge envelope. `properties` defaults to empty, which every prior caller wanted."""
         return edge_envelope(
             entity_id=edge_id(edge_type, source_uuid, target_uuid),
             edge_type=edge_type,
             source_id=source_uuid,
             target_id=target_uuid,
             dimensions=dimensions,
+            properties=properties or {},
         )
 
     def _fetch_account(self, client: GithubClient, owner: str) -> dict[str, Any]:
@@ -2039,8 +2346,8 @@ class GithubCollector(CollectorBase):
             refreshed.append(payload)
         return refreshed
 
-    def _fetch_run_jobs(self, client: GithubClient, full_name: str, run_id_int: int) -> list[dict[str, Any]]:
-        """Fetch the jobs list for a specific run.
+    def _fetch_run_jobs(self, client: GithubClient, full_name: str, run_id_int: int) -> list[dict[str, Any]] | None:
+        """Fetch the jobs list for a specific run, or `None` when it was not observable.
 
         Per GitHub docs the endpoint documents only `200 - OK`; no 404
         condition is documented. The HTTP client retries empty-body 404s
@@ -2048,6 +2355,11 @@ class GithubCollector(CollectorBase):
         Real 404s — a JSON body with `{"message": "..."}` — still propagate
         and we graceful-degrade per-run to avoid aborting the whole collection
         on a single quirky run (`req-github-core-collector-5` discipline).
+
+        `None` on that degrade, not `[]`: a run with no jobs (skipped) and a run
+        whose jobs could not be read are different observations, and the run's
+        end time is derived from the jobs (`_run_completed_at`), so the caller
+        has to be able to tell them apart.
         """
         try:
             return client.get_paginated(f"/repos/{full_name}/actions/runs/{run_id_int}/jobs", item_path="jobs")
@@ -2060,7 +2372,7 @@ class GithubCollector(CollectorBase):
                     f"with body: {exc.body[:120] or '(empty)'}. "
                     f"Skipping job collection for this run.",
                 )
-                return []
+                return None
             raise
 
     def _fetch_workflow_config(self, client: GithubClient, full_name: str, path: str) -> tuple[str, dict[str, Any]]:

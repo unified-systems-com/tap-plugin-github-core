@@ -207,7 +207,9 @@ readable catalogue, a collector can land it on the grid so "what changed" become
    to a field at `self`; revisit at `friends`** if anything needs to point at one.
 2. ~~Where `package_version` lives.~~ **Settled:** `supply_chain_core` (see decisions above).
 3. ~~**`BYPASSES` observability.**~~ **SETTLED EMPIRICALLY 2026-08-27, and the answer is worse than
-   expected.** GitHub returns `bypass_actors` only to a caller with **write access to the ruleset**.
+   expected.** **Addendum 2026-09-02:** less bad than measured — a read credential gets GraphQL's
+   `totalCount` with the nodes redacted (#11 probe, #22), so `bypass_observability` gains a `counted`
+   state and the count rides the ruleset node; see `spec-github-core-v0.md` §Bypass observability. GitHub returns `bypass_actors` only to a caller with **write access to the ruleset**.
    Measured against our own org, and **read the next paragraph before relying on the comparison**:
    an owner-minted fine-grained PAT sees it; a **GitHub App with `administration: read` does not**
    (`bypass_actors` absent from the ruleset detail, HTTP 200).

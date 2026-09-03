@@ -1,0 +1,29 @@
+{
+  "slug": "TRIGGERED_EVALUATION__github_core",
+  "name": "Triggered Evaluation",
+  "description": "The account whose push this rule suite evaluated. An ACCOUNT, not an identity: GitHub returns a login and a numeric id and does not say whether it belongs to a person, a bot or a machine account, so the edge points at the same user-or-organization primitive everything else does rather than claiming a classification we did not observe.",
+  "sources": [
+    "github_core__github_account"
+  ],
+  "targets": [
+    "github_core__rule_suite"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "rules",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "actor_id": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "description": "GitHub's numeric account id at the time of the push. Carried so a login rename is detectable \u2014 the same id under a new login is a rename, not a new actor."
+      }
+    }
+  }
+}
