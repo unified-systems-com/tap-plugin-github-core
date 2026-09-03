@@ -208,7 +208,7 @@ class GatesPanelType:
             rows = build_rows(_fetch(QUERIES))
         except (
             Exception
-        ) as exc:  # noqa: BLE001 — the panel renders its failure, never a blank frame
+        ):  # noqa: BLE001 — the panel renders its failure, never a blank frame
             logger.exception(
                 "[4c40] Gates panel read failed for panel %s", panel.entity_id
             )
@@ -216,7 +216,9 @@ class GatesPanelType:
                 "table_nodes": [],
                 "table_meta": {},
                 "table_search": None,
-                "table_error": f"Gate reads failed: {exc}",
+                # The exception text stays in the log: an executor message can carry query
+                # fragments, and the panel body is not the place for them (Codacy, PR #66).
+                "table_error": "Gate reads failed — see the server log ([4c40]).",
                 **_script_ids(panel),
             }
         meta = {
