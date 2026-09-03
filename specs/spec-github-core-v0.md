@@ -536,25 +536,59 @@ repository.
 GitHub returns a ruleset's bypass-actor list only to a caller with **write access to the ruleset**.
 Measured against our own organization on 2026-08-27: an owner-minted fine-grained PAT sees it; a
 GitHub App with `administration: read` does not — REST omits the `bypass_actors` key entirely
-(HTTP 200), while **GraphQL answers with an empty connection and no error at all**. Our own
-rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful zero versus a
-silently filtered connection — is untested and cannot be tested here without adding a bypass actor
-to a live ruleset, which would be a change to our security posture rather than a measurement.
+(HTTP 200), while **GraphQL answers with a truthful `totalCount` and every node redacted to
+`null`** (corrected 2026-09-02 from "an empty connection", which the #11 probe disproved — #22
+item 2). Our own rulesets genuinely have empty bypass lists, so the distinguishing case — a truthful
+zero versus a silently filtered connection — could not be measured against them without changing
+our security posture. It was measured instead on **a probe ruleset carrying one bypass actor,
+created on a personal repository, read with every available credential, and deleted** (#11,
+2026-08-27; the domain article `github_ruleset.md` §Observability records the table): the read-only
+App received `totalCount: 0` on the control rulesets and `totalCount: 1` on the probe, with every
+node `null`. That is the evidence behind treating a counted zero as a fact.
 
 The derivation that follows:
 
 ```
-observable = REST detail carried `bypass_actors`  OR  GraphQL returned a NON-EMPTY list
+observed = REST detail carried `bypass_actors`  OR  GraphQL returned AT LEAST ONE NON-NULL node
+counted  = neither, AND GraphQL carried `bypassActors.totalCount` (every node null, or none)
 ```
 
-A non-empty GraphQL answer proves itself — a filtered connection cannot invent actors. An empty one
-proves nothing. **False presence is impossible here; false absence is the entire risk.**
+A GraphQL answer with a real actor node in it proves itself — a filtered connection cannot invent
+actors — and `[null]` is not such an answer: a list of redactions is `counted`, never `observed`.
+A redacted one still carries its `totalCount`, and that count is truthful: the #11 probe read `0` on the
+controls and `1` on a ruleset carrying exactly one actor. **False presence is impossible here;
+false absence is the entire risk** — and discarding a known count is a false absence.
 
-The three states live on the **ruleset node** (`bypass_observability`, with `bypass_actor_count`
-meaningful only when `observed`), not on the `BYPASSES` edge, because when the answer is *none* or
-*unknown* there are no edges to carry anything and a view reading only edges would render both as
-an empty list. Generalized: *a property that qualifies an absence belongs on the node the absence
-is about, never on the edges that failed to appear.*
+**The `counted` state (decided 2026-09-02; #22 item 1 is the collector work).** A read-only
+credential learns *how many* may bypass, never *who*. That is most of the security value of the
+question, and the client currently throws it away (it filters the null nodes and never reads
+`totalCount`), degrading a known number to "we could not tell". `bypass_observability` therefore
+takes three values:
+
+| State | Meaning | `bypass_actor_count` |
+| --- | --- | --- |
+| `observed` | The list was read by a credential clearing the write bar. An empty list is then a fact. | The list length. |
+| `counted` | GraphQL answered `totalCount` with the identities redacted. | `totalCount`. **A zero here is a truthful zero**, distinguishable from unobservable for the first time. |
+| `unobservable` | Neither transport answered. | `null`. |
+
+Two invariants a consumer may rely on: the count is non-null **if and only if** the state is
+`observed` or `counted`, so nobody can see a number beside the word "unobservable" and believe
+both; and the count lives on the **ruleset node**, never on a node of its own — it is a fact
+about the ruleset, and a node type for a number would be a second copy of a fact that already has
+a home (derive-a-fact-once). The three states live on the ruleset (`bypass_observability`), not on
+the `BYPASSES` edge, because when the answer is *none* or *unknown* there are no edges to carry
+anything and a view reading only edges would render both as an empty list. Generalized: *a
+property that qualifies an absence belongs on the node the absence is about, never on the edges
+that failed to appear.*
+
+Views render the three states distinctly — git-serious's bypass badge
+(`req-git-serious-branch-protection-tiers-bypass-badge`: grey unobservable, yellow counted, neutral
+observed, and red reserved for a bypass that *happened*, which is the rule-suite surface) — and
+the guidance "a credential with write access to the ruleset would name them" rides `absent_note`
+(`req-github-core-app-auth-11`), machine-legible for the third player. `counted` is enough to make
+it work with a read-only credential; gathering and managing the identities under a properly scoped
+credential is the *make-it-right* task (#39 — same collector with a second envelope, or a separate
+collector, is the open question).
 
 **The read-only posture has a hard ceiling here**, and it is published rather than engineered
 around: seeing the exemption list requires write access to the thing being audited, and we do not
@@ -566,7 +600,9 @@ request write.
 | --- | --- | :---: | --- | --- |
 | req-github-core-rulesets-1 | One Node Per Ruleset | Implemented | A ruleset is one node keyed on owner + ruleset id however many repositories it protects, applied by `PROTECTS` edges. | |
 | req-github-core-rulesets-2 | Rule Parameters Retained | Implemented | The rules array carries each rule's parameters as returned (required check contexts among them), falling back to the type-only GraphQL list when the REST detail is unreadable — and warning when it does. | The gate view needs the contexts, not just the rule types. |
-| req-github-core-rulesets-bypass | Bypass Observability Is Recorded | Implemented | `bypass_observability` is `observed` only when REST carried the key or GraphQL returned a non-empty list; otherwise `unobservable` with a **null** actor count. A run warns per unobservable ruleset. | The failure guarded against is rendering "we could not look" as "nobody can bypass". |
+| req-github-core-rulesets-bypass | Bypass Observability Is Recorded | Implemented | `bypass_observability` is `observed` only when REST carried the key or GraphQL returned a non-empty list; otherwise `unobservable` with a **null** actor count. A run warns per unobservable ruleset. | The failure guarded against is rendering "we could not look" as "nobody can bypass". Superseded in part by `-bypass-2`: the redacted-nodes case becomes `counted`, not `unobservable`. |
+| req-github-core-rulesets-bypass-2 | Counted Is A State | Approved for Development | When GraphQL returns `bypassActors.totalCount` with the nodes redacted, `bypass_observability` is `counted` and `bypass_actor_count` equals `totalCount` — stored as `0` when it is zero, never `null`. The model enum and both schemas gain the value. | #22 item 1. Fixture: `{"totalCount": 1, "nodes": [null]}` → counted, 1. |
+| req-github-core-rulesets-bypass-3 | Count Never Beside Unobservable | Approved for Development | `bypass_actor_count` is non-null if and only if `bypass_observability` is `observed` or `counted`; a test asserts the invariant over every emitted ruleset. | The reader must not be able to see a number and the word "unobservable" and believe both. |
 | req-github-core-rulesets-3 | Unmodelled Actors Are Counted | Implemented | Bypass actors with no node type yet (teams, organization-admin roles) are kept as data on the ruleset and counted, never dropped. | Understating who can bypass is the one direction that must never happen. |
 | req-github-core-rulesets-4 | Ref Resolution Is Additive | Implemented | Condition patterns are stored verbatim (`~DEFAULT_BRANCH`, `~ALL`, globs) AND resolved against observed refs into `PROTECTS` edges with `match_kind: resolved`. A pattern matching nothing is an answer, not a failure. | Intent and effect are both queryable. |
 
