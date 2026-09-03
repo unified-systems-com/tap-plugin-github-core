@@ -1,10 +1,16 @@
-"""The run's end time is derived from its jobs, never read off `updated_at` (github-core#46).
+"""Run and job timestamps and provenance (github-core#46, github-core#47).
+
+The run's end time is derived from its jobs, never read off `updated_at` (github-core#46).
 
 GitHub's run payload carries no `completed_at`. Its `updated_at` moves on re-run, on
 artifact and log events and on check-suite updates — so the previous mapping
 (`completed_at = updated_at`) made a run that was re-run days later read as having taken
 days. The honest end is `max(job.completed_at)` over the run's collected jobs, and the
 node says which source it came from so a reader can tell a measurement from a bound.
+
+The payload's `created_at`, `run_attempt`, `actor` and `triggering_actor` — and the job's
+`created_at` — are stored, not dropped (github-core#47): queue time is `run_started_at −
+created_at`, and without `run_attempt` a re-run counts twice on any per-run strip.
 """
 
 from __future__ import annotations
@@ -36,6 +42,9 @@ def _run(**overrides: Any) -> dict[str, Any]:
         "head_branch": "session/sonar-cleanup",
         "run_started_at": "2026-09-01T18:02:11Z",
         "created_at": "2026-09-01T18:01:40Z",
+        "run_attempt": 2,
+        "actor": {"login": "criticalsec", "id": 1, "node_id": "U_x", "avatar_url": "https://a", "type": "User"},
+        "triggering_actor": {"login": "renovate[bot]", "id": 2, "node_id": "U_y", "type": "Bot"},
         # Far later than any job finished: a re-run / artifact event touched the run.
         "updated_at": "2026-09-02T07:45:03Z",
         "html_url": "https://github.com/unified-systems-com/tap/actions/runs/17402911001",
@@ -50,6 +59,7 @@ def _job(job_id: int, *, started_at: str | None, completed_at: str | None, statu
         "name": f"job-{job_id}",
         "status": status,
         "conclusion": "success" if completed_at else None,
+        "created_at": "2026-09-01T18:01:41Z",
         "started_at": started_at,
         "completed_at": completed_at,
         "html_url": f"https://github.com/{_REPO}/actions/runs/17402911001/job/{job_id}",
@@ -169,3 +179,67 @@ class TestTheOtherTwoStatesAreNamed:
 def test_the_source_label_is_one_of_three(status: str, jobs: list[dict[str, Any]] | None, expected_source: str) -> None:
     _, source = GithubCollector._run_completed_at(_run(status=status), jobs)
     assert source == expected_source
+
+
+class TestProvenanceIsStoredNotDropped:
+    """github-core#47: the payload had these all along; `raw_payload_keys` proved it."""
+
+    def test_run_provenance_lands_on_the_node(self) -> None:
+        run_node, job_nodes, _ = _emit(_run(), _JOBS)
+        fields = run_node["node"]
+        assert fields["created_at"] == "2026-09-01T18:01:40Z"
+        assert fields["run_attempt"] == 2
+        assert fields["actor_login"] == "criticalsec"
+        assert fields["triggering_actor_login"] == "renovate[bot]"
+        # Logins, not user objects: nothing from the actor payload but the login survives.
+        assert "avatar_url" not in str(fields)
+        assert all(j["node"]["created_at"] == "2026-09-01T18:01:41Z" for j in job_nodes)
+
+    def test_an_absent_actor_is_observed_empty_not_null(self) -> None:
+        """`""` says the payload named nobody; null would say we did not look."""
+        run_node, _, _ = _emit(_run(actor=None, triggering_actor={"id": 3}), _JOBS)
+        assert run_node["node"]["actor_login"] == ""
+        assert run_node["node"]["triggering_actor_login"] == ""
+
+    def test_a_payload_without_the_keys_yields_null_not_zero(self) -> None:
+        """A run with no `created_at` renders as not observed — never as a 0 s queue."""
+        bare = _run()
+        for key in ("created_at", "run_attempt"):
+            bare.pop(key)
+        run_node, _, _ = _emit(bare, _JOBS)
+        assert run_node["node"]["created_at"] is None
+        assert run_node["node"]["run_attempt"] is None
+
+
+@pytest.mark.django_db
+class TestTheFieldsRoundTripThroughTheServiceLayer:
+    """The emitted envelope is accepted by `create_node` and reads back typed."""
+
+    def test_run_and_job_round_trip(self) -> None:
+        from datetime import UTC, datetime
+
+        from tap_grid.models import Entity
+        from tap_grid.registry import get_model_class
+        from tap_grid.services import create_node
+
+        run_node, job_nodes, _ = _emit(_run(), _JOBS)
+        result = create_node("github_core__github_actions_run", run_node["node"])
+        assert result.success, f"create_node failed: {result.errors}"
+        run = get_model_class("github_core__github_actions_run").objects.get(
+            entity=Entity.objects.get(pk=result.entity_id)
+        )
+        assert run.created_at == datetime(2026, 9, 1, 18, 1, 40, tzinfo=UTC)
+        assert (run.run_started_at - run.created_at).total_seconds() == 31
+        assert run.completed_at == datetime(2026, 9, 1, 18, 11, 47, tzinfo=UTC)
+        assert run.run_attempt == 2
+        assert run.actor_login == "criticalsec"
+        assert run.triggering_actor_login == "renovate[bot]"
+        assert run.configuration["completed_at_source"] == COMPLETED_AT_FROM_JOBS
+
+        result = create_node("github_core__github_actions_job", job_nodes[0]["node"])
+        assert result.success, f"create_node failed: {result.errors}"
+        job = get_model_class("github_core__github_actions_job").objects.get(
+            entity=Entity.objects.get(pk=result.entity_id)
+        )
+        assert job.created_at == datetime(2026, 9, 1, 18, 1, 41, tzinfo=UTC)
+        assert (job.started_at - job.created_at).total_seconds() == 39

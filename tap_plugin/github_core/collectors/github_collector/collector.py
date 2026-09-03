@@ -194,6 +194,16 @@ def _iso_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+def _login_of(user: Any) -> str:
+    """The `login` of a GitHub user object, or `""` when the payload carried none.
+
+    Runs name their `actor` and `triggering_actor` as full user objects; the node
+    stores the login alone (github-core#47). `""` is observed-empty, which is what
+    an absent or null actor is: the payload was read and named nobody.
+    """
+    if not isinstance(user, dict):
+        return ""
+    return str(user.get("login") or "")
 
 
 def _owner_of(full_name: str) -> str:
@@ -1144,8 +1154,14 @@ class GithubCollector(CollectorBase):
                     "conclusion": r.get("conclusion") or "",
                     "head_sha": r.get("head_sha", ""),
                     "head_branch": r.get("head_branch", ""),
+                    "created_at": r.get("created_at"),
                     "run_started_at": r.get("run_started_at"),
                     "completed_at": completed_at,
+                    "run_attempt": r.get("run_attempt"),
+                    # Logins only (github-core#47): the actor objects carry avatar URLs, node
+                    # ids and a dozen API links — the login is the join key and the answer.
+                    "actor_login": _login_of(r.get("actor")),
+                    "triggering_actor_login": _login_of(r.get("triggering_actor")),
                     "html_url": r.get("html_url", ""),
                     "configuration": {
                         "workflow_id": r.get("workflow_id"),
@@ -1174,6 +1190,7 @@ class GithubCollector(CollectorBase):
                         "name": j_display_name,
                         "status": j.get("status", ""),
                         "conclusion": j.get("conclusion") or "",
+                        "created_at": j.get("created_at"),
                         "started_at": j.get("started_at"),
                         "completed_at": j.get("completed_at"),
                         "html_url": j.get("html_url", ""),
