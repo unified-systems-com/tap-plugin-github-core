@@ -28,7 +28,7 @@ Deliberately **not** covered:
 
 - **Multiple attempts.** See Identity. `run_attempt` is stored on the node but does not fan out into separate nodes.
 - **Logs.** Job logs are reachable at `actions:read` and are a real source (runner names in logs are the basis for non-ephemeral-runner heuristics), but they are not collected. A log is evidence, not an entity.
-- **Artifacts.** `actions_artifact` is a corpus concept at the *friends* tier — 11 sources model an artifact — with `UPLOADS_ARTIFACT` / `DOWNLOADS_ARTIFACT` edges. Not built.
+- **Artifacts, as fields.** Built 2026-09-02: what a run uploaded is an [`actions_artifact`](actions_artifact.md) reached by [`UPLOADS_ARTIFACT`](UPLOADS_ARTIFACT.md) when the run is in the batch. Nothing about artifacts is duplicated onto this node.
 - **The package a run produced.** `BUILDS_PACKAGE_VERSION` is a corpus edge at the *friends* tier, and the corpus notes that **its absence is the finding**: a registry version with no run behind it is how five incidents read. `package_version` was ruled into a future `supply_chain_core`, not here.
 - **The approving human.** Approval of a fork PR run is an event, not a field on the run; the corpus rules `review` to be an edge rather than a node.
 

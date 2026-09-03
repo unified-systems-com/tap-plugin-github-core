@@ -1154,6 +1154,24 @@
       "present": true,
       "source": "repository"
     },
+    "/repos/{owner}/{repo}/actions/artifacts": {
+      "item_properties": [
+        "archive_download_url",
+        "created_at",
+        "digest",
+        "expired",
+        "expires_at",
+        "id",
+        "name",
+        "node_id",
+        "size_in_bytes",
+        "updated_at",
+        "url",
+        "workflow_run"
+      ],
+      "present": true,
+      "source": "artifacts"
+    },
     "/repos/{owner}/{repo}/actions/caches": {
       "item_properties": [
         "created_at",

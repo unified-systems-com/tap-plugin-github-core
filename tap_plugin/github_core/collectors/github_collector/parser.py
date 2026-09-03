@@ -140,6 +140,7 @@ def _extract_job(job_id: str, job_def: Any) -> dict[str, Any]:
             "secrets_passed": [],
             "checkout_ref": "",
             "cache_steps": [],
+            "artifact_steps": [],
             "action_refs": [],
             "steps": [],
         }
@@ -168,6 +169,7 @@ def _extract_job(job_id: str, job_def: Any) -> dict[str, Any]:
         "secrets_passed": sorted(str(k) for k in job_def["secrets"]) if isinstance(job_def.get("secrets"), dict) else [],
         "checkout_ref": _checkout_ref(steps),
         "cache_steps": _cache_steps(steps),
+        "artifact_steps": _artifact_steps(steps),
         "action_refs": _action_refs(steps),
         "steps": steps,
     }
@@ -267,6 +269,48 @@ def _cache_steps(steps: Any) -> list[dict[str, Any]]:
                 "restore_keys": [k for k in str(restore_keys).splitlines() if k.strip()],
             }
         )
+    return out
+
+
+#: The two first-party artifact actions; each has one mode.
+_ARTIFACT_MODE_BY_ACTION: dict[str, str] = {
+    "actions/upload-artifact": "upload",
+    "actions/download-artifact": "download",
+}
+
+
+def _artifact_steps(steps: Any) -> list[dict[str, Any]]:
+    """Declared artifact traffic: which step uploads or downloads, by what name or pattern.
+
+    The declared side of `actions_artifact`. It is kept as a declaration and NOT joined to a
+    concrete artifact node: an upload names an artifact that does not exist until the run
+    happens, and a download names a name or glob pattern that matches a different artifact on
+    every run. GitHub records the uploader of each artifact (the run, on `UPLOADS_ARTIFACT`)
+    and nothing about who downloaded it, so the corpus's `DOWNLOADS_ARTIFACT` has no
+    observable target; what IS derivable from the declaration is `cross_workflow` — a
+    `run-id` or `repository` input means the step reaches into another run's outputs, which
+    is the property the corpus asked the edge to carry (`req-github-core-artifacts`).
+    """
+    out: list[dict[str, Any]] = []
+    for index, step in enumerate(steps if isinstance(steps, list) else []):
+        if not isinstance(step, dict):
+            continue
+        uses = str(step.get("uses") or "")
+        action = uses.split("@", 1)[0].lower()
+        mode = _ARTIFACT_MODE_BY_ACTION.get(action)
+        if mode is None:
+            continue
+        with_block = step.get("with") or {}
+        with_block = with_block if isinstance(with_block, dict) else {}
+        entry: dict[str, Any] = {
+            "step_index": index,
+            "mode": mode,
+            "name": str(with_block.get("name") or ""),
+        }
+        if mode == "download":
+            entry["pattern"] = str(with_block.get("pattern") or "")
+            entry["cross_workflow"] = bool(with_block.get("run-id")) or bool(with_block.get("repository"))
+        out.append(entry)
     return out
 
 

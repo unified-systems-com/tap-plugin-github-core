@@ -25,6 +25,7 @@ github_core__rule_suite = "tap_plugin.github_core.models.rule_suite.RuleSuite"
 github_core__github_environment = "tap_plugin.github_core.models.github_environment.GithubEnvironment"
 github_core__actions_cache = "tap_plugin.github_core.models.actions_cache.ActionsCache"
 github_core__github_action = "tap_plugin.github_core.models.github_action.GithubAction"
+github_core__actions_artifact = "tap_plugin.github_core.models.actions_artifact.ActionsArtifact"
 
 [edges]
 HOSTS_ACCOUNT__github_core = "edges/HOSTS_ACCOUNT.edge.json"
@@ -53,6 +54,7 @@ INSTALLED_ON__github_core = "edges/INSTALLED_ON.edge.json"
 USES_ACTION__github_core = "edges/USES_ACTION.edge.json"
 CALLS_WORKFLOW__github_core = "edges/CALLS_WORKFLOW.edge.json"
 TRIGGERS_WORKFLOW__github_core = "edges/TRIGGERS_WORKFLOW.edge.json"
+UPLOADS_ARTIFACT__github_core = "edges/UPLOADS_ARTIFACT.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"

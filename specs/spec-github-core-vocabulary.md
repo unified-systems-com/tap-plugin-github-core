@@ -91,7 +91,7 @@ neutral substrate when one is extracted, not in `github_core`.
 | `github_team` | no | friends | proposed | 10 sources |
 | `credential_grant` → `identity_core` | **yes** | friends | **new** | **9 standards + 15 incidents.** One node with a `kind` enum, not four thin types — otherwise the one query the standards ask for verbatim requires a UNION |
 | `runner_group` | no | friends | **new** | the published graph is ahead of us on runner scope |
-| `actions_artifact` | neutral-capable | friends | **new** | 11 sources (as *artifact*) |
+| `actions_artifact` | neutral-capable | **self** (pulled forward) | **exists** (2026-09-02, #55) | 11 sources (as *artifact*). Pulled from friends to self by the machinery view's outputs column (#31). Keyed `<full_name>#<artifact_id>`; `digest` and `expired` are the load-bearing fields; Shape C (immutable event with a retention window) |
 | `webhook` | neutral-capable | friends | proposed | 4 standards |
 | `package` / `package_version` | **yes** | friends | **new** | **14 incidents, 10 sources.** Identity is a **purl** (the strongest convergence in the whole sweep) |
 | `identity_core__principal` | **yes** | later | **new** | the *robot / non-human actor* concept clears the 3-source bar |
@@ -138,7 +138,8 @@ properties must justify why it needs none.
 | `BUILDS_PACKAGE_VERSION` | run → package_version | friends | new | `{attested}` — **its absence is the finding**: a registry version with no run behind it is how five incidents read |
 | `POINTS_AT` | git_ref → git_commit | friends | new | `{observed_at}` |
 | `FETCHES_FROM` | workflow_job → web_host | friends | new | `{url_pattern, piped_to_shell, digest_pinned}` |
-| `UPLOADS_ARTIFACT` / `DOWNLOADS_ARTIFACT` | workflow_job → artifact | friends | new | `{cross_workflow}` |
+| `UPLOADS_ARTIFACT` | **run** → artifact | self | **exists** (2026-09-02, #55) | — (exact, from the listing's `workflow_run.id`; every candidate property is a field on the artifact, which IS the event). **Source corrected to the run**: the listing names the run, not the job |
+| ~~`DOWNLOADS_ARTIFACT`~~ | ~~workflow_job → artifact~~ | — | **rejected 2026-09-02** | **No observable target.** GitHub records the uploader and nothing about downloads; a declared download names a pattern, and the node is one concrete id — joining them is the inference `req-github-core-caches-4` refuses. `cross_workflow` survives on the job's `configuration.artifact_steps` (a `run-id`/`repository` input), where it is derivable |
 | `LINKED_IDENTITY` | account → principal | later | new | `{confidence, evidence}` |
 
 ### Naming

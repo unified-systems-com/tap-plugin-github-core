@@ -97,6 +97,16 @@ def actions_cache_id(full_name: str, cache_id_int: int | str) -> UUID:
     return _id("github_core__actions_cache", f"{full_name}#{cache_id_int}")
 
 
+def actions_artifact_id(full_name: str, artifact_id_int: int | str) -> UUID:
+    """An artifact, keyed on the repository plus GitHub's artifact id.
+
+    The id is platform-global (the same generator as runs and caches), so the repository
+    prefix is belt-and-braces in the same way `ruleset_id`'s owner prefix is — and a natural
+    key cannot change once nodes exist, so it is recorded rather than re-derived.
+    """
+    return _id("github_core__actions_artifact", f"{full_name}#{artifact_id_int}")
+
+
 def app_installation_id(installation_id_int: int | str) -> UUID:
     """An installation, keyed on GitHub's installation id — unique across the platform."""
     return _id("github_core__app_installation", str(installation_id_int))

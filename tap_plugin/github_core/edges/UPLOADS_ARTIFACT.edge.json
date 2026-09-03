@@ -1,0 +1,16 @@
+{
+  "slug": "UPLOADS_ARTIFACT__github_core",
+  "name": "Uploads Artifact",
+  "description": "A workflow run produced an artifact — the run that GitHub's artifact listing names as the uploader. Execution-side and exact: the listing carries the run id, so nothing is matched or guessed. Emitted only when that run is in the same collection batch; artifacts whose run lies outside the collected window are counted, not silently dropped.",
+  "sources": [
+    "github_core__github_actions_run"
+  ],
+  "targets": [
+    "github_core__actions_artifact"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "execution"
+  }
+}
