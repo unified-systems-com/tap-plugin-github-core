@@ -65,7 +65,9 @@ GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
     # to things that are genuinely NOT field selections — keywords, arguments, aliases and
     # connection plumbing — rather than hiding real fields behind a name-match.
     "GitObject": ("oid",),
-    "Commit": ("oid",),
+    "Commit": ("oid", "committedDate", "authoredDate", "author", "committer", "signature"),
+    "GitActor": ("name", "email", "user"),
+    "GitSignature": ("isValid", "state", "wasSignedByGitHub", "signer"),
     "RepositoryRuleConditions": ("refName",),
     "RefNameConditionTarget": ("include", "exclude"),
     "RepositoryRule": ("type",),

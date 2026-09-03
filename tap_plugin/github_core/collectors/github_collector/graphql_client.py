@@ -63,6 +63,14 @@ class GithubGraphQLError(Exception):
         self.status = status
 
 
+# The `CommitSlice` fragment at the end of the query is the narrow commit slice
+# (req-github-core-commits): identity as observed, and signature state. Scalar fields on nodes
+# the query already requests — measured at no additional rate-limit cost on 2026-09-02.
+# Deliberately NOT message, tree or parents: the ref/signature convergence, not history.
+# `signature` is null on an unsigned commit, which is an observed value; a field the credential
+# cannot read lands in `errors` and is surfaced separately. The comment lives HERE, outside the
+# query string, because the conformance test reads identifiers out of the query text.
+#
 # The config-layer query. Deliberately does NOT request `branchProtectionRules`: it is admin-only
 # and its absence would add a FORBIDDEN error to every response for a read-only credential, which
 # would train us to ignore the errors array. Rulesets are the current mechanism anyway.
@@ -118,11 +126,11 @@ query($login: String!, $cursor: String) {
           }
           branchRefs: refs(refPrefix: "refs/heads/", first: %(refs)d) {
             totalCount
-            nodes { name target { oid } }
+            nodes { name target { oid ...CommitSlice } }
           }
           tagRefs: refs(refPrefix: "refs/tags/", first: %(refs)d) {
             totalCount
-            nodes { name target { oid __typename ... on Tag { target { oid } } } }
+            nodes { name target { oid __typename ...CommitSlice ... on Tag { target { oid ...CommitSlice } } } }
           }
           object(expression: "HEAD:.github/workflows") {
             ... on Tree {
@@ -133,6 +141,13 @@ query($login: String!, $cursor: String) {
       }
     }
   }
+}
+fragment CommitSlice on Commit {
+  committedDate
+  authoredDate
+  author { name email user { login } }
+  committer { name email user { login } }
+  signature { __typename isValid state wasSignedByGitHub signer { login } }
 }
 """ % {
     "page": _REPO_PAGE_SIZE,
@@ -199,11 +214,17 @@ class GithubGraphQLClient:
         while True:
             body = self._post(_CONFIG_QUERY, {"login": login, "cursor": cursor})
             data = body["data"]
-            for err in body.get("errors") or []:
+            errors = body.get("errors") or []
+            for err in errors:
                 path = ".".join(str(p) for p in (err.get("path") or []))
                 note = f"{err.get('type', 'ERROR')}: {err.get('message', '')} at {path or '<root>'}"
                 if note not in notes:
                     notes.append(note)
+            # A field the credential could not read arrives as `null` in `data` beside its
+            # entry in `errors`. Null is also what an UNSIGNED commit's `signature` looks like,
+            # so a degraded field must not survive as a null the shapers would read as an
+            # observation: remove the key, and let "absent" mean "not answered".
+            prune_errored_paths(data, errors)
 
             rate = data.get("rateLimit") or {}
             cost += int(rate.get("cost") or 0)
@@ -271,9 +292,34 @@ class GithubGraphQLClient:
                         "target_sha": target_sha,
                         "target_type": str(target.get("__typename") or "").lower(),
                         "is_default": ref_type == "branch" and name == default_ref,
+                        # The commit the ref resolves to, sliced; None when the response carries
+                        # no commit body (a degraded field, or a stub without the fragment).
+                        "commit": GithubGraphQLClient.commit_slice(nested if nested else target, head_sha),
                     }
                 )
         return out, truncated
+
+    @staticmethod
+    def commit_slice(commit: dict[str, Any], sha: str) -> dict[str, Any] | None:
+        """Flatten one `CommitSlice` fragment into the `git_commit` field shape.
+
+        Three states for the signature, never two. A signature object yields GitHub's own
+        `state` with its validity and kind; **`signature: null` is `unsigned`**, an observed
+        value; and a commit body with NO `signature` key — the config layer removes a key whose
+        read failed, see `prune_errored_paths` — is `unobservable`, with a null validity. A body
+        without `committedDate` is not a commit slice at all: return None so the caller emits
+        nothing rather than a node full of empty strings pretending to be observations.
+        """
+        if not sha or "committedDate" not in commit:
+            return None
+        return {
+            "sha": sha,
+            "committed_date": commit.get("committedDate"),
+            "authored_date": commit.get("authoredDate"),
+            **_actor_slice("author", commit.get("author")),
+            **_actor_slice("committer", commit.get("committer")),
+            **_signature_slice(commit),
+        }
 
     @staticmethod
     def rulesets(repo: dict[str, Any]) -> list[dict[str, Any]]:
@@ -353,3 +399,78 @@ class GithubGraphQLClient:
                 continue
             out[f".github/workflows/{entry['name']}"] = text
         return out
+
+
+#: The signature field was not answered — removed from the response by `prune_errored_paths`.
+SIGNATURE_UNOBSERVABLE = "unobservable"
+#: GitHub answered `signature: null`: the commit carries no signature.
+SIGNATURE_UNSIGNED = "unsigned"
+
+
+def _actor_slice(role: str, actor: dict[str, Any] | None) -> dict[str, Any]:
+    """`GitActor` as observed: name and email as written, login only when GitHub resolved one."""
+    actor = actor or {}
+    return {
+        f"{role}_name": str(actor.get("name") or ""),
+        f"{role}_email": str(actor.get("email") or ""),
+        f"{role}_login": str(((actor.get("user") or {}).get("login")) or ""),
+    }
+
+
+def _signature_slice(commit: dict[str, Any]) -> dict[str, Any]:
+    """The signature in three states; nulls inside a present signature stay null, never False."""
+    if "signature" not in commit:
+        return {
+            "signature_kind": "",
+            "signature_state": SIGNATURE_UNOBSERVABLE,
+            "signature_valid": None,
+            "signer_login": "",
+            "signed_by_github": False,
+        }
+    signature = commit["signature"]
+    if signature is None:
+        return {
+            "signature_kind": "",
+            "signature_state": SIGNATURE_UNSIGNED,
+            "signature_valid": None,
+            "signer_login": "",
+            "signed_by_github": False,
+        }
+    is_valid = signature.get("isValid")
+    return {
+        "signature_kind": str(signature.get("__typename") or "").removesuffix("Signature").lower(),
+        "signature_state": str(signature.get("state") or "").lower() or SIGNATURE_UNOBSERVABLE,
+        "signature_valid": None if is_valid is None else bool(is_valid),
+        "signer_login": str(((signature.get("signer") or {}).get("login")) or ""),
+        "signed_by_github": bool(signature.get("wasSignedByGitHub")),
+    }
+
+
+def prune_errored_paths(data: Any, errors: list[dict[str, Any]]) -> int:
+    """Remove every field an `errors[]` entry names from `data`, so "not answered" is ABSENT.
+
+    GraphQL leaves a failed nullable field as `null` in `data` beside its error. For a field
+    whose null is also a legitimate answer (`Commit.signature` on an unsigned commit) that
+    would turn "the credential could not read it" into an observation. Deleting the key at the
+    error's `path` is what lets a shaper distinguish the two. Returns the number of keys removed;
+    a path that no longer resolves (a parent already pruned, or a root-level error) is skipped.
+    """
+    removed = 0
+    for err in errors:
+        path = err.get("path") or []
+        if not path:
+            continue
+        node: Any = data
+        for step in path[:-1]:
+            if isinstance(node, dict) and step in node:
+                node = node[step]
+            elif isinstance(node, list) and isinstance(step, int) and step < len(node):
+                node = node[step]
+            else:
+                node = None
+                break
+        leaf = path[-1]
+        if isinstance(node, dict) and leaf in node:
+            del node[leaf]
+            removed += 1
+    return removed

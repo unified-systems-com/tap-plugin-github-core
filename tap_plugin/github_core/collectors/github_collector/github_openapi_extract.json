@@ -482,7 +482,12 @@
         ],
         "present": true,
         "selected": [
-          "oid"
+          "author",
+          "authoredDate",
+          "committedDate",
+          "committer",
+          "oid",
+          "signature"
         ]
       },
       "DeploymentProtectionRule": {
@@ -516,6 +521,21 @@
           "protectionRules"
         ]
       },
+      "GitActor": {
+        "fields": [
+          "avatarUrl",
+          "date",
+          "email",
+          "name",
+          "user"
+        ],
+        "present": true,
+        "selected": [
+          "email",
+          "name",
+          "user"
+        ]
+      },
       "GitObject": {
         "fields": [
           "abbreviatedOid",
@@ -528,6 +548,24 @@
         "present": true,
         "selected": [
           "oid"
+        ]
+      },
+      "GitSignature": {
+        "fields": [
+          "email",
+          "isValid",
+          "payload",
+          "signature",
+          "signer",
+          "state",
+          "wasSignedByGitHub"
+        ],
+        "present": true,
+        "selected": [
+          "isValid",
+          "signer",
+          "state",
+          "wasSignedByGitHub"
         ]
       },
       "Ref": {

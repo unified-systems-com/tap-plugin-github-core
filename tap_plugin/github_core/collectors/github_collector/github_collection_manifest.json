@@ -163,6 +163,31 @@
       "description": "Branches and tags with the commit each points at (req-github-core-refs). Arrives inside the config-layer query at no extra request; declared separately because it needs its own permission statement. Contents read is already in the union for workflow file bodies, so this widens nothing."
     },
     {
+      "name": "commits",
+      "kind": "custom_fn",
+      "path": "POST /graphql (repository.refs.target ...CommitSlice)",
+      "target_entity_type": "github_core__git_commit",
+      "fields": [
+        "full_name",
+        "sha",
+        "committed_date",
+        "authored_date",
+        "author_name",
+        "author_email",
+        "author_login",
+        "committer_name",
+        "committer_email",
+        "committer_login",
+        "signature_kind",
+        "signature_state",
+        "signature_valid",
+        "signer_login",
+        "signed_by_github"
+      ],
+      "permission": "repository:contents:read",
+      "description": "The commit at every collected ref's head, sliced to identity-as-observed and signature verification state (req-github-core-commits). A fragment on the `refs` source's target — scalar fields on nodes the config-layer query already requests, measured at no additional rate-limit cost on 2026-09-02 — so it widens nothing. `signature: null` is recorded as `unsigned` (an observed value); a degraded field is surfaced by the config layer and emits no commit. Keyed on the repository plus the SHA: GitHub persists the signature verification record per repository NETWORK, so a SHA-only node could merge two networks' verdicts."
+    },
+    {
       "name": "rulesets",
       "kind": "rest_endpoint",
       "path": "/repos/{owner}/{repo}/rulesets/{ruleset_id}",
@@ -438,6 +463,12 @@
       "source": "github_core__github_actions_run",
       "target": "github_core__actions_artifact",
       "condition": "artifact.workflow_run.id names a run in the same batch; otherwise counted as unlinked"
+    },
+    {
+      "slug": "POINTS_AT__github_core",
+      "source": "github_core__git_ref",
+      "target": "github_core__git_commit",
+      "condition": "the ref's head commit carried a commit slice in the config layer"
     }
   ]
 }

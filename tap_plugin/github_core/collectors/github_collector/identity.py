@@ -61,6 +61,20 @@ def git_ref_id(full_name: str, ref: str) -> UUID:
     return _id("github_core__git_ref", f"{full_name}#{ref}")
 
 
+def git_commit_id(full_name: str, sha: str) -> UUID:
+    """A commit as observed in ONE repository: `owner/repo` plus the SHA.
+
+    Not the bare SHA, although a commit object is content-addressed: GitHub persists a commit's
+    signature VERIFICATION record per repository *network* ("if the same commit is pushed again
+    to the same repository or to any of its forks, the existing verification record is reused"),
+    so the same SHA in two unrelated networks can legitimately carry two different records, and
+    a SHA-only key would let one repository's verdict overwrite another's (PR #60 review). A
+    repository is inside exactly one network, so this key can never merge two records. The
+    cross-fork join is a follow-on keyed on the network root once `parent` is collected.
+    """
+    return _id("github_core__git_commit", f"{full_name}#{sha.lower()}")
+
+
 def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     """A ruleset, keyed on owner + GitHub's ruleset id.
 

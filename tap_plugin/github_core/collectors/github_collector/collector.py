@@ -42,6 +42,7 @@ from .graphql_client import GithubGraphQLClient, GithubGraphQLError
 from .identity import (
     account_id,
     actions_artifact_id,
+    git_commit_id,
     actions_cache_id,
     app_installation_id,
     edge_id,
@@ -1399,6 +1400,7 @@ class GithubCollector(CollectorBase):
                 )
             )
             edges.append(self._edge("HAS_REF__github_core", repo_uuid, ref_uuid, git_dims))
+            self._emit_commit(full_name, ref.get("commit"), ref_uuid, git_dims, nodes, edges)
         for ref_type, missing in sorted(truncated.items()):
             self.record_warn(
                 _SITE_REFS_TRUNCATED,
@@ -1408,6 +1410,38 @@ class GithubCollector(CollectorBase):
                 message_data={"repo": full_name, "ref_type": ref_type, "missing": missing},
             )
         return uuid_by_ref
+
+    def _emit_commit(
+        self,
+        full_name: str,
+        commit: dict[str, Any] | None,
+        ref_uuid: Any,
+        git_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """One `git_commit` per (repository, head SHA), shared across that repository's refs,
+        plus `POINTS_AT`.
+
+        Repository-scoped, because GitHub's signature verification record is persisted per
+        repository network and a SHA-only node could merge two networks' verdicts. Nothing is
+        emitted when the ref carried no commit slice: a config layer whose commit fields were
+        degraded, or a repos-only scope, yields refs without commits — and a node full of empty
+        strings would read as an unsigned commit by someone nobody could name.
+        """
+        if not commit:
+            return
+        commit_uuid = git_commit_id(full_name, str(commit["sha"]))
+        nodes.append(
+            node_envelope(
+                entity_id=commit_uuid,
+                entity_type="github_core__git_commit",
+                name=str(commit["sha"])[:12],
+                dimensions=git_dims,
+                fields={**commit, "full_name": full_name, "configuration": {}, "tags": {}},
+            )
+        )
+        edges.append(self._edge("POINTS_AT__github_core", ref_uuid, commit_uuid, git_dims))
 
     def _emit_rulesets(
         self,

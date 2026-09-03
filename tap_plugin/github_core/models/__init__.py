@@ -2,6 +2,7 @@
 
 from tap_plugin.github_core.models.actions_artifact import ActionsArtifact
 from tap_plugin.github_core.models.actions_cache import ActionsCache
+from tap_plugin.github_core.models.git_commit import GitCommit
 from tap_plugin.github_core.models.app_installation import AppInstallation
 from tap_plugin.github_core.models.git_ref import GitRef
 from tap_plugin.github_core.models.github_account import GithubAccount
@@ -21,6 +22,7 @@ from tap_plugin.github_core.models.workflow_job import WorkflowJob
 __all__ = [
     "ActionsArtifact",
     "ActionsCache",
+    "GitCommit",
     "AppInstallation",
     "GitRef",
     "GithubAccount",
