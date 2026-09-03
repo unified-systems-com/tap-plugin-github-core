@@ -5,8 +5,9 @@
     "actions": {
       "state": "requested",
       "level": "read",
-      "why": "Workflows, runs, jobs, caches — the execution layer.",
+      "why": "Workflows, runs, jobs, caches, artifacts — the execution layer and what it uploaded.",
       "sources": [
+        "artifacts",
         "caches",
         "jobs",
         "runs",
