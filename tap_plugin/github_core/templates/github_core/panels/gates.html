@@ -1,0 +1,8 @@
+{% comment %}
+github-gates (req-github-core-gates-panel): the view template IS the panel type's identity —
+the page view resolves a Panel row to its type by matching this path — so the gates panel owns
+a template of its own and renders through the standard table panel's, unchanged. Everything
+the include needs (table_nodes, table_columns, table_meta, the json_script ids) comes from
+GatesPanelType.get_view_context.
+{% endcomment %}
+{% include "tap_web/panels/table_panel.html" %}
