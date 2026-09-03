@@ -22,7 +22,8 @@
         "rule_suite_detail",
         "rule_suites",
         "rulesets",
-        "runners"
+        "runners",
+        "status_checks"
       ]
     },
     "artifact_metadata": {
@@ -57,7 +58,9 @@
       "level": "read",
       "why": "Workflow YAML, refs, and (once #31 lands) releases.",
       "sources": [
+        "commits",
         "refs",
+        "used_actions",
         "workflow_yaml"
       ]
     },
