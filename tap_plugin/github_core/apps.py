@@ -39,6 +39,7 @@ class GithubCoreConfig(TapPluginConfig):
             CrossGridReferencesPanelType,
         )
         from tap_plugin.github_core.panels.deploy_health import DeployHealthPanelType
+        from tap_plugin.github_core.panels.gates import GatesPanelType
         from tap_plugin.github_core.panels.history_strip import HistoryStripPanelType
         from tap_plugin.github_core.panels.recent_activity import RecentActivityPanelType
         from tap_plugin.github_core.panels.repo_hero import RepoHeroPanelType
@@ -51,3 +52,4 @@ class GithubCoreConfig(TapPluginConfig):
         panel_type_registry.register("github-workflow-catalog", WorkflowCatalogPanelType)
         panel_type_registry.register("github-cross-grid-references", CrossGridReferencesPanelType)
         panel_type_registry.register("github-history-strip", HistoryStripPanelType)
+        panel_type_registry.register("github-gates", GatesPanelType)
