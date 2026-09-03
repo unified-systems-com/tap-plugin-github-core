@@ -200,7 +200,12 @@ class GatesPanelType:
     @classmethod
     def get_view_context(cls, panel: Panel, request: HttpRequest) -> dict[str, Any]:
         """Execute the declared reads, fold them into rows, and return the table template's context."""
-        from tap_web.panels.table_panel import _script_ids
+        try:
+            from tap_web.panels.table_panel import _script_ids
+        except (
+            ImportError
+        ):  # core older than tap#305 (2026-09-03): same id grammar, one place
+            _script_ids = _script_ids_fallback
 
         config = dict(cls.config_defaults)
         config.update(panel.config or {})
@@ -242,6 +247,21 @@ class GatesPanelType:
             "table_error": None,
             **_script_ids(panel),
         }
+
+
+def _script_ids_fallback(panel: Panel) -> dict[str, str]:
+    """The table renderer's json_script id grammar, for a core that predates tap#305.
+
+    Mirrors ``tap_web.panels.table_panel._script_ids`` (``tap-table-<kind>-<panel id>``, the
+    contract ``panel-table.js`` rebuilds from ``data-tap-table-panel-id``). Dead code the moment
+    the plugin's harness pin passes tap#305; kept so the panel imports on the pinned harness.
+    """
+    pid = panel.entity_id
+    return {
+        "table_data_script_id": f"tap-table-data-{pid}",
+        "table_columns_script_id": f"tap-table-columns-{pid}",
+        "table_groupby_script_id": f"tap-table-groupby-{pid}",
+    }
 
 
 def _fetch(queries: dict[str, str]) -> dict[str, dict[str, Any]]:
