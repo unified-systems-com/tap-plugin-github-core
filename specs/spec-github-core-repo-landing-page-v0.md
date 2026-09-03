@@ -71,6 +71,7 @@ that do not advance the plot do not appear on the v0 page — see
 ### Page Route + Page Variable
 ----
 RID: `req-github-core-repo-page-route`
+
 Status: `Implemented`
 
 The page is mounted at the fixed route `/github_core/repo`. It is
@@ -90,6 +91,7 @@ stable UUID that survives renames.
 ### Entity Resolution
 ----
 RID: `req-github-core-repo-page-resolution`
+
 Status: `Implemented`
 
 Every panel on this page consumes a single resolved entity: the
@@ -116,6 +118,7 @@ link and lands on samsite's repo automatically.
 ### Repo Hero Panel
 ----
 RID: `req-github-core-repo-page-hero`
+
 Status: `Implemented`
 
 A horizontal strip across the top of the page. The single anchor that says
@@ -145,6 +148,7 @@ Surface:
 ### Recent Activity Panel
 ----
 RID: `req-github-core-repo-page-activity`
+
 Status: `Implemented`
 
 A chronological list of the most recent workflow runs for the resolved
@@ -177,6 +181,7 @@ Default limit: 10. Configurable per panel-instance.
 ### Deploy Health Panel
 ----
 RID: `req-github-core-repo-page-health`
+
 Status: `Implemented`
 
 A compact per-workflow scoreboard: at-a-glance "are we shipping clean?"
@@ -207,6 +212,7 @@ make absence legible).
 ### Workflow Catalog Panel
 ----
 RID: `req-github-core-repo-page-catalog`
+
 Status: `Implemented`
 
 What's defined to run on this repo, with an expand-to-see-detail affordance
@@ -239,6 +245,7 @@ on first load. Other workflows collapsed.
 ### Cross-Grid References Panel
 ----
 RID: `req-github-core-repo-page-cross-grid`
+
 Status: `Implemented`
 
 **The "mapping the tao" payoff panel.** Shows outbound `REFERENCES_RESOURCE`
@@ -280,6 +287,7 @@ That transition is itself a demo moment.
 ### History Strip Panel
 ----
 RID: `req-github-core-repo-page-history`
+
 Status: `Proposed`
 
 A compact strip surfacing the "this is honest-to-god audit evidence" demo
@@ -308,6 +316,7 @@ Surface:
 ### Page Layout
 ----
 RID: `req-github-core-repo-page-layout`
+
 Status: `Proposed`
 
 Top-to-bottom vertical reading order. The activity + health panels share a
@@ -341,6 +350,7 @@ panel takes the full page width.
 ### Navigation Discoverability
 ----
 RID: `req-github-core-repo-page-nav`
+
 Status: `Proposed`
 
 The page must be reachable from at least one existing navigation surface so
@@ -358,6 +368,7 @@ the existing samsite nav-links GRIFT.
 ### GRIFT Layout
 ----
 RID: `req-github-core-repo-page-grift`
+
 Status: `Implemented`
 
 The page and its panel instances are declared as a single GRIFT batch:
@@ -381,6 +392,7 @@ table and validated against `grift-document.schema.json` at load.
 ### v0 Non-Goals
 ----
 RID: `req-github-core-repo-page-nongoals`
+
 Status: `Implemented`
 
 Out of scope for v0 of this page:
