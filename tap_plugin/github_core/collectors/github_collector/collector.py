@@ -117,7 +117,12 @@ _SYNTHETIC_APP_BY_PATH_PREFIX: dict[str, dict[str, str]] = {
     "dynamic/dependabot/": {
         "slug": "dependabot",
         "name": "Dependabot",
+        # Generic app page — the fallback when the observed owner is a user account.
         "html_url": "https://github.com/apps/dependabot",
+        # For an organization the app's own page is the org's security-settings
+        # page, where Dependabot is enabled and configured for every repository;
+        # `{owner}` is the account login. The generic apps/ page is documentation.
+        "org_html_url": "https://github.com/organizations/{owner}/settings/security_analysis",
         "description": "GitHub's managed dependency-update and security-alert app.",
     },
 }
@@ -482,6 +487,9 @@ class GithubCollector(CollectorBase):
         # github_app nodes are singletons shared across repos; dedupe the node
         # emission across the whole run (the ENABLED_ON edges still fan in).
         self._emitted_app_ids: set[str] = set()
+        # Account type of the observed owner ("Organization" | "User"), learned when
+        # the account node is emitted; steers owner-scoped app URLs.
+        self._account_type: str = ""
         #: Actor logins already emitted as accounts this run. One person bypassing in
         #: nineteen repositories is ONE account node, not nineteen.
         self._emitted_actor_logins: set[str] = set()
@@ -915,6 +923,7 @@ class GithubCollector(CollectorBase):
         # account
         account_payload = self._fetch_account(client, owner)
         account_uuid = account_id(account_payload["login"])
+        self._account_type = str(account_payload.get("type") or "")
         nodes.append(
             node_envelope(
                 entity_id=account_uuid,
@@ -2190,6 +2199,10 @@ class GithubCollector(CollectorBase):
         for a platform app detected enabled on ``full_name``."""
         apps_dims = {**repo_dims, "github.surface": "apps"}
         app_uuid = github_app_id(app_meta["slug"])
+        owner = full_name.split("/", 1)[0]
+        html_url = app_meta.get("html_url", "")
+        if self._account_type == "Organization" and app_meta.get("org_html_url"):
+            html_url = app_meta["org_html_url"].format(owner=owner)
         if str(app_uuid) not in self._emitted_app_ids:
             self._emitted_app_ids.add(str(app_uuid))
             nodes.append(
@@ -2202,7 +2215,7 @@ class GithubCollector(CollectorBase):
                         "slug": app_meta["slug"],
                         "name": app_meta["name"],
                         "app_id": None,
-                        "html_url": app_meta.get("html_url", ""),
+                        "html_url": html_url,
                         "description": app_meta.get("description", ""),
                         "configuration": {},
                         "tags": {},

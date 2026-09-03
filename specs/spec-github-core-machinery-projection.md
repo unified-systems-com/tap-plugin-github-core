@@ -64,6 +64,14 @@ prose (`git-serious-tap/docs/doc-git-serious-shape-of-a-pipeline.md`).
 
 ## Requirement Status
 
+> **Status semantics.** An ACID is `Implemented` when its done-test was OBSERVED on a running
+> instance (the git-serious convergence rule: a step's status flips on observation, not on a
+> merge). The observations below were made 2026-09-02 with tap core's `session/viz-git-serious`
+> installed — the `ranked` inner layout and flowed columns (tap#293), `input_schema` defaults
+> (req-grid-search-obj-5-2) and the stack.js re-entrancy fix (tap#304). **Those must be on tap
+> main before this module is released**; on a core without them the module degrades (grid inner
+> layouts, `?repo=` required) rather than breaks, and the observations are not reproducible.
+
 | RID | Name | Status | Notes |
 | --- | --- | :---: | --- |
 | req-github-core-machinery-module | [The Layout Module](#the-layout-module) | In Development | `static/github_core/js/projections/machinery.js`; standard tap layout contract; repository is an input |
@@ -107,12 +115,20 @@ CI system of ONE repository present in the scene as nested machinery.
   what their line means.
 - **Nothing in the module is repository-specific.** A grep for `unified-systems-com`, `tap`,
   `product-lines` or any job key in the module is a defect.
+- **Facts the cy data does not carry.** panel-graph copies spine fields only (label, entity_type,
+  icon, dimensions, tags) and an edge's type onto `label`; the module fetches `job_key`, `needs`,
+  `permissions`, `configuration` and ref kinds through `/api/v1/gryphon/execute` (one type-scan
+  per type, `WHERE x.data.full_name = $repo`) and matches edges by `edge_type` OR `label`.
+- **Rendering notes (observed 2026-09-02):** the pipelines column uses the ranked layout's flowed
+  columns (`columnLayout: "flow"`, tap#293) so seventeen workflow boxes read as trigger-class rows
+  rather than a tower; workflows with no declared jobs render as empty boxes; container labels
+  sit on the box edge. Known rough edges, not defects.
 
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-machinery-module-1 | Lays Out Our Own Repository | In Development | On an instance observing unified-systems-com with `unified-systems-com/tap` in the scene, the module renders `github.com ⊃ account ⊃ tap ⊃ 17 workflow boxes ⊃ their jobs` with no node outside the outer box. | The done-test: Status flips only when this is OBSERVED on a running instance. |
+| req-github-core-machinery-module-1 | Lays Out Our Own Repository | Implemented | On an instance observing unified-systems-com with `unified-systems-com/tap` in the scene, the module renders `github.com ⊃ account ⊃ tap ⊃ 17 workflow boxes ⊃ their jobs` with no node outside the outer box. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. 17 workflow boxes, 30 jobs, nothing outside github.com. |
 | req-github-core-machinery-module-2 | No Repository, No Crash | In Development | A scene with no `github_repository` node produces the `machinery_no_repository` warning and no exception. | |
 | req-github-core-machinery-module-3 | Generic By Grep | In Development | The module source contains no repository, workflow or job name. | A guard-shaped ACID; cheap to enforce in plugin CI later. |
 
@@ -145,8 +161,8 @@ box around its executed jobs (the live layer decides).
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-machinery-nesting-1 | Every Job Has One Workflow | In Development | Every `workflow_job` in the scene has `data.parent` set to exactly one `github_workflow`, and every workflow to exactly one repository. | `resolveNesting` rejects multi-parent; the ACID asserts the outcome. |
-| req-github-core-machinery-nesting-2 | Nothing Outside github.com | In Development | Every non-badge node in the scene is a descendant of the `github_platform` node. | Tier nodes (apps, issuer) included — they sit inside github.com, outside the repository. |
+| req-github-core-machinery-nesting-1 | Every Job Has One Workflow | Implemented | Every `workflow_job` in the scene has `data.parent` set to exactly one `github_workflow`, and every workflow to exactly one repository. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. Probe: 30/30 jobs parented, 17/17 workflows parented. |
+| req-github-core-machinery-nesting-2 | Nothing Outside github.com | Implemented | Every non-badge node in the scene is a descendant of the `github_platform` node. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. Dependabot on the top tier inside github.com. |
 
 ---
 ### Stage Ranking
@@ -186,11 +202,11 @@ never placed at rank 0. Fixture: `A needs B`, `B needs A`, `C needs A` — all t
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-machinery-stages-1 | Three Ranks For The Gate | In Development | `product-lines` renders three columns: {setup, secret-scan}, {line, cold-boot, lean-boot, api-fuzz, rids}, {gate}. | Done-test; observed on a running instance. |
-| req-github-core-machinery-stages-2 | Sources Then Pipelines Then Outputs | In Development | Refs and rulesets, workflow boxes, and environments occupy three distinct stage columns in that order along the flow direction. | |
+| req-github-core-machinery-stages-1 | Three Ranks For The Gate | Implemented | `product-lines` renders three columns: {setup, secret-scan}, {line, cold-boot, lean-boot, api-fuzz, rids}, {gate}. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. gate ← {api-fuzz, cold-boot, lean-boot, line, rids} ← {setup, secret-scan}, right to left under rtl. |
+| req-github-core-machinery-stages-2 | Sources Then Pipelines Then Outputs | Implemented | Refs and rulesets, workflow boxes, and environments occupy three distinct stage columns in that order along the flow direction. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. Refs + rulesets right, workflow block centre, environment + placeholders left. |
 | req-github-core-machinery-stages-3 | Unresolved Is A Row | In Development | A fixture workflow whose job `needs` an absent job renders that job in the *unresolved* row and emits `machinery_unresolved_rank`. | Negative case; fixture, not live data. |
 | req-github-core-machinery-stages-5 | Unresolved Propagates | In Development | Fixture `A needs B`, `B needs A`, `C needs A`: A, B and C all render in the *unresolved* row; none is at rank 0. | Codex review finding on PR #32. |
-| req-github-core-machinery-stages-4 | Branches Collapse | In Development | A repository with more than `stack_refs_over` non-default, non-tag refs shows one deck with the true count on its chip. | *Observed*: tap carries dozens of session branches. |
+| req-github-core-machinery-stages-4 | Branches Collapse | Implemented | A repository with more than `stack_refs_over` non-default, non-tag refs shows one deck with the true count on its chip. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. One deck, chip reads 79; default branch and tags individual. Required the stack.js re-entrancy fix (tap#304). |
 
 ---
 ### Direction
@@ -217,7 +233,7 @@ the same picture at a different altitude.
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-machinery-flow-1 | Mirror Exactly | In Development | The same scene under `ltr` and `rtl` yields x positions negated about the repository box's centre, identical y positions, identical box sizes. | |
-| req-github-core-machinery-flow-2 | Default Is Right | In Development | With no `machinery.flow` key, sources render right of outputs. | |
+| req-github-core-machinery-flow-2 | Default Is Right | Implemented | With no `machinery.flow` key, sources render right of outputs. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. |
 
 ---
 ### Tiers Outside The Repository
@@ -243,7 +259,7 @@ Two tiers sit inside github.com but outside the repository box, on the cross axi
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-machinery-tiers-1 | Apps On Top | In Development | Every `github_app` in the scene renders above the repository box, inside github.com, with its `ENABLED_ON` edge visible. | *Observed*: 6 apps on the unified-systems-com grid. |
+| req-github-core-machinery-tiers-1 | Apps On Top | Implemented | Every `github_app` in the scene renders above the repository box, inside github.com, with its `ENABLED_ON` edge visible. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. Dependabot (the one app ENABLED_ON tap) above the account box; the five others hidden as unowned. |
 
 ---
 ### Unknowns Render As Unknowns
@@ -272,10 +288,10 @@ absence read as a finished answer.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-machinery-honesty-1 | Placeholder Present | In Development | With no `github_release` node for the repository, its outputs stage shows the `releases: not yet collected` placeholder; with one present for that repository it does not. | |
+| req-github-core-machinery-honesty-1 | Placeholder Present | Implemented | With no `github_release` node for the repository, its outputs stage shows the `releases: not yet collected` placeholder; with one present for that repository it does not. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. releases / artifacts / packages placeholders in the outputs stage. |
 | req-github-core-machinery-honesty-3 | Placeholder Scope Is The Box | In Development | Two repositories in one scene, only one holding a `github_release`: the other's placeholder remains. | Codex review finding on PR #32. |
 | req-github-core-machinery-honesty-4 | Producer Is Three-State | In Development | A job with no declared permissions at job or workflow level renders producer state *not observable*, not unmarked; a `write-all` fixture marks every job producer. | Codex review finding on PR #32. |
-| req-github-core-machinery-honesty-2 | Synthetic Is Marked | In Development | Every placeholder carries `_synthetic: true` and is absent from the status-badge population. | |
+| req-github-core-machinery-honesty-2 | Synthetic Is Marked | Implemented | Every placeholder carries `_synthetic: true` and is absent from the status-badge population. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. `_synthetic: true`; no badge population names a placeholder. |
 
 ---
 ### Consumer Contract
@@ -303,7 +319,7 @@ warnings named after the type (`machinery_missing_<type>`), never to a crash.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-machinery-consumer-1 | git-serious Renders It | In Development | The git-serious landing page renders the machinery view of the instance's primary repository via this module. | Observed on a running instance. |
+| req-github-core-machinery-consumer-1 | git-serious Renders It | Implemented | The git-serious landing page renders the machinery view of the instance's primary repository via this module. | Observed 2026-09-02 on the viz session (8020), git-serious landing against unified-systems-com/tap. git-serious landing v0.4.0 (node upserts: layout js_file, projection `machinery`, scoped node search). |
 
 ---
 ### The Live Layer
