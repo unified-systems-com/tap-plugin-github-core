@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import fnmatch
 import logging
+import re
 from datetime import datetime
 from typing import Any, ClassVar
 from urllib.parse import quote
@@ -134,11 +135,21 @@ _SITE_REQUIRED_CHECKS_UNOBSERVABLE = "d66c"
 _SITE_STATUS_CHECKS = "9409"
 _SITE_ACTION_REF_UNOBSERVABLE = "a288"
 _SITE_ACTION_REF_BUDGET = "c9a3"
+_SITE_ACTION_REF_MALFORMED = "45b3"
 
 #: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
 #: three calls against a repository that is NOT in scope; past the cap an edge lands as
 #: `resolution: not_attempted` and the run says how many, rather than spending the rate limit.
 _ACTION_REF_RESOLUTION_CAP = 400
+#: What may reach an authenticated API path from a workflow file's `uses:` line. The repository is
+#: exactly `owner/repo` (no dots-only segments, no extra segments) and the ref is a git refname
+#: fragment: no `..`, no leading/trailing `/`, no empty segment — a crafted `../../orgs/x` must fail
+#: HERE, never travel as a request (Grok seat on PR #67).
+_SAFE_REPOSITORY_RE = re.compile(r"^(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+$")
+_SAFE_REF_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.?(?:/|$))(?!.*//)[A-Za-z0-9_.@+/-]+(?<!/)$")
+#: An annotated tag may point at another tag object; peel that many levels before giving up.
+_TAG_PEEL_MAX_DEPTH = 3
+_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
 #: GitHub Actions' own App id — the integration that produces a workflow job's check run.
 _GITHUB_ACTIONS_INTEGRATION_ID = 15368
@@ -2536,6 +2547,18 @@ class GithubCollector(CollectorBase):
             result: tuple[str, str, str] = (PIN_UNRESOLVED, "", "not_attempted")
             state["cache"][key] = result
             return result
+        if not _SAFE_REPOSITORY_RE.match(repository_full_name) or not _SAFE_REF_RE.match(declared_ref):
+            # Not a shape GitHub itself would accept in `uses:`; it does not exist as written, and it
+            # never becomes a request path.
+            self.record_warn(
+                _SITE_ACTION_REF_MALFORMED,
+                "ACTION_REF_MALFORMED",
+                f"{repository_full_name}@{declared_ref}: not an `owner/repo` plus git refname; no lookup made.",
+                message_data={"action_repo": repository_full_name, "ref": declared_ref},
+            )
+            result = (PIN_UNRESOLVED, "", "unresolved")
+            state["cache"][key] = result
+            return result
         state["lookups"] += 1
         encoded = quote(declared_ref, safe="/")
         result = (PIN_UNRESOLVED, "", "unresolved")
@@ -2558,20 +2581,51 @@ class GithubCollector(CollectorBase):
             obj = payload.get("object") or {}
             sha = str(obj.get("sha") or "")
             if pin_kind == PIN_TAG and str(obj.get("type") or "") == "tag" and sha:
-                sha = self._peel_annotated_tag(client, repository_full_name, sha)
+                commit = self._peel_annotated_tag(client, repository_full_name, sha)
+                if commit is None:
+                    # The tag exists but its commit could not be established: say so. A tag OBJECT's
+                    # SHA is not what a runner checks out, and must not be recorded as if it were.
+                    self.record_warn(
+                        _SITE_ACTION_REF_UNOBSERVABLE,
+                        "ACTION_REF_UNOBSERVABLE_PEEL",
+                        f"{repository_full_name}@{declared_ref}: the tag is annotated and its commit could not be "
+                        f"read (refused, failed, or nested deeper than {_TAG_PEEL_MAX_DEPTH} tag objects); "
+                        f"pin kind is `tag`, resolved commit NOT observable.",
+                        message_data={"action_repo": repository_full_name, "ref": declared_ref},
+                    )
+                    result = (PIN_TAG, "", "unobservable")
+                    break
+                sha = commit
             result = (pin_kind, sha, "rest")
             break
         state["cache"][key] = result
         return result
 
-    def _peel_annotated_tag(self, client: GithubClient, repository_full_name: str, tag_sha: str) -> str:
-        """The commit behind an annotated tag object. On failure the tag object's own SHA is kept —
-        a real, immutable object in that repository, one level above the commit."""
-        try:
-            payload = client.get(f"/repos/{repository_full_name}/git/tags/{tag_sha}")
-        except GithubAPIError:
-            return tag_sha
-        return str(((payload.get("object") or {}).get("sha")) or tag_sha)
+    def _peel_annotated_tag(self, client: GithubClient, repository_full_name: str, tag_sha: str) -> str | None:
+        """The COMMIT behind an annotated tag object, or None when it cannot be established.
+
+        A tag object may point at another tag object; peel until `object.type == "commit"`, at most
+        `_TAG_PEEL_MAX_DEPTH` levels. A refused or failed read, a non-commit at the bottom, or a
+        SHA that is not 40-hex all return None — never the tag object's own SHA dressed as the
+        commit (Codex seat on PR #67).
+        """
+        sha = tag_sha
+        for _ in range(_TAG_PEEL_MAX_DEPTH):
+            if not _SHA40_RE.match(sha):
+                return None
+            try:
+                payload = client.get(f"/repos/{repository_full_name}/git/tags/{sha}")
+            except GithubAPIError:
+                return None
+            obj = payload.get("object") or {}
+            kind = str(obj.get("type") or "")
+            nxt = str(obj.get("sha") or "")
+            if kind == "commit" and _SHA40_RE.match(nxt):
+                return nxt
+            if kind != "tag" or not nxt:
+                return None
+            sha = nxt
+        return None
 
     def _refs_for(self, repository_full_name: str) -> dict[str, str] | None:
         """``{ref path: head sha}`` for an in-scope repository, or None when it is not in scope.

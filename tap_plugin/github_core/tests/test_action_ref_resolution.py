@@ -174,6 +174,64 @@ jobs:
         assert props["main"]["resolution"] == "in_scope" and props["main"]["pin_kind"] == "branch"
         assert client.calls == []
 
+    def test_a_failed_or_nested_peel_is_unobservable_not_a_tag_object_sha(self) -> None:
+        """Codex on PR #67: a tag object's SHA is not the commit a runner checks out. A refused
+        peel, a tag pointing at a tag beyond the depth guard, or a non-commit at the bottom all
+        land as `pin_kind: tag` with `resolution: unobservable` and no `resolved_sha`."""
+        t1, t2, t3, t4 = "1" * 40, "2" * 40, "3" * 40, "4" * 40
+        routes = {
+            "/repos/a/refused/git/ref/tags/v1": {"object": {"type": "tag", "sha": TAG_OBJ}},
+            f"/repos/a/refused/git/tags/{TAG_OBJ}": GithubAPIError(status=403, url="x", body="{}"),
+            "/repos/a/nested/git/ref/tags/v1": {"object": {"type": "tag", "sha": t1}},
+            f"/repos/a/nested/git/tags/{t1}": {"object": {"type": "tag", "sha": t2}},
+            f"/repos/a/nested/git/tags/{t2}": {"object": {"type": "commit", "sha": SHA_C}},
+            "/repos/a/deep/git/ref/tags/v1": {"object": {"type": "tag", "sha": t1}},
+            f"/repos/a/deep/git/tags/{t1}": {"object": {"type": "tag", "sha": t2}},
+            f"/repos/a/deep/git/tags/{t2}": {"object": {"type": "tag", "sha": t3}},
+            f"/repos/a/deep/git/tags/{t3}": {"object": {"type": "tag", "sha": t4}},
+            "/repos/a/blob/git/ref/tags/v1": {"object": {"type": "tag", "sha": t1}},
+            f"/repos/a/blob/git/tags/{t1}": {"object": {"type": "blob", "sha": t2}},
+        }
+        # Every case declares `v1`, so each runs alone (the helper keys edges by declared ref).
+        for action, expect in (("a/refused", None), ("a/nested", SHA_C)):
+            single = _uses_edges(_collector(), _StubClient(routes), f"on: push\njobs:\n  j:\n    steps:\n      - uses: {action}@v1\n")
+            got = single["v1"]
+            if expect is None:
+                assert got["pin_kind"] == "tag" and got["resolution"] == "unobservable" and "resolved_sha" not in got
+            else:
+                assert got["resolution"] == "rest" and got["resolved_sha"] == expect
+        for action in ("a/deep", "a/blob"):
+            got = _uses_edges(_collector(), _StubClient(routes), f"on: push\njobs:\n  j:\n    steps:\n      - uses: {action}@v1\n")["v1"]
+            assert got["resolution"] == "unobservable" and "resolved_sha" not in got
+        c2 = _collector()
+        _uses_edges(c2, _StubClient(routes), "on: push\njobs:\n  j:\n    steps:\n      - uses: a/refused@v1\n")
+        assert ("warn", "ACTION_REF_UNOBSERVABLE_PEEL") in c2.records
+
+    def test_a_crafted_repository_or_ref_never_becomes_a_request(self) -> None:
+        """Grok on PR #67: `uses:` is untrusted text from a workflow file. A repository that is not
+        exactly `owner/repo`, or a ref carrying `..`, an empty segment or a leading slash, is
+        `unresolved` without any call — it cannot exist as written and must not travel."""
+        c = _collector()
+        client = _StubClient(_ROUTES)
+        yaml_text = """\
+on: push
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ../x/y@v1
+      - uses: actions/checkout@../../orgs/victim
+      - uses: actions/checkout@/leading
+      - uses: actions/checkout@a//b
+      - uses: actions/checkout@release/v4
+"""
+        props = _uses_edges(c, client, yaml_text)
+        for bad in ("../../orgs/victim", "/leading", "a//b"):
+            assert props[bad]["resolution"] == "unresolved" and props[bad]["pin_kind"] == "unresolved"
+        assert all("/orgs/" not in call and "/../" not in call for call in client.calls)
+        assert client.calls.count("/repos/actions/checkout/git/ref/tags/release/v4") == 1
+        assert c.records.count(("warn", "ACTION_REF_MALFORMED")) >= 4
+
     def test_the_tally_counts_rest_states_separately(self) -> None:
         c = _collector()
         _uses_edges(c, _StubClient(_ROUTES), _WORKFLOW)
