@@ -1,0 +1,41 @@
+{
+  "slug": "REQUIRES_CHECK__github_core",
+  "name": "Requires Check",
+  "description": "A ruleset requires a status-check context to pass before a matching ref can move (`required_status_checks` rule parameters). The properties say from which integration and how strictly; the ruleset's own enforcement stays on the ruleset node rather than being copied here. Derived from the REST ruleset detail, which is administration-gated: a refused detail yields NO edge and is counted as not observable, never as a ruleset with no required checks.",
+  "sources": [
+    "github_core__github_ruleset"
+  ],
+  "targets": [
+    "github_core__status_check"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "rules",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "required": [
+      "strict",
+      "do_not_enforce_on_create"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "integration_id": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "description": "The GitHub App that must produce the check (15368 is GitHub Actions itself). null means any source may satisfy it — which is a weaker gate, and the reason this is carried explicitly rather than defaulted."
+      },
+      "strict": {
+        "type": "boolean",
+        "description": "`strict_required_status_checks_policy`: the branch must be up to date with the base before merging, so the check ran against what will actually land."
+      },
+      "do_not_enforce_on_create": {
+        "type": "boolean",
+        "description": "The rule is not enforced when the ref is created — a window a fresh branch passes through unchecked."
+      }
+    }
+  }
+}

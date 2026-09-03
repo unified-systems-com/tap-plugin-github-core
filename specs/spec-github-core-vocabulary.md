@@ -76,7 +76,7 @@ neutral substrate when one is extracted, not in `github_core`.
 | `github_actions_job` | yes | self | exists | the *executed* job. Slug retained (slugs are identity and never rename); its relationship to `workflow_job` is stated below |
 | **`git_ref`** | **yes** | **self** | **reshaped** | 12 sources. Replaces the never-built `git_branch`: branch **and tag** in one type, because tag movement is the detection for three incidents and rulesets already target `branch\|tag\|push` |
 | `github_ruleset` | no | self | proposed | 7 sources; the gate itself |
-| `status_check` | no | self | proposed | 6 sources; convergence node — required by rulesets, produced by workflows/apps |
+| `status_check` | no | self | **exists** (2026-09-02, #61) | 6 sources; convergence node — required by rulesets, produced by workflows/apps. Keyed `<owner>#<context>`; **a check nobody requires has no node** (every job produces one; the node is the requirement's target). The App producer waits on the App's numeric id |
 | `github_action` | no | self | **exists** (2026-09-02, #45) | 4 sources, and one carries `is_pinned` — the same property we proposed independently. Keyed on the action path, platform-global; the pin lives on the edge |
 | `actions_secret` | partial | self | proposed | **11 sources**; 12 incidents |
 | **`actions_cache`** | neutral-capable | **self** | **new** | 5 incidents including the two most recent. Convergence node: written by a low-trust job, restored by a privileged one |
@@ -120,8 +120,8 @@ properties must justify why it needs none.
 | `INSTANCE_OF_JOB` | actions_job → workflow_job | friends | new | `{run_attempt}` — the declaration↔execution bridge |
 | **`HAS_REF`** | repository → git_ref | self | new | — (drift lives in the ref's `head_sha` field history) |
 | **`BYPASSES`** | account\|team\|app → ruleset | self | new | `{actor_type, bypass_mode, observable, source}` — **`observable: false` distinguishes "nobody can bypass" from "we cannot see"**, which a blank cell cannot |
-| `REQUIRES_CHECK` | ruleset → status_check | self | proposed | `{enforcement}` |
-| `PRODUCES_CHECK` | workflow\|app → status_check | self | proposed | `{confidence}` — honest about inference |
+| `REQUIRES_CHECK` | ruleset → status_check | self | **exists** (2026-09-02, #61) | `{integration_id, strict, do_not_enforce_on_create}` — the rule's own qualifiers. **`enforcement` dropped**: it is a field on the ruleset node, and a copy would disagree the day a ruleset is switched to evaluate. Shape E: a refused detail is counted as not observable, never as no requirement |
+| `PRODUCES_CHECK` | workflow → status_check (app: follow-on) | self | **exists** (2026-09-02, #61) | `{job_key, job_name, confidence ∈ exact \| matrix_template}` — honest about inference; derived from job display names only where the requirement admits an Actions check (`integration_id` null or 15368) |
 | `USES_ACTION` | workflow_job → github_action | self | **exists** (2026-09-02, #45) | `{declared_ref, pin_kind, is_pinned, resolved_sha, resolution, step_indexes}` — pinned by SHA, digest, tag or branch, **or `unresolved`**: tag-versus-branch is not observable from the string, and is resolved only when the action's repository is in scope (`resolution` says which). `resolves_to_fork` dropped — needs the fork graph, not derivable; named in the article |
 | **`REFERENCES_SECRET`** | workflow_job → actions_secret | self | proposed | `{step_index, trigger_events, checks_out_pr_head, interpolates_into_run, top_level_permissions}` — **the adjudication properties**: shape versus exploitability |
 | **`WRITES_CACHE`** / **`RESTORES_CACHE`** | workflow_job → actions_cache | self | new | `{step_index, ref_scope, fork_reachable}` / `{step_index, ref_scope, privileged}` — is the writer reachable by an outsider, does the reader hold publish rights |

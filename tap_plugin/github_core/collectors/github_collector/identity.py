@@ -93,6 +93,16 @@ def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     return _id("github_core__github_ruleset", f"{owner}#{ruleset_id_int}")
 
 
+def status_check_id(owner: str, context: str) -> UUID:
+    """A required check context, keyed on the owner and the context string.
+
+    Owner-scoped like `ruleset_id`: an organization ruleset requires the same context across
+    every repository it protects, and one node with fan-in is the whole point. The context is
+    kept exactly as written — check names are case-sensitive on GitHub.
+    """
+    return _id("github_core__status_check", f"{owner}#{context}")
+
+
 def rule_suite_id(suite_id_int: int | str) -> UUID:
     """A rule suite, keyed on GitHub's own suite id — unique across the platform.
 

@@ -21,3 +21,7 @@ GitHub itself uses for a run's uploaded artifacts — with the same padded viewB
 
 git-commit.svg is derived from the Octicons `git-commit` glyph at v19.15.1, with the same
 padded viewBox, explicit #1f2328 fill and <title> as the rest of the derived set.
+
+status-check.svg is derived from the Octicons `check-circle` glyph at v19.15.1 — the glyph
+GitHub renders beside a passing required check — with the same padded viewBox, explicit
+#1f2328 fill and <title> as the rest of the derived set.
