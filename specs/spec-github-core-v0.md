@@ -76,6 +76,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-actions-used | [Actions Used](#actions-used) | In Development | 2026-09-02 (github-core#45, ranked first by `build-github-corpus`): `github_action` node keyed on the action path, shared across the scope, plus `USES_ACTION` carrying the pin. The parser no longer labels every non-SHA ref `tag`; a mutable name is resolved only against an in-scope repository's refs and is otherwise `unresolved` / `unobservable`. |
+| req-github-core-workflow-chains | [Workflow Chains](#workflow-chains) | In Development | 2026-09-02 (github-core#29, #52): `CALLS_WORKFLOW` (job → reusable workflow, the `USES_ACTION` pin grammar + `secrets_inherit`) and `TRIGGERS_WORKFLOW` (completing → triggered, from `on.workflow_run`), both resolved in a post-pass over the whole scope; an unresolved callee or name is recorded on the node, never fabricated. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -531,6 +532,50 @@ the corpus's next items on this surface and are not built here.
 | req-github-core-actions-used-3 | A Name Is Never Called A Tag Without Evidence | In Development | A non-SHA ref parses as `unresolved`; it becomes `tag` or `branch` only by matching the in-scope repository's refs, and is `unobservable` when that repository is out of scope. | Asserted at the parser and the collector. |
 | req-github-core-actions-used-4 | Docker Steps Are Actions Too | In Development | `docker://image[:tag|@sha256:digest]` lands as a `kind: docker` node; a digest is `digest` and pinned, an image tag is `tag` and not. | |
 | req-github-core-actions-used-5 | The Run Says What It Saw | In Development | The run records the distinct-action count, the usage count, how many usages were unpinned and how many of those were unobservable, so a zero reads as a count and not a silence. | `ACTIONS_USED`. |
+
+### Workflow Chains
+----
+RID: `req-github-core-workflow-chains`
+Status: `In Development`
+
+Two ways one workflow reaches another, both declared in YAML, both invisible until this wave. A
+**reusable-workflow call** (`jobs.<id>.uses: owner/repo/.github/workflows/x.yml@ref`, or the
+same-repository `./` form) brings another file's jobs, runners and permissions into the caller's
+run and receives whatever secrets the caller passes — every one of them under `secrets: inherit`.
+A **`workflow_run` trigger** (`on: workflow_run: workflows: [<name>]`) fires one workflow on the
+completion of another, in base-repository context, which is GitHub's own recommended shape for
+handling untrusted input and therefore the edge along which a fork's output reaches a workflow that
+holds secrets (github-core#29, #52).
+
+`CALLS_WORKFLOW` sources from the **job**, not the workflow the corpus row named: the call is written
+on the job, the job carries the `permissions` and `secrets` every privilege question needs, and two
+jobs in one file may call two workflows. It carries the `USES_ACTION` pin grammar
+(`req-github-core-actions-used-3`) — a same-repository call is `pin_kind: local`, pinned by
+construction — plus `same_repository` and `secrets_inherit`. `TRIGGERS_WORKFLOW` points from the
+completing workflow to the triggered one (the initiator is the source), resolves display names
+within the repository only, fans out to every workflow sharing the name, and carries `types`,
+`branches` and `branches-ignore` **only as written** — GitHub's `types` default is not filled in.
+The corpus's `conclusion_filter` is not carried: GitHub has no such key, and reading the check out
+of job `if:` expressions would be a guess.
+
+**Resolution is a post-pass**, after every repository in scope is walked, because a callee is named
+by path in a repository that may be walked later, and workflow nodes are keyed on GitHub's numeric
+id. A callee or a name that resolves to nothing produces **no edge and no invented node**; the state
+is recorded on the node the absence is about — `workflow_job.configuration.call_resolution` ∈
+`resolved | unresolved_in_scope | out_of_scope`, `github_workflow.configuration.trigger_resolution`
+— and the run reports the counts (`WORKFLOW_CALLS`, `WORKFLOW_TRIGGERS`). At repos-only scope every
+cross-repository call is `out_of_scope`, and the summary is what keeps that from reading as an estate
+without reusable workflows.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-workflow-chains-1 | Calls Resolve Across The Scope | In Development | A job-level `uses:` naming a workflow collected anywhere in the scope becomes `CALLS_WORKFLOW` job → workflow, resolved after the full walk. | |
+| req-github-core-workflow-chains-2 | An Unresolved Callee Is Recorded, Not Invented | In Development | A callee not on the grid yields no edge and no node; the job's `configuration.call_resolution` states `unresolved_in_scope` or `out_of_scope`, and the run counts both. | Three states, never two. |
+| req-github-core-workflow-chains-3 | The Call Carries Its Pin And Its Secrets Posture | In Development | The edge states `declared_ref`, `pin_kind` (incl. `local`), `is_pinned`, `resolution`, `same_repository`, `secrets_inherit`, and `resolved_sha` when known; the calling job's configuration lists the named secrets passed. Names only, never values. | Pin grammar shared with `USES_ACTION`. |
+| req-github-core-workflow-chains-4 | Triggers Point The Way The Event Flows | In Development | `on.workflow_run.workflows` on B yields `TRIGGERS_WORKFLOW` A → B for every workflow A in the same repository whose stored display name matches; an unmatched name lands on B's `configuration.trigger_resolution` and warns. | |
+| req-github-core-workflow-chains-5 | Filters As Written Only | In Development | `types`, `branches`, `branches_ignore` appear on the edge only when the file declares them; GitHub's defaults are never written. | |
 
 ### Refs
 ----

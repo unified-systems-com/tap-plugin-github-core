@@ -1,0 +1,163 @@
+{
+  "slug": "CALLS_WORKFLOW__github_core",
+  "name": "Calls Workflow",
+  "description": "A declared job calls a reusable workflow (`jobs.<id>.uses: owner/repo/.github/workflows/x.yml@ref`, or `./.github/workflows/x.yml`). The callee brings its own jobs, runners and permissions and receives whatever secrets the caller passes — every one of them under `secrets: inherit`. The pin says whether the caller runs the workflow it reviewed or whatever a name points at today. Emitted only when the callee is on the grid; an unresolved call is recorded on the calling job, never as a fabricated node.",
+  "sources": [
+    "github_core__workflow_job"
+  ],
+  "targets": [
+    "github_core__github_workflow"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "required": [
+      "declared_ref",
+      "pin_kind",
+      "is_pinned",
+      "resolution",
+      "same_repository",
+      "secrets_inherit"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "declared_ref": {
+        "type": "string",
+        "description": "The ref as written after `@`; empty for a same-repository call, which takes no ref."
+      },
+      "pin_kind": {
+        "type": "string",
+        "enum": [
+          "sha",
+          "tag",
+          "branch",
+          "unresolved",
+          "unpinned",
+          "local"
+        ],
+        "description": "`sha` proves itself. `tag` / `branch` only when resolved against the callee repository's refs (in scope). `unresolved` is a mutable name the collector could not classify. `local` is a same-repository call, which runs at the caller's own commit and cannot be repointed independently. `unpinned` is a cross-repository call with no ref, which GitHub rejects but a file can still contain."
+      },
+      "is_pinned": {
+        "type": "boolean",
+        "description": "True iff the callee cannot move under the caller: `sha` or `local`."
+      },
+      "resolved_sha": {
+        "type": "string",
+        "description": "The commit the ref resolved to at collection time — the SHA itself, or an in-scope ref's head. Absent when unobservable. Its field history across collections is the drift detection for a `@main` call."
+      },
+      "resolution": {
+        "type": "string",
+        "enum": [
+          "literal",
+          "in_scope",
+          "unobservable"
+        ],
+        "description": "How the pin was established: read off the string; matched against refs of the callee's repository already held; or not looked up because that repository is outside the observed scope."
+      },
+      "same_repository": {
+        "type": "boolean",
+        "description": "The `./` form: callee and caller are one repository. Distinguishes a call whose callee moves with the caller from one whose callee is someone else's file."
+      },
+      "secrets_inherit": {
+        "type": "boolean",
+        "description": "`secrets: inherit` — the caller passes EVERY secret it holds to the callee. The single property that turns a reusable-workflow call into the untrusted→privileged handoff the incident corpus describes. Named secrets, when passed instead, are listed on the calling job's configuration."
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "pin_kind": {
+              "enum": [
+                "sha",
+                "local"
+              ]
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "is_pinned": {
+              "const": true
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "is_pinned": {
+              "const": false
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "pin_kind": {
+              "const": "local"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "same_repository": {
+              "const": true
+            },
+            "declared_ref": {
+              "const": ""
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "pin_kind": {
+              "enum": [
+                "tag",
+                "branch"
+              ]
+            },
+            "resolution": {
+              "const": "in_scope"
+            }
+          },
+          "required": [
+            "resolution"
+          ]
+        },
+        "then": {
+          "required": [
+            "resolved_sha"
+          ]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "resolution": {
+              "const": "unobservable"
+            }
+          }
+        },
+        "then": {
+          "not": {
+            "required": [
+              "resolved_sha"
+            ]
+          },
+          "properties": {
+            "pin_kind": {
+              "const": "unresolved"
+            }
+          }
+        }
+      }
+    ],
+    "description": "The pin and the secrets posture, with their internal consistency enforced as on USES_ACTION: `is_pinned` is derived from `pin_kind` (`sha` or `local`), a `local` call is same-repository with no ref by construction, an `unobservable` resolution can only be `unresolved` with no `resolved_sha`, and an in-scope tag or branch must say what it resolved to."
+  }
+}

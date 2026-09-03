@@ -396,6 +396,18 @@
       "source": "github_core__workflow_job",
       "target": "github_core__github_action",
       "condition": "a step's `uses:` names a non-local action; one edge per (job, action, declared ref)"
+    },
+    {
+      "slug": "CALLS_WORKFLOW__github_core",
+      "source": "github_core__workflow_job",
+      "target": "github_core__github_workflow",
+      "condition": "a job-level `uses:` names a workflow file that is on the grid (post-pass over the whole scope); an unresolved call is recorded on the job as `call_resolution`"
+    },
+    {
+      "slug": "TRIGGERS_WORKFLOW__github_core",
+      "source": "github_core__github_workflow",
+      "target": "github_core__github_workflow",
+      "condition": "the target's `on.workflow_run.workflows` names the source's display name, same repository only; an unmatched name is recorded on the target as `trigger_resolution`"
     }
   ]
 }

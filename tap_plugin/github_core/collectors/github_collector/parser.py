@@ -45,7 +45,9 @@ def parse_workflow_yaml(raw_yaml: str) -> dict[str, Any]:
         }
 
     # YAML 1.1 gotcha: `on:` parses as boolean `True`. Check both keys.
-    triggers = _extract_triggers(parsed.get("on", parsed.get(True)))
+    on_block = parsed.get("on", parsed.get(True))
+    triggers = _extract_triggers(on_block)
+    workflow_run = _extract_workflow_run(on_block)
     permissions = _normalize_permissions(parsed.get("permissions"))
     jobs = [_extract_job(job_id, job_def) for job_id, job_def in (parsed.get("jobs") or {}).items()]
     refs = _categorize_refs(parsed)
@@ -54,11 +56,41 @@ def parse_workflow_yaml(raw_yaml: str) -> dict[str, Any]:
     return {
         "raw_yaml": raw_yaml,
         "triggers": triggers,
+        "workflow_run": workflow_run,
         "permissions": permissions,
         "jobs": jobs,
         "refs": refs,
         "local_action_refs": local_action_refs,
     }
+
+
+def _extract_workflow_run(on_block: Any) -> dict[str, Any] | None:
+    """The `on: workflow_run:` block — which workflows' completion fires this one.
+
+    Kept apart from the flat trigger list because it names OTHER workflows, which is the
+    `TRIGGERS_WORKFLOW` input. Only the keys the author wrote are carried: GitHub defaults
+    `types` to `[requested, completed]` when absent, and filling that in here would record a
+    declaration the file does not make. Returns None when the workflow has no such trigger.
+    """
+    if not isinstance(on_block, dict) or "workflow_run" not in on_block:
+        return None
+    block = on_block.get("workflow_run")
+    block = block if isinstance(block, dict) else {}
+    out: dict[str, Any] = {"workflows": _string_list(block.get("workflows"))}
+    for key in ("types", "branches", "branches-ignore"):
+        if key in block:
+            out[key.replace("-", "_")] = _string_list(block.get(key))
+    return out
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(x) for x in value]
+    return [str(value)]
 
 
 def _extract_triggers(on_block: Any) -> list[str]:
@@ -103,6 +135,9 @@ def _extract_job(job_id: str, job_def: Any) -> dict[str, Any]:
             "environment": "",
             "needs": [],
             "uses": "",
+            "workflow_call": None,
+            "secrets_inherit": False,
+            "secrets_passed": [],
             "checkout_ref": "",
             "cache_steps": [],
             "action_refs": [],
@@ -122,6 +157,15 @@ def _extract_job(job_id: str, job_def: Any) -> dict[str, Any]:
         "environment": _environment_name(job_def.get("environment")),
         "needs": [str(n) for n in needs],
         "uses": str(job_def.get("uses") or ""),
+        # A job-level `uses:` is always a reusable-workflow call (an action cannot be used at
+        # the job level), so the split is unconditional when the string is present.
+        "workflow_call": split_workflow_call(str(job_def.get("uses") or "")),
+        # `secrets: inherit` hands EVERY secret of the caller to the callee — the property that
+        # turns a reusable-workflow call into the untrusted→privileged handoff. A mapping passes
+        # named secrets; only the NAMES are kept (the values are `${{ secrets.X }}` expressions,
+        # never material, but nothing here should ever be tempted to store one).
+        "secrets_inherit": job_def.get("secrets") == "inherit",
+        "secrets_passed": sorted(str(k) for k in job_def["secrets"]) if isinstance(job_def.get("secrets"), dict) else [],
         "checkout_ref": _checkout_ref(steps),
         "cache_steps": _cache_steps(steps),
         "action_refs": _action_refs(steps),
@@ -342,9 +386,44 @@ def _git_pin_kind(ref: str) -> str:
     return PIN_UNRESOLVED
 
 
+#: A same-repository reusable-workflow call (`./.github/workflows/x.yml`): no ref is written and
+#: none can be — it runs at the caller's own commit, so it cannot be repointed independently.
+PIN_LOCAL = "local"
+
+
 def is_pinned(pin_kind: str) -> bool:
-    """The one-bit answer every action-pinning control asks: immutable, or a name someone else keeps."""
-    return pin_kind in (PIN_SHA, PIN_DIGEST)
+    """The one-bit answer every pinning control asks: immutable, or a name someone else keeps."""
+    return pin_kind in (PIN_SHA, PIN_DIGEST, PIN_LOCAL)
+
+
+def split_workflow_call(uses: str) -> dict[str, Any] | None:
+    """Split a job-level `uses:` — a reusable-workflow call — into callee identity and pin.
+
+    Two written forms (GitHub's `jobs.<job_id>.uses`): `./.github/workflows/x.yml` for a
+    workflow in the same repository, which takes no ref and runs at the caller's commit; and
+    `owner/repo/.github/workflows/x.yml@ref` for another repository's, which requires one.
+    Returns None for an empty string. The pin grammar is `split_uses`'s: a SHA is `sha`, a
+    name is `unresolved` until the collector can match it against in-scope refs.
+    """
+    if not uses:
+        return None
+    if uses.startswith("./"):
+        return {
+            "same_repository": True,
+            "repository_full_name": "",
+            "path": uses[2:],
+            "ref": "",
+            "pin_kind": PIN_LOCAL,
+        }
+    spec, _, ref = uses.partition("@")
+    parts = spec.split("/")
+    return {
+        "same_repository": False,
+        "repository_full_name": "/".join(parts[:2]) if len(parts) >= 2 else "",
+        "path": "/".join(parts[2:]),
+        "ref": ref,
+        "pin_kind": _git_pin_kind(ref),
+    }
 
 
 def _detect_local_action_refs(jobs: list[dict[str, Any]]) -> list[dict[str, str]]:

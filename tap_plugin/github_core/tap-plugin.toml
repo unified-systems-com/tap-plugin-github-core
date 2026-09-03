@@ -51,6 +51,8 @@ SCOPED_TO__github_core = "edges/SCOPED_TO.edge.json"
 HAS_INSTALLATION__github_core = "edges/HAS_INSTALLATION.edge.json"
 INSTALLED_ON__github_core = "edges/INSTALLED_ON.edge.json"
 USES_ACTION__github_core = "edges/USES_ACTION.edge.json"
+CALLS_WORKFLOW__github_core = "edges/CALLS_WORKFLOW.edge.json"
+TRIGGERS_WORKFLOW__github_core = "edges/TRIGGERS_WORKFLOW.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"
