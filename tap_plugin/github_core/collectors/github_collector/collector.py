@@ -48,6 +48,7 @@ from .identity import (
     git_ref_id,
     github_app_id,
     job_id,
+    github_action_id,
     platform_id,
     repository_id,
     ruleset_id,
@@ -55,11 +56,19 @@ from .identity import (
     run_id,
     ruleset_id,
     runner_id,
+    uses_action_edge_id,
     workflow_id,
     workflow_job_id,
 )
 from .manifest import load_collection_manifest, load_link_manifest
-from .parser import parse_workflow_yaml
+from .parser import (
+    PIN_BRANCH,
+    PIN_SHA,
+    PIN_TAG,
+    PIN_UNRESOLVED,
+    is_pinned,
+    parse_workflow_yaml,
+)
 from .secret import (
     GITHUB_SECRET_REF,
     api_base_url,
@@ -107,6 +116,28 @@ _SITE_INSTALLATIONS_UNREACHABLE = "1825"
 _SITE_INSTALLATIONS_COLLECTED = "c3d0"
 _SITE_BYPASS_ACTOR_UNMODELLED = "5dd2"
 _SITE_AUTH_MODE = "3e4d"
+_SITE_ACTION_REF_NOT_FOUND = "de95"
+_SITE_ACTIONS_USED = "13f5"
+
+#: The dimension keys that scope an envelope to ONE repository. Stripped from a node shared
+#: across the scope (an action, an app), kept on the edges that use it.
+_REPO_SCOPED_DIMENSION_KEYS = ("github.owner", "github.repo")
+
+
+def _group_action_calls(action_refs: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    """Fold a job's per-step action refs into one entry per (action path, declared ref).
+
+    Two steps calling the same action at the same ref are one relationship with two positions;
+    the same action at two refs is two relationships.
+    """
+    by_call: dict[tuple[str, str], dict[str, Any]] = {}
+    for ref in action_refs:
+        action_path = str(ref.get("action_path") or ref.get("action") or "")
+        if not action_path:
+            continue
+        entry = by_call.setdefault((action_path, str(ref.get("ref") or "")), {**ref, "step_indexes": []})
+        entry["step_indexes"].append(int(ref.get("step_index", 0)))
+    return by_call
 
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
 # list under synthetic ``dynamic/<app>/...`` paths. These are not repo CI
@@ -560,6 +591,13 @@ class GithubCollector(CollectorBase):
         # purpose: one repository's default is `main` and another's is `master`, and a bare ref
         # path would let the first repo's default mark the second repo's same-named branch.
         self._default_refs: set[str] = set()
+        # Refs of an in-scope repository, `ref path -> head sha`, built on first demand from the
+        # config layer already in hand. What lets `uses: acme/tool@main` be resolved to a branch
+        # and a commit without a request, and what leaves `actions/checkout@v4` honestly
+        # unresolved: that repository is not in scope, and nothing here goes looking.
+        self._refs_by_repo: dict[str, dict[str, str]] = {}
+        #: Run-level tally for the actions summary, so a run can say what it saw.
+        self._action_usage: dict[str, Any] = {"actions": set(), "edges": 0, "unpinned": 0, "unobservable": 0}
 
         # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope)
         owner = collection_owner(data)
@@ -707,6 +745,22 @@ class GithubCollector(CollectorBase):
             _SITE_BATCH_SUBMITTED,
             "COLLECTION_BATCH_SUBMITTED",
             f"Submitted collection batch with {len(nodes)} node(s) + {len(edges)} edge(s).",
+        )
+        usage = self._usage_tally()
+        self.record_info(
+            _SITE_ACTIONS_USED,
+            "ACTIONS_USED",
+            f"{len(usage['actions'])} distinct action(s) across {usage['edges']} job usage(s); "
+            f"{usage['unpinned']} usage(s) pinned to a mutable name or nothing, of which "
+            f"{usage['unobservable']} could not be resolved because the action lives outside the "
+            f"observed scope. A zero here with workflows in scope means no `uses:` lines, not a "
+            f"clean bill — check the workflow count.",
+            message_data={
+                "actions": len(usage["actions"]),
+                "usages": usage["edges"],
+                "unpinned": usage["unpinned"],
+                "unobservable": usage["unobservable"],
+            },
         )
 
         # --- enrichment phase (link resolution against landed nodes) ---
@@ -1798,6 +1852,8 @@ class GithubCollector(CollectorBase):
                         {**declared_dims, "github.surface": "deployments"},
                     )
                 )
+            # The third-party code this job hands its token to, and how each call is pinned.
+            self._emit_used_actions(full_name, job_uuid, job.get("action_refs") or [], declared_dims, nodes, edges)
         # `needs:` — emitted after every job in the file has an id, because a job may need one
         # declared below it.
         for job in jobs:
@@ -1820,6 +1876,152 @@ class GithubCollector(CollectorBase):
                         properties={"condition": str(job.get("if") or "")},
                     )
                 )
+
+    def _emit_used_actions(
+        self,
+        full_name: str,
+        job_uuid: Any,
+        action_refs: list[dict[str, Any]],
+        usage_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """One `github_action` per distinct path, one `USES_ACTION` per (job, action, ref).
+
+        The node is shared across the whole run (deterministic id; envelope collapse keeps one
+        copy) and carries NO owner/repo dimension, because `actions/checkout` belongs to no one
+        repository in scope. The edge keeps the calling repository's dimensions: the usage is
+        that repository's fact. The pin lives on the edge — it is a fact about this job's call,
+        and the same action is pinned differently by different jobs.
+        """
+        action_dims = {k: v for k, v in usage_dims.items() if k not in _REPO_SCOPED_DIMENSION_KEYS}
+        for (action_path, declared_ref), call in sorted(_group_action_calls(action_refs).items()):
+            action_uuid = github_action_id(action_path)
+            nodes.append(self._action_node(action_uuid, action_path, call, action_dims))
+            properties = self._uses_action_properties(full_name, call, declared_ref)
+            edges.append(
+                edge_envelope(
+                    entity_id=uses_action_edge_id(job_uuid, action_uuid, declared_ref),
+                    edge_type="USES_ACTION__github_core",
+                    source_id=job_uuid,
+                    target_id=action_uuid,
+                    dimensions=usage_dims,
+                    properties=properties,
+                )
+            )
+            self._tally_usage(action_path, properties)
+
+    @staticmethod
+    def _action_node(action_uuid: Any, action_path: str, call: dict[str, Any], dims: dict[str, str]) -> dict[str, Any]:
+        return node_envelope(
+            entity_id=action_uuid,
+            entity_type="github_core__github_action",
+            name=action_path,
+            dimensions=dims,
+            fields={
+                "action_path": action_path,
+                "kind": str(call.get("kind") or "repository"),
+                "owner": str(call.get("owner") or ""),
+                "repository_full_name": str(call.get("repository_full_name") or ""),
+                "subpath": str(call.get("subpath") or ""),
+                "name": action_path,
+                "configuration": {},
+                "tags": {},
+            },
+        )
+
+    def _uses_action_properties(self, full_name: str, call: dict[str, Any], declared_ref: str) -> dict[str, Any]:
+        """The pin, in three states — see `_resolve_action_pin`."""
+        pin_kind, resolved_sha, resolution = self._resolve_action_pin(
+            full_name,
+            str(call.get("kind") or ""),
+            str(call.get("repository_full_name") or ""),
+            declared_ref,
+            str(call.get("pin_kind") or ""),
+        )
+        properties: dict[str, Any] = {
+            "declared_ref": declared_ref,
+            "pin_kind": pin_kind,
+            "is_pinned": is_pinned(pin_kind),
+            "resolution": resolution,
+            "step_indexes": sorted(call["step_indexes"]),
+        }
+        if resolved_sha:
+            properties["resolved_sha"] = resolved_sha
+        return properties
+
+    def _tally_usage(self, action_path: str, properties: dict[str, Any]) -> None:
+        usage = self._usage_tally()
+        usage["actions"].add(action_path)
+        usage["edges"] += 1
+        if not properties["is_pinned"]:
+            usage["unpinned"] += 1
+        if properties["resolution"] == "unobservable":
+            usage["unobservable"] += 1
+
+    def _resolve_action_pin(
+        self, full_name: str, kind: str, repository_full_name: str, declared_ref: str, parsed_pin: str
+    ) -> tuple[str, str, str]:
+        """Upgrade a parsed pin to what the collector can PROVE: ``(pin_kind, resolved_sha, resolution)``.
+
+        Three states, never two. `literal`: the string settles it (a SHA, a digest, an image
+        tag, nothing written). `in_scope`: the action's repository is in the observed scope, so
+        its refs are in hand and the name is a `tag` or a `branch` with a head commit — or it
+        matches neither, which stays `unresolved` and is warned about. `unobservable`: the
+        repository is outside the scope and no call was made; the absence of a resolved SHA
+        here is not evidence of anything and must not render as one.
+        """
+        if parsed_pin != PIN_UNRESOLVED or kind != "repository":
+            return parsed_pin, declared_ref if parsed_pin == PIN_SHA else "", "literal"
+        refs = self._refs_for(repository_full_name)
+        if refs is None:
+            return PIN_UNRESOLVED, "", "unobservable"
+        tag_sha = refs.get(f"refs/tags/{declared_ref}")
+        if tag_sha is not None:
+            return PIN_TAG, tag_sha, "in_scope"
+        branch_sha = refs.get(f"refs/heads/{declared_ref}")
+        if branch_sha is not None:
+            return PIN_BRANCH, branch_sha, "in_scope"
+        self.record_warn(
+            _SITE_ACTION_REF_NOT_FOUND,
+            "ACTION_REF_NOT_FOUND",
+            f"{full_name} uses {repository_full_name}@{declared_ref}, whose repository is in scope "
+            f"but carries no tag or branch by that name among the refs collected — a deleted ref, "
+            f"or one beyond the ref page cap. Left unresolved rather than guessed.",
+            message_data={"repo": full_name, "action_repo": repository_full_name, "ref": declared_ref},
+        )
+        return PIN_UNRESOLVED, "", "in_scope"
+
+    def _usage_tally(self) -> dict[str, Any]:
+        """The run's action tally, created on first touch.
+
+        Lazy rather than set in `run()` alone because the per-repo walk is exercised directly by
+        tests that build the collector without running it, and a tally that only exists after
+        `run()` would make every such walk raise on its first `uses:` line.
+        """
+        tally = getattr(self, "_action_usage", None)
+        if tally is None:
+            tally = {"actions": set(), "edges": 0, "unpinned": 0, "unobservable": 0}
+            self._action_usage = tally
+        return tally
+
+    def _refs_for(self, repository_full_name: str) -> dict[str, str] | None:
+        """``{ref path: head sha}`` for an in-scope repository, or None when it is not in scope.
+
+        Built from the config layer already fetched, so resolution costs no request. None and
+        an empty dict are different answers: None is "cannot look", {} is "looked, none".
+        """
+        gql = getattr(self, "_config", {}).get(repository_full_name)
+        if gql is None:
+            return None
+        by_repo: dict[str, dict[str, str]] = getattr(self, "_refs_by_repo", None) or {}
+        self._refs_by_repo = by_repo
+        cached = by_repo.get(repository_full_name)
+        if cached is None:
+            refs, _truncated = GithubGraphQLClient.refs(gql)
+            cached = {str(r["ref"]): str(r.get("head_sha") or "") for r in refs}
+            by_repo[repository_full_name] = cached
+        return cached
 
     def _collect_rule_suites(
         self,

@@ -1,6 +1,6 @@
 {
   "manifest_version": "0",
-  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth). A source that genuinely needs no triple states why in `permission_not_applicable` \u2014 the exemption is declared, never achieved by leaving the field out.",
+  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth). A source that genuinely needs no triple states why in `permission_not_applicable` — the exemption is declared, never achieved by leaving the field out.",
   "api_base_url": "https://api.github.com",
   "sources": [
     {
@@ -231,7 +231,7 @@
         "suspended"
       ],
       "permission_failure": "degrade_with_warning",
-      "description": "Which Apps can reach this account's repositories, and with which granted permissions (req-github-core-app-installations). App-ONLY: a personal access token gets 404, which is one of the two surfaces that make the App the product credential rather than a convenience. Falls back to `/app/installations` \u2014 THIS App's own installation, an inventory of one \u2014 when the account-wide list is refused, and says which it got, because an inventory of one is not an inventory.",
+      "description": "Which Apps can reach this account's repositories, and with which granted permissions (req-github-core-app-installations). App-ONLY: a personal access token gets 404, which is one of the two surfaces that make the App the product credential rather than a convenience. Falls back to `/app/installations` — THIS App's own installation, an inventory of one — when the account-wide list is refused, and says which it got, because an inventory of one is not an inventory.",
       "permission": "organization:administration:read"
     },
     {
@@ -288,6 +288,21 @@
       "permission": "repository:administration:read",
       "permission_failure": "degrade_with_warning",
       "description": "Per-rule evaluations for one suite. The list says a bypass happened; only this says WHICH control was gone around, which is what makes the event a finding rather than a log line."
+    },
+    {
+      "name": "used_actions",
+      "kind": "custom_fn",
+      "path": "derived from workflow_yaml (`uses:` per step)",
+      "target_entity_type": "github_core__github_action",
+      "fields": [
+        "action_path",
+        "kind",
+        "owner",
+        "repository_full_name",
+        "subpath"
+      ],
+      "permission": "repository:contents:read",
+      "description": "Actions a declared job calls (req-github-core-actions-used), split out of the workflow YAML the `workflow_yaml` source already fetches, so this widens nothing. One node per action path, shared across the scope; the pin (`declared_ref`, `pin_kind`, `is_pinned`, `resolved_sha`, `resolution`) rides on the USES_ACTION edge. A mutable name is resolved to a tag or branch and a commit ONLY when the action's own repository is inside the observed scope, from the `refs` source already in hand; otherwise the edge says `unresolved` / `unobservable` rather than guessing. No call is made to an out-of-scope action repository."
     }
   ],
   "edges": [
@@ -375,6 +390,12 @@
       "slug": "INSTALLED_ON__github_core",
       "source": "github_core__app_installation",
       "target": "github_core__github_account"
+    },
+    {
+      "slug": "USES_ACTION__github_core",
+      "source": "github_core__workflow_job",
+      "target": "github_core__github_action",
+      "condition": "a step's `uses:` names a non-local action; one edge per (job, action, declared ref)"
     }
   ]
 }

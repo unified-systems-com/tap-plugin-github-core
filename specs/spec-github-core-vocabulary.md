@@ -77,7 +77,7 @@ neutral substrate when one is extracted, not in `github_core`.
 | **`git_ref`** | **yes** | **self** | **reshaped** | 12 sources. Replaces the never-built `git_branch`: branch **and tag** in one type, because tag movement is the detection for three incidents and rulesets already target `branch\|tag\|push` |
 | `github_ruleset` | no | self | proposed | 7 sources; the gate itself |
 | `status_check` | no | self | proposed | 6 sources; convergence node — required by rulesets, produced by workflows/apps |
-| `github_action` | no | self | proposed | 4 sources, and one carries `is_pinned` — the same property we proposed independently |
+| `github_action` | no | self | **exists** (2026-09-02, #45) | 4 sources, and one carries `is_pinned` — the same property we proposed independently. Keyed on the action path, platform-global; the pin lives on the edge |
 | `actions_secret` | partial | self | proposed | **11 sources**; 12 incidents |
 | **`actions_cache`** | neutral-capable | **self** | **new** | 5 incidents including the two most recent. Convergence node: written by a low-trust job, restored by a privileged one |
 | `app_installation` | no | self | proposed | 7 sources. **Splits the existing `github_app`**: the registered application and the grant are different objects |
@@ -122,7 +122,7 @@ properties must justify why it needs none.
 | **`BYPASSES`** | account\|team\|app → ruleset | self | new | `{actor_type, bypass_mode, observable, source}` — **`observable: false` distinguishes "nobody can bypass" from "we cannot see"**, which a blank cell cannot |
 | `REQUIRES_CHECK` | ruleset → status_check | self | proposed | `{enforcement}` |
 | `PRODUCES_CHECK` | workflow\|app → status_check | self | proposed | `{confidence}` — honest about inference |
-| `USES_ACTION` | workflow_job → github_action | self | proposed | `{pin_kind, pinned_sha, declared_ref, resolves_to_fork}` — pinned by SHA, tag or branch, and does the SHA belong to the canonical repo |
+| `USES_ACTION` | workflow_job → github_action | self | **exists** (2026-09-02, #45) | `{declared_ref, pin_kind, is_pinned, resolved_sha, resolution, step_indexes}` — pinned by SHA, digest, tag or branch, **or `unresolved`**: tag-versus-branch is not observable from the string, and is resolved only when the action's repository is in scope (`resolution` says which). `resolves_to_fork` dropped — needs the fork graph, not derivable; named in the article |
 | **`REFERENCES_SECRET`** | workflow_job → actions_secret | self | proposed | `{step_index, trigger_events, checks_out_pr_head, interpolates_into_run, top_level_permissions}` — **the adjudication properties**: shape versus exploitability |
 | **`WRITES_CACHE`** / **`RESTORES_CACHE`** | workflow_job → actions_cache | self | new | `{step_index, ref_scope, fork_reachable}` / `{step_index, ref_scope, privileged}` — is the writer reachable by an outsider, does the reader hold publish rights |
 | `CALLS_WORKFLOW` | workflow → workflow | self | proposed | `{pin_kind, ref}` |

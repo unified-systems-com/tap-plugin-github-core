@@ -227,10 +227,12 @@ def _cache_steps(steps: Any) -> list[dict[str, Any]]:
 
 
 def _action_refs(steps: Any) -> list[dict[str, Any]]:
-    """Every third-party action a job calls, with how it is pinned.
+    """Every third-party action a job calls, with how it is pinned — the `USES_ACTION` input.
 
-    Recorded now, unresolved: `USES_ACTION` and its `resolves_to_fork` adjudication are a later
-    wave, but the pin kind is free to derive here and is what a tag-repoint attack turns on.
+    Local `./` actions are excluded (they are the repository's own code, surfaced separately as
+    `LOCAL_ACTION_DEFERRED`). Everything else — a repository action or a `docker://` image — is
+    split into the path that identifies the action and the ref that pins it, because those are
+    different facts: the path is a node, the pin is an edge property.
     """
     out: list[dict[str, Any]] = []
     for index, step in enumerate(steps if isinstance(steps, list) else []):
@@ -239,25 +241,110 @@ def _action_refs(steps: Any) -> list[dict[str, Any]]:
         uses = str(step.get("uses") or "")
         if not uses or uses.startswith("./"):
             continue
-        name, _, ref = uses.partition("@")
-        out.append({"step_index": index, "action": name, "ref": ref, "pin_kind": _pin_kind(ref)})
+        out.append({"step_index": index, **split_uses(uses)})
     return out
 
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+#: An OCI digest is `sha256:` plus exactly 64 hex characters; anything else that starts with
+#: `sha256:` is a malformed declaration, and a malformed pin must not read as an immutable one.
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_DOCKER_PREFIX = "docker://"
+
+#: Immutable from the string alone (a commit SHA).
+PIN_SHA = "sha"
+#: Immutable from the string alone (an image digest).
+PIN_DIGEST = "digest"
+#: A mutable name RESOLVED to a tag against the action repository's refs.
+PIN_TAG = "tag"
+#: A mutable name RESOLVED to a branch against the action repository's refs.
+PIN_BRANCH = "branch"
+#: A mutable name whose kind the string cannot establish. Never guessed as `tag`.
+PIN_UNRESOLVED = "unresolved"
+#: No ref written at all.
+PIN_UNPINNED = "unpinned"
 
 
-def _pin_kind(ref: str) -> str:
-    """`sha`, `tag`, or `unpinned`.
+def split_uses(uses: str) -> dict[str, Any]:
+    """Split one `uses:` value into the action's identity and its declared pin.
 
-    A 40-hex ref is immutable. Anything else is a name its owner can repoint at any commit, which
-    is why "pinned to v4" is not a pin — it is a promise someone else keeps.
+    Returns ``{kind, action, action_path, owner, repository_full_name, subpath, ref, pin_kind}``.
+    `action` duplicates `action_path` for the older readers of `configuration.action_refs`.
+
+    `pin_kind` says only what the STRING proves. A 40-hex ref is a commit and a `sha256:` ref
+    is a digest — both immutable, both `is_pinned`. A docker image's `:tag` is a tag by the
+    registry's own vocabulary. A repository action's `@v4` or `@main` is a name the owner can
+    repoint, and whether it is a tag or a branch is NOT visible here: the previous shape called
+    every such name `tag`, which was a declaration that existed and was false. The collector
+    upgrades `unresolved` to `tag`/`branch` only when it holds the action repository's refs.
     """
+    if uses.startswith(_DOCKER_PREFIX):
+        return _split_docker_uses(uses[len(_DOCKER_PREFIX) :])
+    return _split_repository_uses(uses)
+
+
+def _split_docker_uses(image: str) -> dict[str, Any]:
+    """`docker://image[:tag|@sha256:digest]` — a registry pin, not a git one."""
+    if "@" in image:
+        path, _, ref = image.partition("@")
+        pin = PIN_DIGEST if _DIGEST_RE.match(ref) else PIN_UNRESOLVED
+    else:
+        # A `:tag` after the last `/` (a registry may carry a port: `localhost:5000/img`).
+        head, _, tail = image.rpartition("/")
+        name, _, ref = tail.partition(":")
+        path = f"{head}/{name}" if head else name
+        pin = PIN_TAG if ref else PIN_UNPINNED
+    action_path = f"{_DOCKER_PREFIX}{path}"
+    return {
+        "kind": "docker",
+        "action": action_path,
+        "action_path": action_path,
+        "owner": "",
+        "repository_full_name": "",
+        "subpath": "",
+        "ref": ref,
+        "pin_kind": pin,
+    }
+
+
+def _split_repository_uses(uses: str) -> dict[str, Any]:
+    """`owner/repo[/subdir]@ref` — the common form.
+
+    Owner and repository are lower-cased: GitHub resolves them case-insensitively, so
+    `Actions/Checkout` and `actions/checkout` are one repository and must be one node, or
+    fan-in fragments and an exact-action query misses the differently cased declaration.
+    The subpath stays as written — it is a filesystem path inside the repository.
+    """
+    path, _, ref = uses.partition("@")
+    parts = path.split("/")
+    has_repo = len(parts) >= 2
+    repository_full_name = "/".join(part.lower() for part in parts[:2]) if has_repo else path.lower()
+    subpath = "/".join(parts[2:])
+    action_path = f"{repository_full_name}/{subpath}" if subpath else repository_full_name
+    return {
+        "kind": "repository",
+        "action": action_path,
+        "action_path": action_path,
+        "owner": parts[0].lower() if has_repo else "",
+        "repository_full_name": repository_full_name if has_repo else "",
+        "subpath": subpath,
+        "ref": ref,
+        "pin_kind": _git_pin_kind(ref),
+    }
+
+
+def _git_pin_kind(ref: str) -> str:
+    """What a git ref string proves on its own: a commit, nothing, or a name (unresolved)."""
     if not ref:
-        return "unpinned"
+        return PIN_UNPINNED
     if _SHA_RE.match(ref):
-        return "sha"
-    return "tag"
+        return PIN_SHA
+    return PIN_UNRESOLVED
+
+
+def is_pinned(pin_kind: str) -> bool:
+    """The one-bit answer every action-pinning control asks: immutable, or a name someone else keeps."""
+    return pin_kind in (PIN_SHA, PIN_DIGEST)
 
 
 def _detect_local_action_refs(jobs: list[dict[str, Any]]) -> list[dict[str, str]]:
