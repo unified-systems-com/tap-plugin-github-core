@@ -8,13 +8,17 @@ API's shape:
 
 * **GraphQL — the configuration layer.** Repository enumeration, metadata, rulesets (with their
   conditions, rules and bypass actors), environments, every branch and tag with the commit it
-  points at, and the *content* of every workflow file, for a whole account, in one request.
+  points at, releases (an output that happens to ride this transport), and the *content* of
+  every workflow file, for a whole account, in one request.
   Measured against a 19-repo organization: 1 request, **64 rate-limit points of 5000**, returning
   the config layer whole — 165 refs, 4 rulesets per repo, 46 workflow files, 172 KB of YAML
   inlined. (The metadata-only form of this query cost 1 point; rulesets, refs and environments are
   what take it to 64 — still under 2% of an hour's budget, for an entire account.)
 * **REST — the operation layer.** Workflow registrations (the numeric id and state that runs link
-  to), runs, jobs and runners. No GraphQL equivalent exists.
+  to), runs, jobs, runners and artifacts. No GraphQL equivalent exists. GitHub Packages is REST
+  too, and worse: the GraphQL `packages` connection answered `totalCount: 0` with no error for an
+  organization whose ghcr.io images the REST detail endpoint returned — the container registry is
+  simply not on that transport, and an empty connection there proves nothing.
 
 That division happens to fall exactly along the design/config/operation seam the product reasons
 about, which is a convenience rather than a coincidence: configuration is declarative and lives in
@@ -52,6 +56,10 @@ _RULE_PAGE_SIZE = 30
 _BYPASS_ACTOR_PAGE_SIZE = 30
 _ENVIRONMENT_PAGE_SIZE = 20
 _REF_PAGE_SIZE = 100
+# Releases newest-first; an active repository cuts far fewer than this per collection window,
+# and `totalCount` says how many the cap left behind.
+_RELEASE_PAGE_SIZE = 50
+_RELEASE_ASSET_PAGE_SIZE = 50
 _TIMEOUT_SECONDS = 60
 
 
@@ -132,6 +140,26 @@ query($login: String!, $cursor: String) {
             totalCount
             nodes { name target { oid __typename ...CommitSlice ... on Tag { target { oid ...CommitSlice } } } }
           }
+          releases(first: %(releases)d, orderBy: {field: CREATED_AT, direction: DESC}) {
+            totalCount
+            nodes {
+              databaseId
+              name
+              tagName
+              isDraft
+              isPrerelease
+              isLatest
+              createdAt
+              publishedAt
+              url
+              author { login }
+              tagCommit { oid }
+              releaseAssets(first: %(assets)d) {
+                totalCount
+                nodes { name size contentType downloadUrl createdAt }
+              }
+            }
+          }
           object(expression: "HEAD:.github/workflows") {
             ... on Tree {
               entries { name path object { ... on Blob { byteSize isTruncated text } } }
@@ -156,6 +184,8 @@ fragment CommitSlice on Commit {
     "bypass": _BYPASS_ACTOR_PAGE_SIZE,
     "envs": _ENVIRONMENT_PAGE_SIZE,
     "refs": _REF_PAGE_SIZE,
+    "releases": _RELEASE_PAGE_SIZE,
+    "assets": _RELEASE_ASSET_PAGE_SIZE,
 }
 
 
@@ -382,6 +412,50 @@ class GithubGraphQLClient:
                 }
             )
         return out
+
+    @staticmethod
+    def releases(repo: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+        """Releases of one repository, shaped for the emitter, plus how many the cap dropped.
+
+        Returns ``(releases, missing)``. A release is a product of execution that happens to
+        ride the config-layer transport; `tagCommit` is the commit the tag resolved to at
+        observation, which is the half of tag-movement detection the release side holds.
+        """
+        connection = repo.get("releases") or {}
+        nodes = [n for n in (connection.get("nodes") or []) if n]
+        missing = max(int(connection.get("totalCount") or 0) - len(nodes), 0)
+        out: list[dict[str, Any]] = []
+        for node in nodes:
+            assets_conn = node.get("releaseAssets") or {}
+            out.append(
+                {
+                    "release_id": node.get("databaseId"),
+                    "tag_name": str(node.get("tagName") or ""),
+                    "name": str(node.get("name") or ""),
+                    "is_draft": node.get("isDraft"),
+                    "is_prerelease": node.get("isPrerelease"),
+                    "is_latest": node.get("isLatest"),
+                    "author_login": str((node.get("author") or {}).get("login") or ""),
+                    "target_sha": str((node.get("tagCommit") or {}).get("oid") or ""),
+                    "created_at": node.get("createdAt"),
+                    "published_at": node.get("publishedAt"),
+                    "html_url": str(node.get("url") or ""),
+                    "asset_count": assets_conn.get("totalCount"),
+                    "assets": [GithubGraphQLClient._release_asset(a) for a in (assets_conn.get("nodes") or []) if a],
+                }
+            )
+        return out, missing
+
+    @staticmethod
+    def _release_asset(asset: dict[str, Any]) -> dict[str, Any]:
+        """One attached file, flattened to the shape `github_release.assets` stores."""
+        return {
+            "name": str(asset.get("name") or ""),
+            "size": asset.get("size"),
+            "content_type": str(asset.get("contentType") or ""),
+            "download_url": str(asset.get("downloadUrl") or ""),
+            "created_at": asset.get("createdAt"),
+        }
 
     @staticmethod
     def workflow_files(repo: dict[str, Any]) -> dict[str, str]:

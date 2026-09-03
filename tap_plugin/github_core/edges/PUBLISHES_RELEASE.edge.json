@@ -1,0 +1,16 @@
+{
+  "slug": "PUBLISHES_RELEASE__github_core",
+  "name": "Publishes Release",
+  "description": "A repository published this release. Containment for the output column: every release hangs off the repository whose tag it was cut on, whether or not the run that cut it was collected.",
+  "sources": [
+    "github_core__github_repository"
+  ],
+  "targets": [
+    "github_core__github_release"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "releases",
+    "github.observation": "declaration"
+  }
+}

@@ -2,7 +2,7 @@ manifest_version = "0"
 plugin_version = "0.1.0"
 slug = "github_core"
 name = "TAP GitHub Core"
-description = "GitHub Actions models — the pipeline as declared (workflows, jobs, rulesets, environments) and as run (runs, jobs, runners, caches)."
+description = "GitHub Actions models — the pipeline as declared (workflows, jobs, rulesets, environments) and as run (runs, jobs, runners, caches) — and what it produces (releases, artifacts, packages)."
 
 depends_on = [
     { slug = "identity_core", note = "ENABLED_ON sources the identity_core__oidc_issuer type; the collector mints the issuer node via identity_core.issuer (the OIDC vocabulary lives there, not here)." },
@@ -26,6 +26,9 @@ github_core__rule_suite = "tap_plugin.github_core.models.rule_suite.RuleSuite"
 github_core__status_check = "tap_plugin.github_core.models.status_check.StatusCheck"
 github_core__github_environment = "tap_plugin.github_core.models.github_environment.GithubEnvironment"
 github_core__actions_cache = "tap_plugin.github_core.models.actions_cache.ActionsCache"
+github_core__github_release = "tap_plugin.github_core.models.github_release.GithubRelease"
+github_core__github_package = "tap_plugin.github_core.models.github_package.GithubPackage"
+github_core__github_package_version = "tap_plugin.github_core.models.github_package_version.GithubPackageVersion"
 github_core__github_action = "tap_plugin.github_core.models.github_action.GithubAction"
 github_core__actions_artifact = "tap_plugin.github_core.models.actions_artifact.ActionsArtifact"
 
@@ -60,6 +63,13 @@ UPLOADS_ARTIFACT__github_core = "edges/UPLOADS_ARTIFACT.edge.json"
 POINTS_AT__github_core = "edges/POINTS_AT.edge.json"
 REQUIRES_CHECK__github_core = "edges/REQUIRES_CHECK.edge.json"
 PRODUCES_CHECK__github_core = "edges/PRODUCES_CHECK.edge.json"
+PUBLISHES_RELEASE__github_core = "edges/PUBLISHES_RELEASE.edge.json"
+BUILDS_RELEASE__github_core = "edges/BUILDS_RELEASE.edge.json"
+TARGETS_REF__github_core = "edges/TARGETS_REF.edge.json"
+STORES_ARTIFACT__github_core = "edges/STORES_ARTIFACT.edge.json"
+PUBLISHES_PACKAGE__github_core = "edges/PUBLISHES_PACKAGE.edge.json"
+PUBLISHES_PACKAGE_VERSION__github_core = "edges/PUBLISHES_PACKAGE_VERSION.edge.json"
+BUILDS_PACKAGE_VERSION__github_core = "edges/BUILDS_PACKAGE_VERSION.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"

@@ -51,7 +51,11 @@ GQL_BRANCH = "main"
 #: in a 1,600-type schema proves nothing about the type we select it on.
 GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
     "Repository": ("nameWithOwner", "databaseId", "isArchived", "isFork", "visibility", "url",
-                   "defaultBranchRef", "rulesets", "environments", "refs", "object"),
+                   "defaultBranchRef", "rulesets", "environments", "refs", "releases", "object"),
+    "Release": ("databaseId", "name", "tagName", "isDraft", "isPrerelease", "isLatest", "createdAt",
+                "publishedAt", "url", "author", "tagCommit", "releaseAssets"),
+    "ReleaseAsset": ("name", "size", "contentType", "downloadUrl", "createdAt"),
+    "User": ("login",),
     "RepositoryRuleset": ("databaseId", "name", "enforcement", "target", "conditions",
                           "rules", "bypassActors"),
     "RepositoryRulesetBypassActor": ("bypassMode", "organizationAdmin", "repositoryRoleName", "actor"),

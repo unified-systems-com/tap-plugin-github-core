@@ -11,7 +11,10 @@ from tap_plugin.github_core.models.github_actions_job import GithubActionsJob
 from tap_plugin.github_core.models.github_actions_run import GithubActionsRun
 from tap_plugin.github_core.models.github_app import GithubApp
 from tap_plugin.github_core.models.github_environment import GithubEnvironment
+from tap_plugin.github_core.models.github_package import GithubPackage
+from tap_plugin.github_core.models.github_package_version import GithubPackageVersion
 from tap_plugin.github_core.models.github_platform import GithubPlatform
+from tap_plugin.github_core.models.github_release import GithubRelease
 from tap_plugin.github_core.models.github_repository import GithubRepository
 from tap_plugin.github_core.models.github_ruleset import GithubRuleset
 from tap_plugin.github_core.models.rule_suite import RuleSuite
@@ -32,7 +35,10 @@ __all__ = [
     "GithubActionsRun",
     "GithubApp",
     "GithubEnvironment",
+    "GithubPackage",
+    "GithubPackageVersion",
     "GithubPlatform",
+    "GithubRelease",
     "GithubRepository",
     "GithubRuleset",
     "RuleSuite",

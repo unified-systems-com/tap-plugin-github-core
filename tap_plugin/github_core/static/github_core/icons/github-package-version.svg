@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. The package box with a version pin — one published version of it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>GitHub Package Version</title>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linejoin="round"
+    d="M11 3.6 3.8 7.5v8.4l7.2 3.9 3.6-2"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.4" stroke-linejoin="round" d="M3.8 7.5 11 11.4l7.2-3.9L11 3.6M11 11.4v8.4"/>
+  <circle cx="18" cy="16.5" r="3.2" fill="#ffffff" stroke="#1f2328" stroke-width="1.5"/>
+  <circle cx="18" cy="16.5" r="1" fill="#1f2328"/>
+</svg>

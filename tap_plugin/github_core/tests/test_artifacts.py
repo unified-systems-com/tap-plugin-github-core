@@ -16,7 +16,7 @@ import pytest
 import tap_plugin.github_core.models as github  # noqa: F401 — trigger model registration
 from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
 from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
-from tap_plugin.github_core.collectors.github_collector.identity import actions_artifact_id, run_id
+from tap_plugin.github_core.collectors.github_collector.identity import actions_artifact_id, repository_id, run_id
 from tap_plugin.github_core.collectors.github_collector.parser import parse_workflow_yaml
 
 from tap_grid.models import Entity
@@ -80,7 +80,8 @@ def _collect(client: _Client, runs_in_batch: set[int]) -> tuple[GithubCollector,
     c = _collector()
     nodes: list[dict] = []
     edges: list[dict] = []
-    c._collect_artifacts(client, "o/r", {"github.platform": "github.com"}, runs_in_batch, nodes, edges)  # type: ignore[arg-type]
+    run_index = [{"run_id": r, "uuid": run_id("o/r", r), "head_sha": "", "head_branch": "", "event": ""} for r in runs_in_batch]
+    c._collect_artifacts(client, "o/r", repository_id("o/r"), {"github.platform": "github.com"}, run_index, nodes, edges, {})  # type: ignore[arg-type]
     return c, nodes, edges
 
 
@@ -97,19 +98,24 @@ class TestCollection:
         assert client.calls == [("/repos/o/r/actions/artifacts", {"per_page": "100"})]
 
     def test_an_artifact_of_a_run_in_the_batch_gets_the_upload_edge(self) -> None:
-        _, nodes, edges = _collect(_Client([_artifact(1, 100)]), {100})
+        _, nodes, all_edges = _collect(_Client([_artifact(1, 100)]), {100})
+        edges = [e for e in all_edges if e["edge"]["edge_type"] == "UPLOADS_ARTIFACT__github_core"]
         assert len(nodes) == 1 and len(edges) == 1
-        assert edges[0]["edge"]["edge_type"] == "UPLOADS_ARTIFACT__github_core"
         assert edges[0]["edge"]["from_entity_id"] == str(run_id("o/r", 100))
         assert edges[0]["edge"]["to_entity_id"] == str(actions_artifact_id("o/r", 1))
+        stores = [e for e in all_edges if e["edge"]["edge_type"] == "STORES_ARTIFACT__github_core"]
+        assert len(stores) == 1 and stores[0]["edge"]["from_entity_id"] == str(repository_id("o/r"))
         assert nodes[0]["node"]["configuration"]["run_in_batch"] is True
 
     def test_an_artifact_of_a_run_outside_the_window_is_counted_not_dropped(self) -> None:
         """Older runs are normal, not an error and not nothing: the node lands with its run_id,
         no edge is emitted (the dangling-edge guard would have dropped it silently), and the
         summary says how many."""
-        c, nodes, edges = _collect(_Client([_artifact(1, 100), _artifact(2, 99)]), {100})
+        c, nodes, all_edges = _collect(_Client([_artifact(1, 100), _artifact(2, 99)]), {100})
+        edges = [e for e in all_edges if e["edge"]["edge_type"] == "UPLOADS_ARTIFACT__github_core"]
         assert len(nodes) == 2 and len(edges) == 1
+        # every artifact hangs off the repository, in or out of the window
+        assert sum(e["edge"]["edge_type"] == "STORES_ARTIFACT__github_core" for e in all_edges) == 2
         older = next(n for n in nodes if n["node"]["artifact_id"] == 2)
         assert older["node"]["run_id"] == 99 and older["node"]["configuration"]["run_in_batch"] is False
         summary = next(e for e in c.events if e[1] == "ARTIFACTS_COLLECTED")  # type: ignore[attr-defined]

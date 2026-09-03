@@ -1,0 +1,304 @@
+{
+  "_comment": "CAPTURED from the live GitHub API on 2026-09-02 with a read-only GitHub App installation token (actions:read, contents:read, metadata:read, administration:read; NO packages permission), against unified-systems-com/tap. Verbatim apart from ordering, `per_page` caps, and the package owner/repository sub-objects trimmed to their identifying keys. Everything here is public. `releases_graphql` is the `repository.releases` connection of the config-layer query; `artifacts` is GET /repos/{owner}/{repo}/actions/artifacts?per_page=3 (3,636 total at capture); `packages_list_container_refused` is what GET /orgs/{org}/packages?package_type=container answers an App installation token (the OpenAPI description marks the packages endpoints enabledForGitHubApps: false); `packages_list_npm` is the 200 [] the same credential gets for a type the org has none of, which proves nothing; `package_detail` / `package_versions` are the per-package endpoints, which DID answer for a public package; the versions are the four newest (cosign signature/attestation digests, tagged `sha256-...` or untagged) plus the newest ones carrying a `sha-<short>` commit tag and `latest`, from one page of 100. Re-capture rather than hand-edit.",
+  "releases_graphql": {
+    "totalCount": 5,
+    "nodes": [
+      {
+        "databaseId": 375872961,
+        "name": "v0.1.4",
+        "tagName": "v0.1.4",
+        "isDraft": false,
+        "isPrerelease": false,
+        "isLatest": true,
+        "createdAt": "2026-08-24T17:26:40Z",
+        "publishedAt": "2026-08-24T17:26:54Z",
+        "url": "https://github.com/unified-systems-com/tap/releases/tag/v0.1.4",
+        "author": {
+          "login": "tap-release-please[bot]"
+        },
+        "tagCommit": {
+          "oid": "59adb091aa4b364b73269c303dc2bcf54b249804"
+        },
+        "releaseAssets": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      },
+      {
+        "databaseId": 373464443,
+        "name": "v0.1.3",
+        "tagName": "v0.1.3",
+        "isDraft": false,
+        "isPrerelease": false,
+        "isLatest": false,
+        "createdAt": "2026-08-20T03:00:02Z",
+        "publishedAt": "2026-08-20T03:00:12Z",
+        "url": "https://github.com/unified-systems-com/tap/releases/tag/v0.1.3",
+        "author": {
+          "login": "tap-release-please[bot]"
+        },
+        "tagCommit": {
+          "oid": "ad03fbb856c720e3c929bffe2fc60bc95f4c37c8"
+        },
+        "releaseAssets": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      },
+      {
+        "databaseId": 369471725,
+        "name": "v0.1.2",
+        "tagName": "v0.1.2",
+        "isDraft": false,
+        "isPrerelease": false,
+        "isLatest": false,
+        "createdAt": "2026-08-12T19:15:22Z",
+        "publishedAt": "2026-08-12T19:15:35Z",
+        "url": "https://github.com/unified-systems-com/tap/releases/tag/v0.1.2",
+        "author": {
+          "login": "tap-release-please[bot]"
+        },
+        "tagCommit": {
+          "oid": "153f6d7b8e6ac7aa1bda6ce1b7388367c8e84dab"
+        },
+        "releaseAssets": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      },
+      {
+        "databaseId": 368926902,
+        "name": "v0.1.1",
+        "tagName": "v0.1.1",
+        "isDraft": false,
+        "isPrerelease": false,
+        "isLatest": false,
+        "createdAt": "2026-08-12T00:26:58Z",
+        "publishedAt": "2026-08-12T00:27:09Z",
+        "url": "https://github.com/unified-systems-com/tap/releases/tag/v0.1.1",
+        "author": {
+          "login": "tap-release-please[bot]"
+        },
+        "tagCommit": {
+          "oid": "20649aeec98a95c699d6ca48c6bd10f1ef9de598"
+        },
+        "releaseAssets": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      },
+      {
+        "databaseId": 368268878,
+        "name": "v0.1.0 \u2014 the named baseline",
+        "tagName": "v0.1.0",
+        "isDraft": false,
+        "isPrerelease": false,
+        "isLatest": false,
+        "createdAt": "2026-08-11T00:27:15Z",
+        "publishedAt": "2026-08-11T00:27:58Z",
+        "url": "https://github.com/unified-systems-com/tap/releases/tag/v0.1.0",
+        "author": {
+          "login": "notgeorge"
+        },
+        "tagCommit": {
+          "oid": "dd339129f3bd36fb11def7bed8e4b8a734ec2459"
+        },
+        "releaseAssets": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      }
+    ]
+  },
+  "artifacts": {
+    "total_count": 3636,
+    "artifacts": [
+      {
+        "id": 9864827097,
+        "node_id": "MDg6QXJ0aWZhY3Q5ODY0ODI3MDk3",
+        "name": "seat-xai",
+        "size_in_bytes": 3513,
+        "url": "https://api.github.com/repos/unified-systems-com/tap/actions/artifacts/9864827097",
+        "archive_download_url": "https://api.github.com/repos/unified-systems-com/tap/actions/artifacts/9864827097/zip",
+        "expired": false,
+        "digest": "sha256:3038f723e40c5f323938a63ca1aecb1d5f42fa49b2cd25d9e5b8f12c3ac4dd73",
+        "created_at": "2026-09-02T20:06:26Z",
+        "updated_at": "2026-09-02T20:06:26Z",
+        "expires_at": "2026-12-01T20:01:38Z",
+        "workflow_run": {
+          "id": 33676808707,
+          "repository_id": 1150092195,
+          "head_repository_id": 1150092195,
+          "head_branch": "main",
+          "head_sha": "2e39bdf9f9408c06af2379253bb0fb0d30219e2c"
+        }
+      },
+      {
+        "id": 9864761794,
+        "node_id": "MDg6QXJ0aWZhY3Q5ODY0NzYxNzk0",
+        "name": "seat-xai",
+        "size_in_bytes": 5187,
+        "url": "https://api.github.com/repos/unified-systems-com/tap/actions/artifacts/9864761794",
+        "archive_download_url": "https://api.github.com/repos/unified-systems-com/tap/actions/artifacts/9864761794/zip",
+        "expired": false,
+        "digest": "sha256:b0ea4e6366b4be2c71a28b07946949f56c58b8ea721dad97335aba145fdd4c71",
+        "created_at": "2026-09-02T20:04:40Z",
+        "updated_at": "2026-09-02T20:04:40Z",
+        "expires_at": "2026-12-01T20:01:37Z",
+        "workflow_run": {
+          "id": 33676807092,
+          "repository_id": 1150092195,
+          "head_repository_id": 1150092195,
+          "head_branch": "main",
+          "head_sha": "2e39bdf9f9408c06af2379253bb0fb0d30219e2c"
+        }
+      },
+      {
+        "id": 9864693337,
+        "node_id": "MDg6QXJ0aWZhY3Q5ODY0NjkzMzM3",
+        "name": "seat-openai",
+        "size_in_bytes": 4411,
+        "url": "https://api.github.com/repos/unified-systems-com/tap/actions/artifacts/9864693337",
+        "archive_download_url": "https://api.github.com/repos/unified-systems-com/tap/actions/artifacts/9864693337/zip",
+        "expired": false,
+        "digest": "sha256:049c42b12099d049051ea4564382c466b9378252569f1f0b1d8c309400ac00fc",
+        "created_at": "2026-09-02T20:02:48Z",
+        "updated_at": "2026-09-02T20:02:48Z",
+        "expires_at": "2026-12-01T20:01:38Z",
+        "workflow_run": {
+          "id": 33676808707,
+          "repository_id": 1150092195,
+          "head_repository_id": 1150092195,
+          "head_branch": "main",
+          "head_sha": "2e39bdf9f9408c06af2379253bb0fb0d30219e2c"
+        }
+      }
+    ]
+  },
+  "packages_list_container_refused": {
+    "status": 400,
+    "body": "{\"message\":\"Invalid argument.\",\"documentation_url\":\"https://docs.github.com/rest/packages/packages#list-packages-for-an-organization\",\"status\":\"400\"}"
+  },
+  "packages_list_npm": [],
+  "package_detail": {
+    "id": 14322257,
+    "name": "tap-web",
+    "package_type": "container",
+    "owner": {
+      "login": "unified-systems-com",
+      "id": 314327346,
+      "type": "Organization"
+    },
+    "version_count": 1973,
+    "visibility": "public",
+    "url": "https://api.github.com/orgs/unified-systems-com/packages/container/tap-web",
+    "created_at": "2026-08-09T18:15:07Z",
+    "updated_at": "2026-09-02T04:14:13Z",
+    "repository": {
+      "id": 1150092195,
+      "name": "tap",
+      "full_name": "unified-systems-com/tap",
+      "html_url": "https://github.com/unified-systems-com/tap"
+    },
+    "html_url": "https://github.com/orgs/unified-systems-com/packages/container/package/tap-web"
+  },
+  "package_versions": [
+    {
+      "id": 1198548279,
+      "name": "sha256:b813811f6a71fd6cfd55a68c233d3ecb1f9190d1d891ae4f747407682c763aa8",
+      "url": "https://api.github.com/orgs/unified-systems-com/packages/container/tap-web/versions/1198548279",
+      "package_html_url": "https://github.com/orgs/unified-systems-com/packages/container/package/tap-web",
+      "created_at": "2026-09-02T04:14:13Z",
+      "updated_at": "2026-09-02T04:14:13Z",
+      "html_url": "https://github.com/orgs/unified-systems-com/packages/container/tap-web/1198548279",
+      "metadata": {
+        "package_type": "container",
+        "container": {
+          "tags": [
+            "sha256-0bced15f4d9cef74e3a684859728ffb761e19ee2ca17abb1d4abfe1f499b6398"
+          ]
+        }
+      }
+    },
+    {
+      "id": 1198548270,
+      "name": "sha256:199ffbb5bb8ce25846da3fb4f6accb05b99ff42e5b5b3d391d8f69510add660b",
+      "url": "https://api.github.com/orgs/unified-systems-com/packages/container/tap-web/versions/1198548270",
+      "package_html_url": "https://github.com/orgs/unified-systems-com/packages/container/package/tap-web",
+      "created_at": "2026-09-02T04:14:12Z",
+      "updated_at": "2026-09-02T04:14:12Z",
+      "html_url": "https://github.com/orgs/unified-systems-com/packages/container/tap-web/1198548270",
+      "metadata": {
+        "package_type": "container",
+        "container": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "id": 1198548071,
+      "name": "sha256:e0c324871feec28519a80a68f67a5d134bcb7cee744b382c53da9754235c93a0",
+      "url": "https://api.github.com/orgs/unified-systems-com/packages/container/tap-web/versions/1198548071",
+      "package_html_url": "https://github.com/orgs/unified-systems-com/packages/container/package/tap-web",
+      "created_at": "2026-09-02T04:14:06Z",
+      "updated_at": "2026-09-02T04:14:06Z",
+      "html_url": "https://github.com/orgs/unified-systems-com/packages/container/tap-web/1198548071",
+      "metadata": {
+        "package_type": "container",
+        "container": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "id": 1198548064,
+      "name": "sha256:ec867504bf9beb05ff675694dba77d4b98e6d6512ee6854bda916045096ace19",
+      "url": "https://api.github.com/orgs/unified-systems-com/packages/container/tap-web/versions/1198548064",
+      "package_html_url": "https://github.com/orgs/unified-systems-com/packages/container/package/tap-web",
+      "created_at": "2026-09-02T04:14:05Z",
+      "updated_at": "2026-09-02T04:14:05Z",
+      "html_url": "https://github.com/orgs/unified-systems-com/packages/container/tap-web/1198548064",
+      "metadata": {
+        "package_type": "container",
+        "container": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "id": 1198542636,
+      "name": "sha256:aa5ee775e525e54535f5f2c514d03feaa1f6e8e4817348f2d912fa0c384f2e8f",
+      "url": "https://api.github.com/orgs/unified-systems-com/packages/container/tap-web/versions/1198542636",
+      "package_html_url": "https://github.com/orgs/unified-systems-com/packages/container/package/tap-web",
+      "created_at": "2026-09-02T04:11:22Z",
+      "updated_at": "2026-09-02T04:11:22Z",
+      "html_url": "https://github.com/orgs/unified-systems-com/packages/container/tap-web/1198542636",
+      "metadata": {
+        "package_type": "container",
+        "container": {
+          "tags": [
+            "sha-2e39bdf",
+            "latest"
+          ]
+        }
+      }
+    },
+    {
+      "id": 1198484352,
+      "name": "sha256:a60c255c87ea2202b7db02fe8f3b1de328cff1832da863add951d16c64d49de7",
+      "url": "https://api.github.com/orgs/unified-systems-com/packages/container/tap-web/versions/1198484352",
+      "package_html_url": "https://github.com/orgs/unified-systems-com/packages/container/package/tap-web",
+      "created_at": "2026-09-02T03:41:20Z",
+      "updated_at": "2026-09-02T03:41:20Z",
+      "html_url": "https://github.com/orgs/unified-systems-com/packages/container/tap-web/1198484352",
+      "metadata": {
+        "package_type": "container",
+        "container": {
+          "tags": [
+            "sha-8d8a01b"
+          ]
+        }
+      }
+    }
+  ]
+}

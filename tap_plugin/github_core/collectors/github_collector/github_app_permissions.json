@@ -56,12 +56,13 @@
     "contents": {
       "state": "requested",
       "level": "read",
-      "why": "Workflow YAML, refs, and (once #31 lands) releases. Also the `git/ref` and `git/tags` lookups that resolve an out-of-scope action's tag or branch to its commit (req-github-core-actions-used-6).",
+      "why": "Workflow YAML, refs, and releases (#31). Also the `git/ref` and `git/tags` lookups that resolve an out-of-scope action's tag or branch to its commit (req-github-core-actions-used-6).",
       "sources": [
         "action_ref",
         "action_tag_object",
         "commits",
         "refs",
+        "releases",
         "used_actions",
         "workflow_yaml"
       ]
@@ -200,10 +201,13 @@
       "why": "Organisation webhooks, same reasoning at the org level."
     },
     "organization_packages": {
-      "state": "recommended",
+      "state": "requested",
       "level": "read",
-      "why": "Organisation-scoped packages, including ghcr images not linked to a repository. The catalogue lists it, but GitHub's App-settings UI exposes no organisation-level packages permission (observed 2026-09-02): repository `packages: read` on an all-repositories installation reaches packages linked to a repository, and an unlinked package stays NOT OBSERVABLE until GitHub exposes this key — record the gap, do not render it as none. Same measurement applies: no UI control, and the org container listing is closed to Apps regardless.",
-      "until": "#31"
+      "why": "Packages and their versions under the account (#31). Declared because the collector asks GitHub for them, and recorded as a gap: organisation-scoped packages, including ghcr images not linked to a repository. The catalogue lists it, but GitHub's App-settings UI exposes no organisation-level packages permission (observed 2026-09-02): repository `packages: read` on an all-repositories installation reaches packages linked to a repository, and an unlinked package stays NOT OBSERVABLE until GitHub exposes this key — record the gap, do not render it as none. Same measurement applies: no UI control, and the org container listing is closed to Apps regardless.",
+      "sources": [
+        "packages",
+        "package_versions"
+      ]
     },
     "organization_personal_access_token_requests": {
       "state": "deferred",

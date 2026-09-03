@@ -1,0 +1,36 @@
+{
+  "slug": "BUILDS_PACKAGE_VERSION__github_core",
+  "name": "Builds Package Version",
+  "description": "A workflow run produced this package version. The corpus edge whose ABSENCE is the finding: a registry version with no run behind it is how five incidents read. DERIVED from a tag naming convention (`sha-<short sha>` on the image matching the run's head commit), never reported by GitHub, so `match_kind` says how and `attested` stays null until an attestation surface reads it.",
+  "sources": [
+    "github_core__github_actions_run"
+  ],
+  "targets": [
+    "github_core__github_package_version"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "packages",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "match_kind": {
+        "type": "string",
+        "enum": [
+          "tag_sha"
+        ],
+        "description": "`tag_sha`: a container tag of the form `sha-<short>` (or a full sha) matches the run's `head_sha`. The only derivation implemented; a version tagged any other way carries no edge, which the article names as a limit rather than a finding."
+      },
+      "attested": {
+        "type": [
+          "boolean",
+          "null"
+        ],
+        "description": "Whether a build attestation vouches for this run producing this version. Three states: null means no attestation surface has been read \u2014 never `false`, which would be a claim."
+      }
+    }
+  }
+}

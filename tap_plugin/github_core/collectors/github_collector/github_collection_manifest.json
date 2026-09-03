@@ -1,6 +1,6 @@
 {
   "manifest_version": "0",
-  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth). A source that genuinely needs no triple states why in `permission_not_applicable` \u2014 the exemption is declared, never achieved by leaving the field out.",
+  "description": "Declarative inventory of what github_core v0 collects per repo. Documents the API surface for inspection; the collector engine in v0 calls these endpoints directly. A future refactor may drive collection fully off this manifest. Each source declares the fine-grained PAT `permission` it needs, so the least-privilege permission set is DERIVED from this manifest (provision-github-pat skill), never hand-listed. Each source's `permission` is the canonical GitHub permission triple `<surface>:<key>:<level>`; the least-privilege set for BOTH the fine-grained PAT and the GitHub App manifest is the union over sources, derived rather than hand-listed (req-github-core-app-auth). A source that genuinely needs no triple states why in `permission_not_applicable` — the exemption is declared, never achieved by leaving the field out.",
   "api_base_url": "https://api.github.com",
   "sources": [
     {
@@ -293,7 +293,7 @@
         "suspended"
       ],
       "permission_failure": "degrade_with_warning",
-      "description": "Which Apps can reach this account's repositories, and with which granted permissions (req-github-core-app-installations). App-ONLY: a personal access token gets 404, which is one of the two surfaces that make the App the product credential rather than a convenience. Falls back to `/app/installations` \u2014 THIS App's own installation, an inventory of one \u2014 when the account-wide list is refused, and says which it got, because an inventory of one is not an inventory.",
+      "description": "Which Apps can reach this account's repositories, and with which granted permissions (req-github-core-app-installations). App-ONLY: a personal access token gets 404, which is one of the two surfaces that make the App the product credential rather than a convenience. Falls back to `/app/installations` — THIS App's own installation, an inventory of one — when the account-wide list is refused, and says which it got, because an inventory of one is not an inventory.",
       "permission": "organization:administration:read"
     },
     {
@@ -350,6 +350,76 @@
       "permission": "repository:administration:read",
       "permission_failure": "degrade_with_warning",
       "description": "Per-rule evaluations for one suite. The list says a bypass happened; only this says WHICH control was gone around, which is what makes the event a finding rather than a log line."
+    },
+    {
+      "name": "releases",
+      "kind": "custom_fn",
+      "path": "POST /graphql (repository.releases)",
+      "target_entity_type": "github_core__github_release",
+      "fields": [
+        "release_id",
+        "tag_name",
+        "name",
+        "is_draft",
+        "is_prerelease",
+        "is_latest",
+        "author_login",
+        "target_sha",
+        "created_at",
+        "published_at",
+        "html_url",
+        "assets"
+      ],
+      "permission": "repository:contents:read",
+      "description": "Releases newest-first with their assets and the commit each tag resolved to (req-github-core-releases), delivered inside the config-layer query at no extra request. A release is a product of execution riding the declaration transport. Contents read is already in the union, so this widens nothing. Capped per repository; `totalCount` reports what the cap left."
+    },
+    {
+      "name": "packages",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}/packages",
+      "fallback_path": "/users/{owner}/packages",
+      "query": {
+        "package_type": "{package_type}",
+        "per_page": "100"
+      },
+      "item_path": "[*]",
+      "target_entity_type": "github_core__github_package",
+      "fields": [
+        "package_id",
+        "name",
+        "package_type",
+        "visibility",
+        "version_count",
+        "repository",
+        "html_url",
+        "created_at",
+        "updated_at"
+      ],
+      "permission": "organization:packages:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Packages under the account, one call per package type in GitHub's closed set (req-github-core-packages). NOT observable with the product credential today, and recorded as such: GitHub's OpenAPI description marks every packages endpoint `enabledForGitHubApps: false`; measured 2026-09-02 with an App installation token, `package_type=container` answers 400 `Invalid argument.` while `npm`/`maven`/`docker` answer 200 `[]` — which proves nothing, since the org's ghcr.io images exist and the per-package endpoints return them. GraphQL's `packages` connection is no better (`totalCount: 0`, no error, same org). An empty listing from a credential the description says cannot use the endpoint is unobservable, never zero; only a non-empty answer proves itself. The permission is declared so an operator who re-accepts it is asking for the right thing; a classic PAT with `read:packages` is the credential GitHub documents for this surface and the envelope does not model one."
+    },
+    {
+      "name": "package_versions",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}/packages/{package_type}/{package_name}/versions",
+      "fallback_path": "/users/{owner}/packages/{package_type}/{package_name}/versions",
+      "query": {
+        "per_page": "100"
+      },
+      "item_path": "[*]",
+      "target_entity_type": "github_core__github_package_version",
+      "fields": [
+        "version_id",
+        "name",
+        "metadata",
+        "html_url",
+        "created_at",
+        "updated_at"
+      ],
+      "permission": "organization:packages:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Versions of one package, newest first, with the container tags pointing at each digest. Capped per package; `version_count` on the package says what the cap left (measured 1,973 on one image). Same App-support caveat as `packages`; the endpoint DID answer an App token for a public package on 2026-09-02, which is recorded as a measurement, not a guarantee."
     },
     {
       "name": "used_actions",
@@ -480,6 +550,28 @@
       "target": "github_core__github_account"
     },
     {
+      "slug": "PUBLISHES_RELEASE__github_core",
+      "source": "github_core__github_repository",
+      "target": "github_core__github_release"
+    },
+    {
+      "slug": "BUILDS_RELEASE__github_core",
+      "source": "github_core__github_actions_run",
+      "target": "github_core__github_release",
+      "condition": "run.head_branch == release.tag_name (tag_ref) or run.head_sha == release.target_sha (same_commit); runs with event == release excluded"
+    },
+    {
+      "slug": "TARGETS_REF__github_core",
+      "source": "github_core__github_release",
+      "target": "github_core__git_ref",
+      "condition": "refs/tags/<release.tag_name> is an observed git_ref"
+    },
+    {
+      "slug": "STORES_ARTIFACT__github_core",
+      "source": "github_core__github_repository",
+      "target": "github_core__actions_artifact"
+    },
+    {
       "slug": "USES_ACTION__github_core",
       "source": "github_core__workflow_job",
       "target": "github_core__github_action",
@@ -520,6 +612,23 @@
       "source": "github_core__github_workflow",
       "target": "github_core__status_check",
       "condition": "a declared job's display name equals a required context (or is its matrix template) and the requirement's integration is null or GitHub Actions (15368)"
+    },
+    {
+      "slug": "PUBLISHES_PACKAGE__github_core",
+      "source": "github_core__github_account",
+      "target": "github_core__github_package",
+      "condition": "link_kind owner always; link_kind repository when GitHub links the package to a collected repository"
+    },
+    {
+      "slug": "PUBLISHES_PACKAGE_VERSION__github_core",
+      "source": "github_core__github_package",
+      "target": "github_core__github_package_version"
+    },
+    {
+      "slug": "BUILDS_PACKAGE_VERSION__github_core",
+      "source": "github_core__github_actions_run",
+      "target": "github_core__github_package_version",
+      "condition": "a container tag sha-<short> (or full sha) matches a collected run's head_sha"
     }
   ]
 }

@@ -1,0 +1,34 @@
+{
+  "slug": "BUILDS_RELEASE__github_core",
+  "name": "Builds Release",
+  "description": "A workflow run is the one that (most likely) produced this release. DERIVED, not reported: GitHub records who published a release but not which run did, so the edge is inferred from the run's head commit or tag ref, and `match_kind` says which. Runs triggered BY the release (`event: release`) are excluded \u2014 they consume it. The corpus's `BUILDS_PACKAGE_VERSION` rule applies: its absence is a finding, but only after `match_kind` has been read.",
+  "sources": [
+    "github_core__github_actions_run"
+  ],
+  "targets": [
+    "github_core__github_release"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "releases",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "match_kind": {
+        "type": "string",
+        "enum": [
+          "tag_ref",
+          "same_commit"
+        ],
+        "description": "How the run was matched to the release. `tag_ref`: the run's `head_branch` IS the release's tag name \u2014 a tag-push run, the strongest signal GitHub offers. `same_commit`: the run's `head_sha` is the commit the release tag resolves to \u2014 co-location on a commit, which every workflow that ran on that push shares, so several runs may carry it."
+      },
+      "head_sha": {
+        "type": "string",
+        "description": "The run's head commit at match time, so the edge is checkable without re-reading either node."
+      }
+    }
+  }
+}

@@ -74,5 +74,6 @@ Under account scope the repository list comes from `GET /orgs/{owner}/repos` (us
 - `default_branch` — the branch most controls default to targeting. Load-bearing in analysis rather than descriptive: a cache written on the default branch is restorable by workflows on it, and a ruleset that protects `main` protects nothing if the default branch is not `main`.
 - `visibility` — `public`, `private` or `internal`. Changes what a condition *means*: a self-hosted runner on a private repository is ordinary, and on a public one it is one of the strongest findings in the corpus.
 - `html_url` — the browser URL, for linking out.
+- `outputs_observability` — three states per OUTPUT surface (github-core#31): `{"releases": "observed"|"unobservable", "artifacts": ..., "packages": ..., "notes": {surface: why}}`. Lives here rather than on the output nodes because a property that qualifies an absence belongs on the node the absence is about, never on the nodes that failed to appear — the same ruling as `github_ruleset.bypass_observability`. The machinery view reads it to tell "no releases" from "could not look"; `{}` means the collector never ran the output surfaces, which is itself not "none".
 - `configuration` — JSONB for repository detail not yet promoted to a column; also the honest home for repository-level Actions policy when collected.
 - `tags` — TAP's tag map.

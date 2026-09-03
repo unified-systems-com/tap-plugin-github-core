@@ -1,0 +1,26 @@
+{
+  "slug": "TARGETS_REF__github_core",
+  "name": "Targets Ref",
+  "description": "The release was cut on this tag ref. Both ends carry the commit they resolved to when observed \u2014 `github_release.target_sha` and `git_ref.head_sha` \u2014 so a tag moved after the release was cut is a query over two fields, not a diff the collector keeps.",
+  "sources": [
+    "github_core__github_release"
+  ],
+  "targets": [
+    "github_core__git_ref"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "releases",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "tag_name": {
+        "type": "string",
+        "description": "The tag as the release names it, without the `refs/tags/` prefix \u2014 carried so the edge reads without dereferencing the ref."
+      }
+    }
+  }
+}

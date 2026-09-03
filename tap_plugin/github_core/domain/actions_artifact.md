@@ -44,6 +44,8 @@ Observed 2026-09-02 by executed call on `unified-systems-com/tap`: `total_count:
 
 **Credential caveat, stated because it was not tested:** the observation above was made with a classic `repo`-scoped token (`X-Oauth-Scopes: … repo, workflow`). The App installation token this plugin recommends has not yet been observed against this endpoint; the manifest declares `actions:read` from the documentation and degrades with a warning on 403/404, so a refused read renders as *not observable*, not as an empty repository.
 
+**Three states, on the repository node** (github-core#31). `github_repository.outputs_observability.artifacts` is `observed` on a 200 and `unobservable` on a 403 or 404, with the status in `notes.artifacts`. A refusal lands no nodes and is recorded on the node the absence is about, never rendered as a repository that uploads nothing. Every artifact that does land hangs off its repository through `STORES_ARTIFACT`, so one whose run is outside the collected window stays reachable without the `UPLOADS_ARTIFACT` edge.
+
 **Absence shape** (github-core#14): **Shape C — an immutable event with a retention window.** The upload happened; it does not stop having happened when retention ends. GitHub keeps expired artifacts listed with `expired: true`, so expiry is an observed field on this node and absence from the listing — which also happens under the per-repository cap — is never grounds for a tombstone. A reconciler must refuse this type.
 
 **Not observable at all:** downloads (see Boundaries); which job uploaded (the listing names the run); anything about an artifact that has aged out of the listing entirely.

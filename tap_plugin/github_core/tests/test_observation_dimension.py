@@ -18,14 +18,23 @@ EDGES_DIR = Path(github_models.__file__).parent.parent / "edges"
 
 # ActionsCache is a BYPRODUCT of a run, not configuration someone wrote — it exists
 # because a workflow executed and wrote it.
-# ActionsArtifact likewise: a run uploaded it (github-core#14 shape C — an immutable event).
-EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "RuleSuite", "ActionsArtifact"}
+# The OUTPUTS (github-core#31) are all products of execution: a release was published, an
+# artifact was uploaded by a run (github-core#14 shape C — an immutable event), a package
+# version was pushed. A release rides the config-layer GraphQL transport, and transport is
+# not layer.
+EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "RuleSuite",
+                    "GithubRelease", "ActionsArtifact", "GithubPackage", "GithubPackageVersion"}
 # SCOPED_TO is sourced on actions_cache, which is execution — the layer follows the
 # source model rather than a second map (req-github-core-dimensions-6).
 # TRIGGERED_EVALUATION / BYPASSED_RULE / EVALUATED_ON are all sourced on rule_suite, which is execution.
-# UPLOADS_ARTIFACT is sourced on the run: execution.
+# Output edges follow their SOURCE: run-sourced (BUILDS_RELEASE, UPLOADS_ARTIFACT,
+# BUILDS_PACKAGE_VERSION), release-sourced (TARGETS_REF) and package-sourced
+# (PUBLISHES_PACKAGE_VERSION) are execution; the repository/account containment edges
+# (PUBLISHES_RELEASE, STORES_ARTIFACT, PUBLISHES_PACKAGE) are declaration, like HAS_CACHE.
 EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "HAS_ACTIONS_JOB", "EXECUTED_ON", "SCOPED_TO",
-                   "TRIGGERED_EVALUATION", "BYPASSED_RULE", "EVALUATED_ON_REF", "UPLOADS_ARTIFACT"}
+                   "TRIGGERED_EVALUATION", "BYPASSED_RULE", "EVALUATED_ON_REF",
+                   "BUILDS_RELEASE", "UPLOADS_ARTIFACT", "BUILDS_PACKAGE_VERSION", "TARGETS_REF",
+                   "PUBLISHES_PACKAGE_VERSION"}
 # Sources span both layers, so the layer belongs to the endpoint, not the edge
 # type; the collector sets it per emitted edge (req-github-core-dimensions-6).
 LAYER_SPANNING_EDGES = {"REFERENCES_RESOURCE"}

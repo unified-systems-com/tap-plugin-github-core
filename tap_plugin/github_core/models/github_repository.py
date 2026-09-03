@@ -39,6 +39,7 @@ class GithubRepository(BaseModel):
         "default_branch": {"type": "string"},
         "visibility": {"type": "string"},
         "html_url": {"type": "string"},
+        "outputs_observability": {"type": "object"},
         "configuration": {"type": "object"},
         "tags": {"type": "object"},
     }
@@ -51,6 +52,7 @@ class GithubRepository(BaseModel):
         "default_branch": {"validation": "jsonschema", "schema": {"type": "string"}},
         "visibility": {"validation": "jsonschema", "schema": {"type": "string"}},
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
+        "outputs_observability": {"validation": "jsonschema", "schema": {"type": "object"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
@@ -63,6 +65,12 @@ class GithubRepository(BaseModel):
     default_branch = models.CharField(max_length=255, blank=True, default="")
     visibility = models.CharField(max_length=32, blank=True, default="")
     html_url = models.URLField(max_length=512, blank=True, default="")
+    #: Three states per OUTPUT surface — `{"releases": "observed"|"unobservable", "artifacts": ...,
+    #: "packages": ...}` plus a `notes` map saying why. Lives on the repository because a property
+    #: that qualifies an absence belongs on the node the absence is about, never on the nodes that
+    #: failed to appear (github-core#31; the same ruling as `github_ruleset.bypass_observability`).
+    #: Empty `{}` means the collector never ran the output surfaces, which is itself not "none".
+    outputs_observability = models.JSONField(default=dict, blank=True)
     configuration = models.JSONField(default=dict, blank=True)
     tags = models.JSONField(default=dict, blank=True)
 

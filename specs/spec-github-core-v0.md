@@ -73,6 +73,8 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-org-scope | [Account Scope](#account-scope) | Implemented | 2026-08-26 (pulled by git-serious): the envelope names an `owner`; the collector enumerates its repositories (org, user fallback), `repos` becomes an optional include-filter, and the run records the enumeration incl. walk completeness. Repos-only envelopes remain valid as the degenerate run config |
 | req-github-core-models | [Model Set](#model-set) | Implemented | account/repo/workflow/run/job/runner (0001) + synthesized `github_platform` (0002) — seven tables. `oidc_issuer` was extracted to the `identity_core` substrate plugin (dropped here in 0004); github still mints the issuer node via `identity_core.issuer`. |
 | req-github-core-rule-suites | [Rule Suites — Who Actually Bypassed](#rule-suites--who-actually-bypassed) | In Development | 2026-08-28 (settled empirically): enumeration of bypass ACTORS has a documented write-access ceiling, but rule suites answer the adjacent question — who actually bypassed a gate — and return 200 to a read-only App with actor names. Detection where enumeration is refused. |
+| req-github-core-releases | [Releases — The First Output](#releases--the-first-output) | In Development | 2026-09-02 (github-core#31): `github_release` from the config-layer GraphQL query at no extra request, keyed on `owner/repo` + release id; `PUBLISHES_RELEASE` containment, `TARGETS_REF` onto the tag, and a DERIVED `BUILDS_RELEASE` whose `match_kind` labels its own evidence. Three states on the repository node (`outputs_observability`). |
+| req-github-core-packages | [GitHub Packages — The Collection Seam](#github-packages--the-collection-seam) | In Development | 2026-09-02 (github-core#31): `github_package` / `github_package_version` carrying a purl, so `supply_chain_core` (vocabulary decision 4) can claim them by identity. **Not observable with the product credential**: GitHub marks the packages endpoints `enabledForGitHubApps: false`; measured as a 400 on the container listing. Recorded as `unobservable`, never zero. Adds `organization:packages:read` to the derived permission set — existing installations must re-accept. |
 | req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
 | req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-actions-used | [Actions Used](#actions-used) | In Development | 2026-09-02 (github-core#45, ranked first by `build-github-corpus`): `github_action` node keyed on the action path, shared across the scope, plus `USES_ACTION` carrying the pin. The parser no longer labels every non-SHA ref `tag`; a mutable name is resolved only against an in-scope repository's refs and is otherwise `unresolved` / `unobservable`. |
@@ -617,6 +619,13 @@ download steps land on `workflow_job.configuration.artifact_steps`, and the corp
 `cross_workflow` is carried there — a `run-id:` or `repository:` input means the step reaches into
 another run's outputs — so the security-relevant bit survives without a guessed edge.
 
+**Reachable, and three states on the repository** (github-core#31). `STORES_ARTIFACT` (repository →
+artifact) is emitted for every artifact that lands, so one whose run is outside the window stays
+reachable from its repository without the `UPLOADS_ARTIFACT` join. A refused listing (403/404) lands
+nothing and records `github_repository.outputs_observability.artifacts = unobservable` with the status
+in `notes.artifacts` — on the node the absence is about, never rendered as a repository that uploads
+nothing — the same three-state field the releases and packages surfaces stamp.
+
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
@@ -625,6 +634,8 @@ another run's outputs — so the security-relevant bit survives without a guesse
 | req-github-core-artifacts-2 | Upload Join Is Exact And Batch-Honest | In Development | `UPLOADS_ARTIFACT` is emitted from `workflow_run.id` only when that run is in the batch; the run records linked and unlinked counts. | |
 | req-github-core-artifacts-3 | Expiry Observed, Never Inferred | In Development | `expired` is stored as GitHub reports it; absence from the listing is stated as non-evidence in the truncation warning. | Shape C. |
 | req-github-core-artifacts-4 | Declared Steps Kept, Not Joined | In Development | `actions/upload-artifact` and `actions/download-artifact` steps land on the job's `configuration.artifact_steps` with mode, name/pattern and `cross_workflow`; no edge is emitted from a declaration to an artifact instance. | The gap is named, not papered over. |
+| req-github-core-artifacts-5 | Refused Is Not Empty | In Development | A 403 or 404 records `outputs_observability.artifacts = unobservable` with the status in `notes.artifacts`, warns, and lands nothing. | `tests/test_outputs.py::TestArtifactsLand`. |
+| req-github-core-artifacts-6 | Reachable From The Repository | In Development | Every artifact that lands is joined to its repository by `STORES_ARTIFACT`, in or out of the run window. | `tests/test_artifacts.py`. |
 
 ### Commits
 ----
@@ -967,6 +978,115 @@ identity, a timestamp, and facts that point at it. Modelling it duplicates nothi
 | req-github-core-rule-suites-4 | Bypass Is The Collected Subset | In Development | Collection filters to `rule_suite_result=bypass`. A passing suite is a routine push and lands nothing; the `result` field is kept so the model can widen without a migration. | ~47 suites/day on one repository — collecting every push evaluation would swamp the grid for no finding. |
 | req-github-core-rule-suites-5 | The Window Is Explicit, Always | In Development | Every call sets `time_period` explicitly. Omitting it silently defaults to `day`, so a repository with a month of bypasses reads as a quiet one. | Measured: `day` 47, `week` 100+, `month` 100+ on one repository. An absence rendering as a finished answer, arriving through a query default. |
 | req-github-core-rule-suites-6 | Refused Is Not Empty | In Development | A refusal degrades with a warning and records that the surface was unreachable; it never lands zero bypass events as though none occurred. | Same three-state discipline as `bypass_observability`. |
+
+### Releases — The First Output
+----
+RID: `req-github-core-releases`
+Status: `In Development`
+
+The machinery view (git-serious-tap#35) has an OUTPUT column — what the pipeline produces — and
+until github-core#31 no node existed for any output. The column rendered **"artifacts: not yet
+collected"**: an explicit NOT-OBSERVABLE state, never an empty column, and that placeholder was
+the issue's tracking marker in the UI. This requirement retires it for releases.
+
+**Transport.** `Repository.releases` is selected inside the config-layer GraphQL query
+(`req-github-core-graphql-config`) at no extra request — measured 2026-09-02: five releases on
+`unified-systems-com/tap`, the whole query moving from 64 to 66 rate-limit points. The REST
+`/releases` endpoint exists and is not called; George's ruling (2026-09-02) is GraphQL wherever
+GitHub offers it, REST where it does not.
+
+**A release is a product of execution riding the declaration transport.** It is stamped
+`github.observation: execution` because it exists only because someone published it. Transport
+is not layer.
+
+**Identity is the release id, not the tag.** A release can be deleted and re-cut on the same
+tag; a tag can be moved under a release. Keyed on the id, the first is a new node and the second
+is the same node whose `target_sha` changed — which field history records for free.
+
+**The producer is derived, and says so.** GitHub records who published a release (an account —
+`tap-release-please[bot]` on the product repository) but never which run. `BUILDS_RELEASE` is
+inferred from the run window already in hand, and its `match_kind` names the evidence: `tag_ref`
+when the run's `head_branch` is the release's tag (a tag-push build), `same_commit` when the
+run's `head_sha` is the commit the tag resolves to (co-location, shared by every workflow that
+ran on that push). Runs triggered *by* the release (`event: release`) are consumers and are
+excluded. Measured on the product repository: every release matches `same_commit` only, because
+release-please cuts them on a push to `main` — the honest answer, and why the property exists.
+
+**Three states live on the repository.** `github_repository.outputs_observability` carries
+`releases` / `artifacts` / `packages` ∈ `observed` | `unobservable` with a `notes` map, because a
+property that qualifies an absence belongs on the node the absence is about (the
+`bypass_observability` ruling). The view reads it to tell "no releases" from "did not look".
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-releases-1 | Release Model Declared | In Development | A `github_release` node keyed on `owner/repo` + release id carries `tag_name`, `name`, the three GitHub flags (nullable), `author_login`, `target_sha`, timestamps, `asset_count` and `assets`; joined to its repository by `PUBLISHES_RELEASE`. | `models/github_release.py`; `tests/test_outputs.py::TestReleasesLand`. |
+| req-github-core-releases-2 | Tag Joined When Observed | In Development | `TARGETS_REF` joins a release to `refs/tags/<tag_name>` when that ref was collected; an unobserved tag carries no edge and no error, and `tag_name` remains the record. | Both ends carry the commit they resolved to; a re-tag is a query over two fields. |
+| req-github-core-releases-3 | Producer Derived And Labelled | In Development | `BUILDS_RELEASE` is emitted per collected run matching by `tag_ref` or `same_commit`, carrying `match_kind` and `head_sha`; runs with `event == release` are never joined as producers. | The only place a run→release claim is made, and it names its own evidence. |
+| req-github-core-releases-4 | Refused Is Not Empty | In Development | A repos-only scope, or a GraphQL response without the `releases` field, records `outputs_observability.releases = unobservable` with the reason, warns, and lands no release nodes; truncation past the page cap is reported with the total. | Same three-state discipline as `bypass_observability`. |
+
+### GitHub Packages — The Collection Seam
+----
+RID: `req-github-core-packages`
+Status: `In Development`
+
+**Decision 4 stands; this is the seam.** The vocabulary corpus homes `package` /
+`package_version` in a future `supply_chain_core`, keyed on a purl. That ruling is about
+IDENTITY and is not re-litigated here. GitHub Packages is nevertheless a GitHub surface — its
+API, its permission, its App-support matrix are GitHub's — so the COLLECTION belongs in
+github_core. The plugin therefore emits github_core-owned `github_package` and
+`github_package_version` nodes carrying a `purl` field (`pkg:docker/ghcr.io/<owner>/<name>@<digest>`
+for the container registry; the ecosystem's purl type with `?repository_url=<host>.pkg.github.com`
+for npm/maven/rubygems/nuget; `pkg:github/...` otherwise) so the substrate can later claim or
+alias them by the identity the corpus chose. Recorded in the vocabulary spec's decisions.
+
+**Not observable with the product credential, and that is the fact to carry.** GitHub's OpenAPI
+description marks every packages endpoint `enabledForGitHubApps: false`. Measured 2026-09-02
+with a read-only App installation token against `unified-systems-com`:
+
+- `GET /orgs/{org}/packages?package_type=container` → **400 `Invalid argument.`** — while the
+  organization's ghcr.io images (`tap-web`, `tap-db`) exist.
+- `package_type=npm` / `maven` / `docker` → **200 `[]`** — which proves nothing.
+- `GET /orgs/{org}/packages/container/tap-web` and `/versions` → **200**, `version_count: 1973` —
+  the per-package endpoints answered for a *public* package. A measurement, not a guarantee, and
+  the collector does not guess package names to exploit it (an inventory of one is not an
+  inventory).
+- GraphQL `Repository.packages` / `Organization.packages` → `totalCount: 0`, no `errors`, same
+  organization. The container registry is not on that transport.
+
+The rule is the bypass-actor asymmetry: a filtered listing cannot invent a package, so a
+**non-empty** answer proves itself and an **empty** answer under an App credential is
+`unobservable`. Whether granting `organization_packages: read` turns the 400 into a listing is
+**unmeasured** — the App has not been re-accepted. The credential GitHub documents is a classic
+personal access token with `read:packages`, which the envelope does not model; the token, when
+placed, is routed to this surface first (per-source routing, `req-github-core-app-auth-1`).
+
+**Permission.** The manifest declares `organization:packages:read` on both package sources, so
+the derived App manifest now requests `organization_packages: read` (George, 2026-09-02:
+accepted). **An existing installation must re-accept the new permission** — GitHub prompts the
+account's admins; until then the App carries the old set and this surface stays unobservable.
+That is the ordinary consequence of `req-github-core-app-auth-2`, recorded here so nobody
+reads "unobservable" as a defect.
+
+**`BUILDS_PACKAGE_VERSION` — its absence is the finding, after reading `match_kind`.** GitHub
+records nothing about which run pushed a version. The edge is derived from the `sha-<short>`
+tag convention `publish-images` (and `docker/metadata-action`'s default) applies, matched
+against the head commit of a collected run; `attested` is null until an attestation surface
+reads it. A version tagged any other way, on an unlinked package, older than the run window, or under an
+unobservable listing, carries no edge for a reason that is a limit before it is a finding. And the
+edge's presence is a claim by the tagger — anyone with registry push can tag a digest
+`sha-<any commit>` — which is why it carries `attested: null` rather than reading as provenance.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-packages-1 | Package And Version Declared With Purls | In Development | `github_package` (keyed owner + type + name) and `github_package_version` (keyed under it on GitHub's version id) each carry a `purl` minted once by `identity.package_purl`; versions carry `container_tags`; joined by `PUBLISHES_PACKAGE_VERSION`. | `tests/test_outputs.py::TestPackagesLand`, `TestIdentity::test_purl_per_package_type`. |
+| req-github-core-packages-2 | Owner Always, Repository When Linked | In Development | `PUBLISHES_PACKAGE` runs from the owner account (`link_kind: owner`) for every package, and from the repository (`link_kind: repository`) only when GitHub links one that was collected. Under a `repos` include-filter, packages not linked to a collected repository are counted in the note and not emitted. | GitHub's link, never inferred from the name. A repo-scoped envelope asked for those repositories' outputs, not the account's inventory (PR #50 review). |
+| req-github-core-packages-3 | Unobservable Is Never Zero | In Development | Every package type is asked for; a 400/403/404, or a 200 `[]` under an App-only credential, records that type as unobservable; `outputs_observability.packages` on every collected repository is `observed` only when every type answered with proof, else `unobservable` with the per-type reasons; a non-empty answer proves itself. | The captured 400 + `[]` shape is the fixture. |
+| req-github-core-packages-4 | Build Join Derived And Labelled | In Development | `BUILDS_PACKAGE_VERSION` is emitted only from a run of the repository GitHub links the package to, when a `sha-<7..40 hex>` container tag is a prefix of that run's `head_sha`, with `match_kind: tag_sha` and `attested: null`; an unlinked package carries no edge; `sha256-` (cosign) and non-hex tags never match. | The edge is a claim by whoever tagged the image, forgeable by anyone with registry push, and says so; an attestation surface upgrades it (PR #50 review). |
+| req-github-core-packages-5 | Versions Degrade To The Package | In Development | A refused versions listing lands the package alone and warns; a capped listing warns against GitHub's `version_count`. | 1,973 versions on one image at capture. |
 
 ### GitHub Apps
 ----
