@@ -79,6 +79,7 @@ neutral substrate when one is extracted, not in `github_core`.
 | `status_check` | no | self | **exists** (2026-09-02, #61) | 6 sources; convergence node — required by rulesets, produced by workflows/apps. Keyed `<owner>#<context>`; **a check nobody requires has no node** (every job produces one; the node is the requirement's target). The App producer waits on the App's numeric id |
 | `github_action` | no | self | **exists** (2026-09-02, #45) | 4 sources, and one carries `is_pinned` — the same property we proposed independently. Keyed on the action path, platform-global; the pin lives on the edge |
 | `actions_secret` | partial | self | proposed | **11 sources**; 12 incidents |
+| `dependabot_alert` | partial | self | proposed (2026-09-03) | GitHub's own vulnerable-dependency finding; CONSUME per the prior-art verdict. Joins the action and the workflow it flags (`req-github-core-dependabot-alerts`). Neutral shape is *finding*; the source is GitHub's |
 | **`actions_cache`** | neutral-capable | **self** | **new** | 5 incidents including the two most recent. Convergence node: written by a low-trust job, restored by a privileged one |
 | `app_installation` | no | self | proposed | 7 sources. **Splits the existing `github_app`**: the registered application and the grant are different objects |
 | `pull_request` | yes | self | proposed | 10 sources |
@@ -128,6 +129,7 @@ properties must justify why it needs none.
 | `CALLS_WORKFLOW` | **workflow_job** → workflow | self | **exists** (2026-09-02, #29) | `{declared_ref, pin_kind, is_pinned, resolution, resolved_sha, same_repository, secrets_inherit}` — the `USES_ACTION` pin grammar plus whether the caller forwards every secret. **Source corrected to the job**: the call is written on the job, which carries the `permissions` and `secrets` the question needs, and two jobs in one file can call two workflows. Callee not on the grid → no edge; `call_resolution` on the job (three states) |
 | `TRIGGERS_WORKFLOW` | workflow → workflow | self | **exists** (2026-09-02, #52) | `{trigger_event, declared_name, types, branches, branches_ignore}` — completing → triggered, from the target's `on.workflow_run`. **`conclusion_filter` dropped**: GitHub has no such key; the check lives in job `if:` expressions and extracting it is a guess. Filters carried only as written — GitHub's `types` default is not filled in |
 | **`DEFINED_IN`** | github_action → repository | self | new | — enables owner-transfer and archived-action detection |
+| `FLAGS_ACTION` / `FLAGS_WORKFLOW` | dependabot_alert → github_action / github_workflow | self | proposed (2026-09-03) | — property-free: the finding's facts are on the alert node; the edge is the join on package name / manifest path |
 | `HAS_REPO_PERMISSION` | account\|team → repository | self | proposed | `{permission, affiliation, granted_via}` — **four sources independently reify permission provenance**; carry it from day one |
 | `MEMBER_OF_ORG` | account → account | self | proposed | `{role}` |
 | `OPENS_PULL_REQUEST` | account\|app → pull_request | friends | proposed | `{author_association}` |

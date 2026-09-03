@@ -38,7 +38,7 @@
           "unresolved",
           "unpinned"
         ],
-        "description": "What kind of thing the declared ref is. `sha` and `digest` are immutable and provable from the string alone. `tag` and `branch` are mutable names whose kind was RESOLVED against the action repository's refs (only possible when that repository is inside the observed scope). `unresolved` is a mutable name whose kind could not be established — the honest value for `actions/checkout@v4` on almost every grid, never guessed as `tag`. `unpinned` means no ref was written."
+        "description": "What kind of thing the declared ref is. `sha` and `digest` are immutable and provable from the string alone. `tag` and `branch` are mutable names whose kind was RESOLVED against the action repository's refs (only possible when that repository is inside the observed scope). `unresolved` is a mutable name whose kind could not be established \u2014 the honest value for `actions/checkout@v4` on almost every grid, never guessed as `tag`. `unpinned` means no ref was written."
       },
       "is_pinned": {
         "type": "boolean",
@@ -53,9 +53,12 @@
         "enum": [
           "literal",
           "in_scope",
-          "unobservable"
+          "rest",
+          "unresolved",
+          "unobservable",
+          "not_attempted"
         ],
-        "description": "How `pin_kind` and `resolved_sha` were established. `literal`: read off the string (a SHA or digest). `in_scope`: resolved against refs the collector holds for the action's own repository. `unobservable`: the action lives outside the observed scope and no call was made to look — absence of a resolved SHA here is NOT evidence of anything."
+        "description": "How `pin_kind` and `resolved_sha` were established. `literal`: read off the string (a SHA or digest). `in_scope`: resolved against refs the collector holds for the action's own repository. `unobservable`: the action lives outside the observed scope and no call was made to look \u2014 absence of a resolved SHA here is NOT evidence of anything. `rest`: the action's repository is outside the scope and the name was looked up over REST (`git/ref/tags/{ref}`, then `heads/{ref}`; an annotated tag peeled to its commit) and found \u2014 `resolved_sha` is the commit it pointed at when observed. `unresolved`: looked up and found at neither path \u2014 the ref does not exist as written. `unobservable`: no lookup answered (out of scope with no client, or refused/failed); absence of a SHA here is NOT evidence about the pin. `not_attempted`: the run's per-run resolution cap was spent."
       },
       "step_indexes": {
         "type": "array",

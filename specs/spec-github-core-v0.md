@@ -89,6 +89,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-runner | [Runner Semantics](#runner-semantics) | Implemented | Durable runner nodes + matchable EXECUTED_ON + observed-runner-on-job + no-ephemeral-runner-nodes |
 | req-github-core-grid-links | [Existing Grid Links](#existing-grid-links) | Implemented | Enrichment phase + exact-only + warn-only failures + Gryphon read path (via `=~` regex operator); OIDC link verified end-to-end against samsite + AWS |
 | req-github-core-python-deps | [Plugin Python Dependency](#plugin-python-dependency) | Implemented | `PyYAML` is plugin-owned via root uv workspace; first proof of `req-plugin-arch-python-deps` |
+| req-github-core-dependabot-alerts | [Dependabot Alerts](#dependabot-alerts) | Proposed | 2026-09-03: GitHub's own vulnerable-dependency findings, per repository, landed as `dependabot_alert` nodes joined to the `github_action` (by package) and `github_workflow` (by manifest path) they flag. The App already holds `repository:vulnerability_alerts:read` (exploratory); the manifest declaration is what is missing. Not yet observable on our own org; fixture in place. |
 | req-github-core-backlog-references | [Variables And Secret References (Backlog)](#variables-and-secret-references-backlog) | Backlog | Two-source-of-truth model, hotlink contract implication, provenance shape; pick up when critical path |
 | req-github-core-backlog-run-attempts | [Multi-Attempt Run Observation (Backlog)](#multi-attempt-run-observation-backlog) | Backlog | Per-attempt run + job fan-out, re-run-failed-jobs subtlety, HAS_ACTIONS_JOB lifecycle; pick up when critical path |
 | req-github-core-backlog-grid-vocab-links | [Grid-Vocabulary Reference Resolution (Backlog)](#grid-vocabulary-reference-resolution-backlog) | Backlog | Replace the parser's regex shape-guessing with matching against the known grid vocabulary (regions/zones/dist-ids); removes junk refs, recovers `${{ }}`-embedded matches, needs confidence markers |
@@ -513,8 +514,14 @@ request); otherwise **`unresolved`**, with `resolution: unobservable` when the r
 scope and `resolution: in_scope` when it was in scope and the name matched nothing. The previous
 parser called every non-SHA ref `tag`, which was a declaration that existed and was false —
 presence is not correctness — and `resolution` exists so a reader can tell "pinned to a tag" from
-"pinned to a name nobody looked up". No call is made to an out-of-scope action repository in this
-wave; the article records what that call would be.
+"pinned to a name nobody looked up". An out-of-scope
+action repository IS looked up (2026-09-03, PR #67): `GET /repos/{o}/{r}/git/ref/tags/{ref}` then
+`.../heads/{ref}` on 404 — the order a runner resolves — with an annotated tag peeled to its commit
+via `GET .../git/tags/{sha}`; a hit is `resolution: rest` with the commit as `resolved_sha`, a miss
+at both paths is `unresolved` (the ref does not exist as written), a refusal or failure is
+`unobservable` and warned, and past the per-run cap the edge says `not_attempted` and the run says
+how many. Both endpoints ride `repository:contents:read`, already in the union, and answer any
+credential on a public repository. One lookup per distinct (repository, ref) per run.
 
 `is_pinned` is carried explicitly (true iff `sha` or `digest`) so the one-bit control every
 action-pinning check asks is not re-derived per view. `resolved_sha` — the SHA itself, or an
@@ -532,9 +539,14 @@ the corpus's next items on this surface and are not built here.
 | --- | --- | :---: | --- | --- |
 | req-github-core-actions-used-1 | Action Node Is Shared | In Development | Every non-local `uses:` in a collected workflow lands as one `github_action` per action path, platform-global, with no owner/repo dimension. | Same fan-in shape as `github_app`. |
 | req-github-core-actions-used-2 | The Pin Lives On The Edge | In Development | `USES_ACTION` (job → action) carries `declared_ref`, `pin_kind`, `is_pinned`, `resolution`, `step_indexes` and, when known, `resolved_sha`; a job calling the same action at two refs emits two edges. | Edge id includes the declared ref for that reason. |
-| req-github-core-actions-used-3 | A Name Is Never Called A Tag Without Evidence | In Development | A non-SHA ref parses as `unresolved`; it becomes `tag` or `branch` only by matching the in-scope repository's refs, and is `unobservable` when that repository is out of scope. | Asserted at the parser and the collector. |
+| req-github-core-actions-used-3 | A Name Is Never Called A Tag Without Evidence | In Development | A non-SHA ref parses as `unresolved`; it becomes `tag` or `branch` only by matching the in-scope repository's refs (`in_scope`) or by a REST lookup of an out-of-scope one (`rest`); it is `unobservable` only when no lookup answered. | Asserted at the parser and the collector. |
 | req-github-core-actions-used-4 | Docker Steps Are Actions Too | In Development | `docker://image[:tag|@sha256:digest]` lands as a `kind: docker` node; a digest is `digest` and pinned, an image tag is `tag` and not. | |
-| req-github-core-actions-used-5 | The Run Says What It Saw | In Development | The run records the distinct-action count, the usage count, how many usages were unpinned and how many of those were unobservable, so a zero reads as a count and not a silence. | `ACTIONS_USED`. |
+| req-github-core-actions-used-5 | The Run Says What It Saw | In Development | The run records the distinct-action count, the usage count, how many usages were unpinned and how many of those were unobservable, so a zero reads as a count and not a silence. | `ACTIONS_USED`, extended 2026-09-03 with the REST states and lookups spent. |
+| req-github-core-actions-used-6 | Out-Of-Scope Refs Resolved Over REST | Implemented | A `tag` or `branch` pin on an out-of-scope action carries the commit it pointed at when observed (`resolution: rest`), tags before heads, an annotated tag peeled; a ref at neither path is `unresolved`; a refused lookup, or an annotated tag whose commit cannot be established (refused, or nested deeper than three tag objects), is `unobservable` and warned — never a blank that reads as unpinned, never a tag object's SHA dressed as the commit. A repository that is not exactly `owner/repo`, or a ref with `..`, an empty segment or a leading slash, is `unresolved` without a request — untrusted `uses:` text never shapes an API path. | `test_action_ref_resolution.py`. OBSERVED 2026-09-03 on `unified-systems-com/git-serious-fixtures`: `actions/download-artifact@v3` → `tag`/`rest`/9bc31d5c…, `actions/checkout@v4` → `tag`/`rest`/11d5960a…; the run record: "5 usage(s) pinned to a mutable name or nothing, of which 2 resolved over REST … 2 REST lookup(s) spent". The fixture's own `actions/hello@does-not-exist` is an IN-scope miss (`pin_kind: unresolved`, `resolution: in_scope`); the REST `unresolved` and `unobservable` states are unit-verified only. |
+| req-github-core-actions-used-7 | REST Budget Bounded And Stated | Implemented | Lookups are cached per (repository, ref) for the run and capped (`_ACTION_REF_RESOLUTION_CAP`); past the cap edges carry `not_attempted` and the run warns with the count; `ACTIONS_USED` reports lookups spent and counts per state. | `test_one_lookup_per_distinct_ref_and_a_cap`. The cap path is unit-verified only. |
+| req-github-core-actions-used-8 | Drift Is Queryable | Proposed | After two observations across which a tag was re-pointed, the `USES_ACTION` edge's `resolved_sha` history shows the move under an unchanged `declared_ref`. | The observation is its own issue, github-core#71, on the fixture's `v1` tag. |
+| req-github-core-actions-used-9 | Publishing Repository Linked | Backlog | `DEFINED_IN` joins the action to a `github_repository` carrying `archived` and `fork`, so an archived or transferred action is a query. | Corpus row; named as the next item. |
+| req-github-core-actions-used-10 | Canonical-Repository Membership | Backlog | A SHA pin is checked to belong to the action's canonical repository rather than a fork in its network (`resolves_to_fork`). | Needs reachability from a branch or tag head; `commits/{sha}` answers for the whole fork network. |
 
 ### Workflow Chains
 ----
@@ -1453,6 +1465,86 @@ justified by and documented with `github_core`.
 | req-github-core-python-deps-1 | PyYAML Approved | Implemented | `PyYAML` is approved specifically for `github_core` workflow parsing. | Declared in `plugins/github_core/pyproject.toml`. |
 | req-github-core-python-deps-2 | Plugin-Owned Declaration | Implemented | The dependency is declared in plugin-local Python dependency metadata, not `tap-plugin.toml`. | First proof of `req-plugin-arch-python-deps`; landed via root `[tool.uv.workspace]`. |
 | req-github-core-python-deps-3 | No Isolation Claim | Implemented | The spec does not claim runtime isolation from other installed Python packages. | |
+
+### Dependabot Alerts
+----
+RID: `req-github-core-dependabot-alerts`
+
+Status: `Proposed`
+
+GitHub already computes one class of finding for us: a Dependabot alert names a package in a
+manifest, the advisory that affects it, the vulnerable range and the first patched version, and
+its lifecycle (`open`, `dismissed` with a reason, `fixed`, `auto_dismissed`). For the Actions
+ecosystem the "package" is an action and the "manifest" is a workflow file — exactly the two nodes
+`req-github-core-actions-used` put on the grid. The prior-art verdict is CONSUME
+(`doc-git-serious-cicd-security-prior-art.md` §2.11): land them in the same finding shape zizmor
+uses, with the scanner as a dimension, so two sources' disagreement about one workflow is a query.
+
+**Shape.** One `dependabot_alert` node per (repository, alert number), all states — a fixed alert
+is history, not noise, and "no open alerts" is only meaningful beside "N fixed". Fields carry the
+alert's own facts (state, ecosystem, package, manifest path, scope, advisory ids and severity,
+vulnerable range, first patched version, the lifecycle timestamps, dismissal reason and comment)
+with the raw alert kept in `configuration`. Two edges, property-free by construction: `FLAGS_ACTION`
+(alert → `github_action`, joined on the package name being the action path) and `FLAGS_WORKFLOW`
+(alert → `github_workflow`, joined on `manifest_path` being the workflow's path). An alert whose
+package is not on the grid as an action (a pip package, say) lands with no `FLAGS_ACTION` edge and
+its ecosystem as the reason. Dimensions: the repository's, plus `github.surface: security` (a new
+value, documented in the surface dimension article when built).
+
+**Endpoint and permission.** `GET /repos/{owner}/{repo}/dependabot/alerts` (all four states,
+paginated) at **`repository:vulnerability_alerts:read`** — the App permission GitHub labels
+*Dependabot alerts*, and the first permission this plugin adds beyond the union it held on
+2026-09-03. `permission_failure: degrade_with_warning`: a 403 is a per-repository NOT OBSERVABLE
+state, recorded and warned, never an empty list — the three-state rule (`none` / `some` / `not
+observable`) applies per repository. The organization endpoint (`GET /orgs/{org}/dependabot/alerts`)
+would cost one request per hundred alerts instead of one per repository, but GitHub documents it for
+an owner or security manager and the App's standing there is unverified; the per-repository call
+is the v0 path and the org call an optimisation to measure.
+
+**Two facts to state rather than discover later.** (1) GitHub raises Actions alerts only for
+actions referenced by a *version tag*, never for SHA pins ("alerts are only generated for actions
+that use semantic versioning, not SHA versioning" — the alerts page, retrieved 2026-09-03). An
+absent alert on a SHA-pinned action is therefore no evidence about that action, and the panel that
+shows alerts beside `USES_ACTION` pins must say so. (2) The REST documentation's `ecosystem` enum
+lists `composer, go, maven, npm, nuget, pip, pub, rubygems, rust` and no Actions value, while the
+product documentation says Actions alerts exist. Our own organization carried 29 alerts on
+2026-09-03, all `pip`, all `fixed` — the Actions value has NOT been observed. So the collector must
+not filter server-side on an ecosystem value nobody has seen: it collects every alert, records the
+ecosystem values it observed, and joins `FLAGS_ACTION` on the package name. The first run against
+a repository with an Actions alert settles the enum, and that observation is pinned into the
+collection manifest at that point, not before.
+
+**Done-test needs an alert to exist — the fixture is in place.** `unified-systems-com/git-serious-fixtures`
+(created 2026-09-03, topic `tap-fixture`, Dependabot alerts on, automated security fixes off so
+nothing "fixes" the fixture) references `actions/download-artifact@v3` by tag in a job that never
+runs; the Actions-ecosystem alert it produces is the known answer for ACID 8, and the same repository
+carries the tag-drift fixture for `req-github-core-actions-used-8`. Until the alert is observed on a
+running instance, this requirement does not leave `Proposed`.
+
+**App permission — already held, not yet declared.** The installed `git-serious-exploratory` App
+(installation 157103378 on `unified-systems-com`, read 2026-09-03 via `GET /orgs/{org}/installations`)
+already carries `vulnerability_alerts: read` — along with `security_events: read` and
+`secret_scanning_alerts: read` — as *exploratory* grants from the App's creation. What is missing is
+the declaration: the collection manifest source must name `repository:vulnerability_alerts:read` so
+the permission becomes *derived* rather than exploratory, and any adopter's App minted from the
+manifest gains it. For an adopter whose App predates the declaration, the installation does not
+receive a new permission silently — an organization owner approves it under the App's installation
+settings — and until then the collector reads 403 and reports the surface as not observable.
+Code-scanning alerts (`repository:security_events:read`, also already held) are the same shape one
+step later and are NOT declared here.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-dependabot-alerts-1 | One Node Per Alert, All States | Proposed | Every alert the endpoint returns for a repository in scope lands as a `dependabot_alert` keyed on (repository, number), in every lifecycle state, with the raw alert in `configuration`. | A fixed alert is history. |
+| req-github-core-dependabot-alerts-2 | Refusal Is A Named State | Proposed | A 403 (permission not granted, or granted after installation and not yet approved) records the repository's alert surface as NOT OBSERVABLE with a warning; the batch never carries an empty alert set that reads as clean. | Per repository, three states. |
+| req-github-core-dependabot-alerts-3 | Flagged Action Joined | Proposed | An alert whose package name is an action path on the grid gets a `FLAGS_ACTION` edge to that `github_action`; one whose package is not an action lands with no such edge and its ecosystem visible. | Join on `github_action.action_path`. |
+| req-github-core-dependabot-alerts-4 | Flagged Workflow Joined | Proposed | An alert whose `manifest_path` is a collected workflow's path gets a `FLAGS_WORKFLOW` edge to that `github_workflow`. | Join on `github_workflow.path`. |
+| req-github-core-dependabot-alerts-5 | Ecosystem Observed, Not Assumed | Proposed | No server-side ecosystem filter until the Actions value has been observed on a real alert; the run records the set of ecosystem values it saw. | The documented enum omits Actions. |
+| req-github-core-dependabot-alerts-6 | SHA-Pin Blind Spot Stated | Proposed | Wherever alerts are shown beside `USES_ACTION` pins, a SHA-pinned action with no alert is rendered as "not covered by Dependabot", never as clean. | Product documentation, retrieved 2026-09-03. |
+| req-github-core-dependabot-alerts-7 | Permission Declared And Derived | Proposed | The collection manifest source declares `repository:vulnerability_alerts:read`; the App manifest the skill renders gains *Dependabot alerts: Read-only* from that declaration alone. | Never hand-listed. |
+| req-github-core-dependabot-alerts-8 | Observed On A Running Instance | Proposed | At least one Actions-ecosystem alert lands with both edges on a running instance. | The done-test; needs a repository that carries one. |
 
 ### Variables And Secret References (Backlog)
 ----

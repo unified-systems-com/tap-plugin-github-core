@@ -10,8 +10,10 @@ from __future__ import annotations
 import base64
 import fnmatch
 import logging
+import re
 from datetime import datetime
 from typing import Any, ClassVar
+from urllib.parse import quote
 
 from tap_plugin.github_core.models.status_check import StatusCheck
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
@@ -43,23 +45,22 @@ from .graphql_client import GithubGraphQLClient, GithubGraphQLError
 from .identity import (
     account_id,
     actions_artifact_id,
-    git_commit_id,
     actions_cache_id,
     app_installation_id,
     edge_id,
     environment_id,
+    git_commit_id,
     git_ref_id,
+    github_action_id,
     github_app_id,
     job_id,
-    github_action_id,
     platform_id,
     repository_id,
-    ruleset_id,
     rule_suite_id,
-    run_id,
-    status_check_id,
     ruleset_id,
+    run_id,
     runner_id,
+    status_check_id,
     uses_action_edge_id,
     workflow_id,
     workflow_job_id,
@@ -132,6 +133,23 @@ _SITE_ARTIFACTS_TRUNCATED = "8e7f"
 _SITE_ARTIFACTS_COLLECTED = "933f"
 _SITE_REQUIRED_CHECKS_UNOBSERVABLE = "d66c"
 _SITE_STATUS_CHECKS = "9409"
+_SITE_ACTION_REF_UNOBSERVABLE = "a288"
+_SITE_ACTION_REF_BUDGET = "c9a3"
+_SITE_ACTION_REF_MALFORMED = "45b3"
+
+#: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
+#: three calls against a repository that is NOT in scope; past the cap an edge lands as
+#: `resolution: not_attempted` and the run says how many, rather than spending the rate limit.
+_ACTION_REF_RESOLUTION_CAP = 400
+#: What may reach an authenticated API path from a workflow file's `uses:` line. The repository is
+#: exactly `owner/repo` (no dots-only segments, no extra segments) and the ref is a git refname
+#: fragment: no `..`, no leading/trailing `/`, no empty segment — a crafted `../../orgs/x` must fail
+#: HERE, never travel as a request (Grok seat on PR #67).
+_SAFE_REPOSITORY_RE = re.compile(r"^(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+$")
+_SAFE_REF_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.?(?:/|$))(?!.*//)[A-Za-z0-9_.@+/-]+(?<!/)$")
+#: An annotated tag may point at another tag object; peel that many levels before giving up.
+_TAG_PEEL_MAX_DEPTH = 3
+_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
 #: GitHub Actions' own App id — the integration that produces a workflow job's check run.
 _GITHUB_ACTIONS_INTEGRATION_ID = 15368
@@ -631,7 +649,10 @@ class GithubCollector(CollectorBase):
         # unresolved: that repository is not in scope, and nothing here goes looking.
         self._refs_by_repo: dict[str, dict[str, str]] = {}
         #: Run-level tally for the actions summary, so a run can say what it saw.
-        self._action_usage: dict[str, Any] = {"actions": set(), "edges": 0, "unpinned": 0, "unobservable": 0}
+        # Built by `_usage_tally()` on first touch — ONE initializer, so a state added there cannot be
+        # missing here (2026-09-03: two live runs failed on KeyError('rest') because this line carried
+        # its own copy of the key set).
+        self._action_usage: dict[str, Any] | None = None
         # Workflow-to-workflow reach is resolved in a POST-PASS, after every repository in scope
         # has been walked: a reusable-workflow callee is named by (repo, path) and a
         # `workflow_run` trigger by (repo, name), and either may live in a repository walked
@@ -803,16 +824,32 @@ class GithubCollector(CollectorBase):
             "ACTIONS_USED",
             f"{len(usage['actions'])} distinct action(s) across {usage['edges']} job usage(s); "
             f"{usage['unpinned']} usage(s) pinned to a mutable name or nothing, of which "
-            f"{usage['unobservable']} could not be resolved because the action lives outside the "
-            f"observed scope. A zero here with workflows in scope means no `uses:` lines, not a "
-            f"clean bill — check the workflow count.",
+            f"{usage['rest']} resolved over REST against out-of-scope repositories, {usage['unresolved']} named "
+            f"a ref that exists as neither tag nor branch, {usage['unobservable']} could not be looked up "
+            f"(refused or failed) and {usage['not_attempted']} were not attempted (resolution cap "
+            f"{_ACTION_REF_RESOLUTION_CAP}; {self._action_ref_state()['lookups']} REST lookup(s) spent). "
+            f"A zero here with workflows in scope means no `uses:` lines, not a clean bill — check the "
+            f"workflow count.",
             message_data={
                 "actions": len(usage["actions"]),
                 "usages": usage["edges"],
                 "unpinned": usage["unpinned"],
                 "unobservable": usage["unobservable"],
+                "rest": usage["rest"],
+                "unresolved": usage["unresolved"],
+                "not_attempted": usage["not_attempted"],
+                "rest_lookups": self._action_ref_state()["lookups"],
             },
         )
+        if self._action_ref_state()["skipped"]:
+            self.record_warn(
+                _SITE_ACTION_REF_BUDGET,
+                "ACTION_REF_BUDGET_EXHAUSTED",
+                f"{self._action_ref_state()['skipped']} distinct action ref(s) were not looked up: the per-run "
+                f"resolution cap ({_ACTION_REF_RESOLUTION_CAP}) was reached. Their edges carry "
+                f"`resolution: not_attempted`; an unresolved pin kind there is a budget fact, not an observation.",
+                message_data={"skipped": self._action_ref_state()["skipped"], "cap": _ACTION_REF_RESOLUTION_CAP},
+            )
 
         # --- enrichment phase (link resolution against landed nodes) ---
         enrichment_dims = {"github.platform": "github.com"}
@@ -1130,7 +1167,8 @@ class GithubCollector(CollectorBase):
             )
             # The DECLARED jobs inside this file — the level every privilege decision is made at.
             self._emit_declared_jobs(
-                full_name, wf_uuid, wf["id"], wf.get("path", ""), parsed_config, env_uuid_by_name, nodes, edges
+                full_name, wf_uuid, wf["id"], wf.get("path", ""), parsed_config, env_uuid_by_name, nodes, edges,
+                client=client,
             )
             # Local-action surfacing per req-github-core-workflow-parse-3.
             for ref in parsed_config.get("local_action_refs") or []:
@@ -1867,6 +1905,7 @@ class GithubCollector(CollectorBase):
         env_uuid_by_name: dict[str, Any],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
+            client: GithubClient | None = None,
     ) -> None:
         """Emit one `workflow_job` per job declared in the file, plus its `needs:` graph.
 
@@ -1971,7 +2010,9 @@ class GithubCollector(CollectorBase):
                     )
                 )
             # The third-party code this job hands its token to, and how each call is pinned.
-            self._emit_used_actions(full_name, job_uuid, job.get("action_refs") or [], declared_dims, nodes, edges)
+            self._emit_used_actions(
+                full_name, job_uuid, job.get("action_refs") or [], declared_dims, nodes, edges, client=client
+            )
         # `needs:` — emitted after every job in the file has an id, because a job may need one
         # declared below it.
         for job in jobs:
@@ -2003,6 +2044,7 @@ class GithubCollector(CollectorBase):
         usage_dims: dict[str, str],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
+            client: GithubClient | None = None,
     ) -> None:
         """One `github_action` per distinct path, one `USES_ACTION` per (job, action, ref).
 
@@ -2016,7 +2058,7 @@ class GithubCollector(CollectorBase):
         for (action_path, declared_ref), call in sorted(_group_action_calls(action_refs).items()):
             action_uuid = github_action_id(action_path)
             nodes.append(self._action_node(action_uuid, action_path, call, action_dims))
-            properties = self._uses_action_properties(full_name, call, declared_ref)
+            properties = self._uses_action_properties(full_name, call, declared_ref, client=client)
             edges.append(
                 edge_envelope(
                     entity_id=uses_action_edge_id(job_uuid, action_uuid, declared_ref),
@@ -2048,7 +2090,9 @@ class GithubCollector(CollectorBase):
             },
         )
 
-    def _uses_action_properties(self, full_name: str, call: dict[str, Any], declared_ref: str) -> dict[str, Any]:
+    def _uses_action_properties(
+        self, full_name: str, call: dict[str, Any], declared_ref: str, client: GithubClient | None = None
+    ) -> dict[str, Any]:
         """The pin, in three states — see `_resolve_action_pin`."""
         pin_kind, resolved_sha, resolution = self._resolve_action_pin(
             full_name,
@@ -2056,6 +2100,7 @@ class GithubCollector(CollectorBase):
             str(call.get("repository_full_name") or ""),
             declared_ref,
             str(call.get("pin_kind") or ""),
+            client=client,
         )
         properties: dict[str, Any] = {
             "declared_ref": declared_ref,
@@ -2074,11 +2119,17 @@ class GithubCollector(CollectorBase):
         usage["edges"] += 1
         if not properties["is_pinned"]:
             usage["unpinned"] += 1
-        if properties["resolution"] == "unobservable":
-            usage["unobservable"] += 1
+        if properties["resolution"] in ("unobservable", "rest", "unresolved", "not_attempted"):
+            usage[properties["resolution"]] += 1
 
     def _resolve_action_pin(
-        self, full_name: str, kind: str, repository_full_name: str, declared_ref: str, parsed_pin: str
+        self,
+        full_name: str,
+        kind: str,
+        repository_full_name: str,
+        declared_ref: str,
+        parsed_pin: str,
+        client: GithubClient | None = None,
     ) -> tuple[str, str, str]:
         """Upgrade a parsed pin to what the collector can PROVE: ``(pin_kind, resolved_sha, resolution)``.
 
@@ -2093,7 +2144,13 @@ class GithubCollector(CollectorBase):
             return parsed_pin, declared_ref if parsed_pin == PIN_SHA else "", "literal"
         refs = self._refs_for(repository_full_name)
         if refs is None:
-            return PIN_UNRESOLVED, "", "unobservable"
+            # Out of scope. With a client the name is looked up over REST — once per distinct
+            # (repository, ref) per run, under a cap — and lands as `rest`, `unresolved`,
+            # `unobservable` or `not_attempted` (req-github-core-actions-used-6). Without one
+            # (a caller driving the walk directly) nothing was fetched: `unobservable`.
+            if client is None:
+                return PIN_UNRESOLVED, "", "unobservable"
+            return self._resolve_action_ref_via_rest(client, repository_full_name, declared_ref)
         tag_sha = refs.get(f"refs/tags/{declared_ref}")
         if tag_sha is not None:
             return PIN_TAG, tag_sha, "in_scope"
@@ -2444,9 +2501,131 @@ class GithubCollector(CollectorBase):
         """
         tally = getattr(self, "_action_usage", None)
         if tally is None:
-            tally = {"actions": set(), "edges": 0, "unpinned": 0, "unobservable": 0}
+            tally = {
+                "actions": set(),
+                "edges": 0,
+                "unpinned": 0,
+                "unobservable": 0,
+                "rest": 0,
+                "unresolved": 0,
+                "not_attempted": 0,
+            }
             self._action_usage = tally
         return tally
+
+    def _action_ref_state(self) -> dict[str, Any]:
+        """The run's REST-resolution cache and counters, created on first touch (same reason as
+        `_usage_tally`: the walk is driven directly by tests that never call `run()`)."""
+        state = getattr(self, "_action_ref_resolution", None)
+        if state is None:
+            state = {"cache": {}, "lookups": 0, "skipped": 0}
+            self._action_ref_resolution = state
+        return state
+
+    def _resolve_action_ref_via_rest(
+        self, client: GithubClient, repository_full_name: str, declared_ref: str
+    ) -> tuple[str, str, str]:
+        """What an out-of-scope name IS, and the commit it points at, observed once per run.
+
+        Lookup order mirrors a runner's: a tag named `v4` wins over a branch named `v4`.
+        `GET /repos/{o}/{r}/git/ref/tags/{ref}`, then `.../heads/{ref}` on 404; an annotated tag's
+        object is a tag, not a commit, and is peeled with `GET .../git/tags/{sha}` — the SHA a
+        runner checks out is the commit. Both ride `repository:contents:read` and answer any
+        credential on a public repository, which is what almost every action repository is.
+
+        Every outcome is a named state. `rest`: found. `unresolved`: at neither path — the ref does
+        not exist as written. `unobservable`: refused or failed (private repository, 403, transport)
+        — warned, and NOT evidence about the pin. `not_attempted`: the run's cap was spent.
+        """
+        state = self._action_ref_state()
+        key = (repository_full_name, declared_ref)
+        cached = state["cache"].get(key)
+        if cached is not None:
+            return cached
+        if state["lookups"] >= _ACTION_REF_RESOLUTION_CAP:
+            state["skipped"] += 1
+            result: tuple[str, str, str] = (PIN_UNRESOLVED, "", "not_attempted")
+            state["cache"][key] = result
+            return result
+        if not _SAFE_REPOSITORY_RE.match(repository_full_name) or not _SAFE_REF_RE.match(declared_ref):
+            # Not a shape GitHub itself would accept in `uses:`; it does not exist as written, and it
+            # never becomes a request path.
+            self.record_warn(
+                _SITE_ACTION_REF_MALFORMED,
+                "ACTION_REF_MALFORMED",
+                f"{repository_full_name}@{declared_ref}: not an `owner/repo` plus git refname; no lookup made.",
+                message_data={"action_repo": repository_full_name, "ref": declared_ref},
+            )
+            result = (PIN_UNRESOLVED, "", "unresolved")
+            state["cache"][key] = result
+            return result
+        state["lookups"] += 1
+        encoded = quote(declared_ref, safe="/")
+        result = (PIN_UNRESOLVED, "", "unresolved")
+        for pin_kind, prefix in ((PIN_TAG, "tags"), (PIN_BRANCH, "heads")):
+            try:
+                payload = client.get(f"/repos/{repository_full_name}/git/ref/{prefix}/{encoded}")
+            except GithubAPIError as exc:
+                if exc.status == 404:
+                    continue
+                self.record_warn(
+                    _SITE_ACTION_REF_UNOBSERVABLE,
+                    f"ACTION_REF_UNOBSERVABLE_{exc.status}",
+                    f"{repository_full_name}@{declared_ref}: ref lookup refused or failed ({exc.status}); the pin "
+                    f"kind and resolved commit are NOT observable for this action, which is not evidence it is "
+                    f"unpinned.",
+                    message_data={"action_repo": repository_full_name, "ref": declared_ref, "status": exc.status},
+                )
+                result = (PIN_UNRESOLVED, "", "unobservable")
+                break
+            obj = payload.get("object") or {}
+            sha = str(obj.get("sha") or "")
+            if pin_kind == PIN_TAG and str(obj.get("type") or "") == "tag" and sha:
+                commit = self._peel_annotated_tag(client, repository_full_name, sha)
+                if commit is None:
+                    # The tag exists but its commit could not be established: say so. A tag OBJECT's
+                    # SHA is not what a runner checks out, and must not be recorded as if it were.
+                    self.record_warn(
+                        _SITE_ACTION_REF_UNOBSERVABLE,
+                        "ACTION_REF_UNOBSERVABLE_PEEL",
+                        f"{repository_full_name}@{declared_ref}: the tag is annotated and its commit could not be "
+                        f"read (refused, failed, or nested deeper than {_TAG_PEEL_MAX_DEPTH} tag objects); "
+                        f"pin kind is `tag`, resolved commit NOT observable.",
+                        message_data={"action_repo": repository_full_name, "ref": declared_ref},
+                    )
+                    result = (PIN_TAG, "", "unobservable")
+                    break
+                sha = commit
+            result = (pin_kind, sha, "rest")
+            break
+        state["cache"][key] = result
+        return result
+
+    def _peel_annotated_tag(self, client: GithubClient, repository_full_name: str, tag_sha: str) -> str | None:
+        """The COMMIT behind an annotated tag object, or None when it cannot be established.
+
+        A tag object may point at another tag object; peel until `object.type == "commit"`, at most
+        `_TAG_PEEL_MAX_DEPTH` levels. A refused or failed read, a non-commit at the bottom, or a
+        SHA that is not 40-hex all return None — never the tag object's own SHA dressed as the
+        commit (Codex seat on PR #67).
+        """
+        sha = tag_sha
+        for _ in range(_TAG_PEEL_MAX_DEPTH):
+            if not _SHA40_RE.match(sha):
+                return None
+            try:
+                payload = client.get(f"/repos/{repository_full_name}/git/tags/{sha}")
+            except GithubAPIError:
+                return None
+            obj = payload.get("object") or {}
+            kind = str(obj.get("type") or "")
+            nxt = str(obj.get("sha") or "")
+            if kind == "commit" and _SHA40_RE.match(nxt):
+                return nxt
+            if kind != "tag" or not nxt:
+                return None
+            sha = nxt
+        return None
 
     def _refs_for(self, repository_full_name: str) -> dict[str, str] | None:
         """``{ref path: head sha}`` for an in-scope repository, or None when it is not in scope.
