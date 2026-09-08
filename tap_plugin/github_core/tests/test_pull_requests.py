@@ -222,8 +222,11 @@ class TestBuildStatusFromTheRollup:
         assert fields["checks_rollup_state"] in {"SUCCESS", "FAILURE", "PENDING", "ERROR", "EXPECTED"}
         assert fields["checks"], "the captured head carries check runs"
         run = next(c for c in fields["checks"] if c["kind"] == "check_run")
-        assert set(run) == {"kind", "name", "status", "conclusion", "app", "url"}
+        assert set(run) == {"kind", "check_run_id", "name", "status", "conclusion", "app", "url"}
         assert run["app"] == "github-actions"
+        assert isinstance(run["check_run_id"], int)  # the rerun-dedupe key: a rerun mints a higher id
+        ids = [c["check_run_id"] for c in fields["checks"] if c["kind"] == "check_run"]
+        assert len(ids) == len(set(ids))
         assert fields["configuration"]["checks_total"] == len(fields["checks"])
         assert fields["configuration"]["checks_truncated"] is False
 
@@ -245,7 +248,7 @@ class TestBuildStatusFromTheRollup:
              "targetUrl": "https://app.codacy.com/x", "creator": {"login": "codacy-production"}}
         )
         assert status == {
-            "kind": "status", "name": "Codacy Static Code Analysis", "status": "COMPLETED",
+            "kind": "status", "check_run_id": None, "name": "Codacy Static Code Analysis", "status": "COMPLETED",
             "conclusion": "SUCCESS", "app": "codacy-production", "url": "https://app.codacy.com/x",
         }
 

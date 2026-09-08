@@ -115,7 +115,7 @@ GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
     "PullRequestReview": ("author", "state", "submittedAt"),
     "PullRequestCommit": ("commit",),
     "StatusCheckRollup": ("state", "contexts"),
-    "CheckRun": ("name", "status", "conclusion", "detailsUrl", "checkSuite"),
+    "CheckRun": ("databaseId", "name", "status", "conclusion", "detailsUrl", "checkSuite"),
     "CheckSuite": ("app",),
     "StatusContext": ("context", "state", "targetUrl", "creator"),
 }

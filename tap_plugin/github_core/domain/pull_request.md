@@ -83,7 +83,7 @@ GraphQL is chosen over REST because it is the only transport that carries `revie
 - `review_requests` — `[{"kind": "user"|"team", "login"}]`: who has been asked and has not answered. The *waiting on me* queue reads this.
 - `latest_reviews` — `[{"login", "state", "submitted_at"}]`: each reviewer's latest verdict (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`).
 - `checks_rollup_state` — GitHub's combined verdict on the head commit (`SUCCESS`, `FAILURE`, `PENDING`, `ERROR`, `EXPECTED`) or `""` when no rollup exists: nothing ran, which must not render green.
-- `checks` — the rollup's contexts: `[{"kind": "check_run"|"status", "name", "status", "conclusion", "app", "url"}]`. A check run names the producing App's slug; a commit status names its creator's login, which is what the older API records. Both kinds in one list because a required context may be either.
+- `checks` — the rollup's contexts: `[{"kind": "check_run"|"status", "check_run_id", "name", "status", "conclusion", "app", "url"}]`. A check run names the producing App's slug and carries GitHub's `check_run_id` — a rerun mints a new, higher id for the same (app, name), so a consumer keeps the latest by id instead of guessing from the url; a commit status names its creator's login, which is what the older API records, and has no id (null). Both kinds in one list because a required context may be either.
 - `html_url` — the pull request page.
 - `configuration` — JSONB for detail not promoted to a column; carries `checks_total` (the rollup's own count) and `checks_truncated` (whether the page held fewer than that).
 - `tags` — TAP's tag map.

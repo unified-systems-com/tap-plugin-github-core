@@ -473,6 +473,7 @@
         "selected": [
           "checkSuite",
           "conclusion",
+          "databaseId",
           "detailsUrl",
           "name",
           "status"

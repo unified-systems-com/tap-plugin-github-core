@@ -262,7 +262,7 @@ query($login: String!, $cursor: String) {
                         totalCount
                         nodes {
                           __typename
-                          ... on CheckRun { name status conclusion detailsUrl checkSuite { app { slug } } }
+                          ... on CheckRun { databaseId name status conclusion detailsUrl checkSuite { app { slug } } }
                           ... on StatusContext { context state targetUrl creator { login } }
                         }
                       }
@@ -681,11 +681,15 @@ class GithubGraphQLClient:
         Both kinds are kept in one list because the gate counts both: GitHub Actions and most
         Apps post check runs, while Codacy, Sonar and older integrations post statuses, and a
         required context may be either. `app` names the producer for a check run; a status names
-        its `creator` login instead, which is what the older API records.
+        its `creator` login instead, which is what the older API records. `check_run_id` is
+        GitHub's id for a check run — a rerun mints a new, higher id for the same (app, name),
+        which is what lets a consumer keep the latest without guessing from the url; a commit
+        status has no id and carries null.
         """
         if context.get("__typename") == "StatusContext":
             return {
                 "kind": "status",
+                "check_run_id": None,
                 "name": str(context.get("context") or ""),
                 "status": "COMPLETED",
                 "conclusion": str(context.get("state") or ""),
@@ -694,6 +698,7 @@ class GithubGraphQLClient:
             }
         return {
             "kind": "check_run",
+            "check_run_id": context.get("databaseId"),
             "name": str(context.get("name") or ""),
             "status": str(context.get("status") or ""),
             "conclusion": str(context.get("conclusion") or ""),
