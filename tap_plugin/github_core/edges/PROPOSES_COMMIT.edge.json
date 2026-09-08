@@ -1,0 +1,16 @@
+{
+  "slug": "PROPOSES_COMMIT__github_core",
+  "name": "Proposes Commit",
+  "description": "The commit at the pull request's head when observed — the commit the check rollup on the node is a verdict about, and the join to the runs that executed on it. Drawn only when that commit was observed in this batch; `head_sha` on the node holds it regardless.",
+  "sources": [
+    "github_core__pull_request"
+  ],
+  "targets": [
+    "git_core__git_commit"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "pulls",
+    "github.observation": "execution"
+  }
+}

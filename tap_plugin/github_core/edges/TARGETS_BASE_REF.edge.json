@@ -1,0 +1,26 @@
+{
+  "slug": "TARGETS_BASE_REF__github_core",
+  "name": "Targets Base Ref",
+  "description": "The branch the pull request asks to land on. This is the ref whose rulesets gate the merge (`PROTECTS_REF` from the ruleset onto the same node), which is how a pull request reaches the required checks that stand between it and merge.",
+  "sources": [
+    "github_core__pull_request"
+  ],
+  "targets": [
+    "git_core__git_ref"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "pulls",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ref_name": {
+        "type": "string",
+        "description": "The base branch name as the pull request names it, without the `refs/heads/` prefix."
+      }
+    }
+  }
+}

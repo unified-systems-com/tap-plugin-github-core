@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("github_core", "0010_outputs_releases_packages"),
+        ("github_core", "0013_retire_renamed_edge_types"),
         ("tap_grid", "0002_entitytype_kind"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]

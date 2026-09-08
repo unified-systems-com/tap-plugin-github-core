@@ -88,6 +88,18 @@ def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     return _id("github_core__github_ruleset", f"{owner}#{ruleset_id_int}")
 
 
+def pull_request_id(full_name: str, number: int | str) -> UUID:
+    """A pull request, keyed on the repository it is opened against plus its number.
+
+    The number is GitHub's own identity for a pull request within a repository and is what every
+    URL, commit message and review comment names it by; `databaseId` is carried as a field for
+    continuity across a repository transfer, not as the key. Scoped to the BASE repository: a
+    fork's pull request is a fact about the repository it targets, and the head repository is a
+    field on the node.
+    """
+    return _id("github_core__pull_request", f"{full_name}#{number}")
+
+
 def custom_property_id(owner: str, property_name: str) -> UUID:
     """A custom-property DEFINITION, keyed on the owner and the property name.
 

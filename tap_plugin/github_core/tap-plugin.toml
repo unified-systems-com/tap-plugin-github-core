@@ -32,6 +32,7 @@ github_core__github_package_version = "tap_plugin.github_core.models.github_pack
 github_core__github_action = "tap_plugin.github_core.models.github_action.GithubAction"
 github_core__actions_artifact = "tap_plugin.github_core.models.actions_artifact.ActionsArtifact"
 github_core__github_custom_property = "tap_plugin.github_core.models.github_custom_property.GithubCustomProperty"
+github_core__pull_request = "tap_plugin.github_core.models.pull_request.PullRequest"
 
 [edges]
 HOSTS_ACCOUNT__github_core = "edges/HOSTS_ACCOUNT.edge.json"
@@ -69,6 +70,10 @@ PRODUCES_CHECK__github_core = "edges/PRODUCES_CHECK.edge.json"
 PUBLISHES_RELEASE__github_core = "edges/PUBLISHES_RELEASE.edge.json"
 BUILDS_RELEASE__github_core = "edges/BUILDS_RELEASE.edge.json"
 TARGETS_REF__github_core = "edges/TARGETS_REF.edge.json"
+OPENS_PULL_REQUEST__github_core = "edges/OPENS_PULL_REQUEST.edge.json"
+PROPOSES_REF__github_core = "edges/PROPOSES_REF.edge.json"
+PROPOSES_COMMIT__github_core = "edges/PROPOSES_COMMIT.edge.json"
+TARGETS_BASE_REF__github_core = "edges/TARGETS_BASE_REF.edge.json"
 STORES_ARTIFACT__github_core = "edges/STORES_ARTIFACT.edge.json"
 PUBLISHES_PACKAGE__github_core = "edges/PUBLISHES_PACKAGE.edge.json"
 PUBLISHES_PACKAGE_VERSION__github_core = "edges/PUBLISHES_PACKAGE_VERSION.edge.json"

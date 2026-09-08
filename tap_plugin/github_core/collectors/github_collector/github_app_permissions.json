@@ -38,9 +38,12 @@
       "why": "Artifact attestations (SLSA provenance): the `attested` property on BUILDS_PACKAGE_VERSION, whose absence is the finding."
     },
     "checks": {
-      "state": "recommended",
+      "state": "requested",
       "level": "read",
-      "why": "Check runs and suites: what the gate required and what answered — the required-checks half of why-isn't-this-merging."
+      "why": "Check runs and suites: what the gate required and what answered \u2014 the required-checks half of why-isn't-this-merging. Requested 2026-09-08 (github-core#82): the head commit's `statusCheckRollup` CheckRun contexts on every collected pull request.",
+      "sources": [
+        "pull_request_checks"
+      ]
     },
     "code_quality": {
       "state": "deferred",
@@ -270,9 +273,12 @@
       "why": "User-to-server; the App observes an organisation and never acts as a user."
     },
     "pull_requests": {
-      "state": "recommended",
+      "state": "requested",
       "level": "read",
-      "why": "Pull requests, reviews, approvals: the admission gate's subject; waiting-on-me and why-isn't-this-merging."
+      "why": "Pull requests, reviews, approvals: the admission gate's subject; waiting-on-me and why-isn't-this-merging. Requested 2026-09-08 by req-github-core-pull-requests (github-core#82): the config-layer `pullRequests` field.",
+      "sources": [
+        "pull_requests"
+      ]
     },
     "repository_advisories": {
       "state": "recommended",
@@ -322,9 +328,12 @@
       "why": "User-to-server."
     },
     "statuses": {
-      "state": "recommended",
+      "state": "requested",
       "level": "read",
-      "why": "Commit statuses: the older check API that Codacy, Sonar and other third parties still post; required checks can be statuses."
+      "why": "Commit statuses: the older check API that Codacy, Sonar and other third parties still post; required checks can be statuses. Requested 2026-09-08 (github-core#82): the StatusContext half of the same rollup.",
+      "sources": [
+        "pull_request_statuses"
+      ]
     },
     "vulnerability_alerts": {
       "state": "recommended",

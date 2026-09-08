@@ -391,6 +391,18 @@
     "commit": "82ff2d4780080e6929ebb95608cefa22dfa05ac7",
     "sha256": "bbdb03f4006f4e34964d67d55385f1c8c47c4cacd507ccdc38af2544247ecddd",
     "types": {
+      "Actor": {
+        "fields": [
+          "avatarUrl",
+          "login",
+          "resourcePath",
+          "url"
+        ],
+        "present": true,
+        "selected": [
+          "login"
+        ]
+      },
       "App": {
         "fields": [
           "createdAt",
@@ -430,6 +442,65 @@
           "byteSize",
           "isTruncated",
           "text"
+        ]
+      },
+      "CheckRun": {
+        "fields": [
+          "annotations",
+          "checkSuite",
+          "completedAt",
+          "conclusion",
+          "databaseId",
+          "deployment",
+          "detailsUrl",
+          "externalId",
+          "id",
+          "isRequired",
+          "name",
+          "pendingDeploymentRequest",
+          "permalink",
+          "repository",
+          "resourcePath",
+          "startedAt",
+          "status",
+          "steps",
+          "summary",
+          "text",
+          "title",
+          "url"
+        ],
+        "present": true,
+        "selected": [
+          "checkSuite",
+          "conclusion",
+          "detailsUrl",
+          "name",
+          "status"
+        ]
+      },
+      "CheckSuite": {
+        "fields": [
+          "app",
+          "branch",
+          "checkRuns",
+          "commit",
+          "conclusion",
+          "createdAt",
+          "creator",
+          "databaseId",
+          "id",
+          "matchingPullRequests",
+          "push",
+          "repository",
+          "resourcePath",
+          "status",
+          "updatedAt",
+          "url",
+          "workflowRun"
+        ],
+        "present": true,
+        "selected": [
+          "app"
         ]
       },
       "Commit": {
@@ -487,7 +558,8 @@
           "committedDate",
           "committer",
           "oid",
-          "signature"
+          "signature",
+          "statusCheckRollup"
         ]
       },
       "DeploymentProtectionRule": {
@@ -566,6 +638,225 @@
           "signer",
           "state",
           "wasSignedByGitHub"
+        ]
+      },
+      "Label": {
+        "fields": [
+          "color",
+          "createdAt",
+          "description",
+          "id",
+          "isDefault",
+          "issues",
+          "name",
+          "pullRequests",
+          "repository",
+          "resourcePath",
+          "updatedAt",
+          "url"
+        ],
+        "present": true,
+        "selected": [
+          "name"
+        ]
+      },
+      "PullRequest": {
+        "fields": [
+          "activeLockReason",
+          "additions",
+          "assignees",
+          "author",
+          "authorAssociation",
+          "autoMergeRequest",
+          "baseRef",
+          "baseRefName",
+          "baseRefOid",
+          "baseRepository",
+          "body",
+          "bodyHTML",
+          "bodyText",
+          "canBeRebased",
+          "changedFiles",
+          "checksResourcePath",
+          "checksUrl",
+          "closed",
+          "closedAt",
+          "closingIssuesReferences",
+          "comments",
+          "commits",
+          "createdAt",
+          "createdViaEmail",
+          "databaseId",
+          "deletions",
+          "editor",
+          "files",
+          "fullDatabaseId",
+          "headRef",
+          "headRefName",
+          "headRefOid",
+          "headRepository",
+          "headRepositoryOwner",
+          "hovercard",
+          "id",
+          "includesCreatedEdit",
+          "isCrossRepository",
+          "isDraft",
+          "isInMergeQueue",
+          "isMergeQueueEnabled",
+          "isReadByViewer",
+          "labels",
+          "lastEditedAt",
+          "latestOpinionatedReviews",
+          "latestReviews",
+          "locked",
+          "maintainerCanModify",
+          "mergeCommit",
+          "mergeQueue",
+          "mergeQueueEntry",
+          "mergeStateStatus",
+          "mergeable",
+          "merged",
+          "mergedAt",
+          "mergedBy",
+          "milestone",
+          "number",
+          "participants",
+          "permalink",
+          "potentialMergeCommit",
+          "projectCards",
+          "projectItems",
+          "projectV2",
+          "projectsV2",
+          "publishedAt",
+          "reactionGroups",
+          "reactions",
+          "repository",
+          "resourcePath",
+          "revertResourcePath",
+          "revertUrl",
+          "reviewDecision",
+          "reviewRequests",
+          "reviewThreads",
+          "reviews",
+          "state",
+          "statusCheckRollup",
+          "suggestedReviewers",
+          "timeline",
+          "timelineItems",
+          "title",
+          "titleHTML",
+          "totalCommentsCount",
+          "updatedAt",
+          "url",
+          "userContentEdits",
+          "viewerCanApplySuggestion",
+          "viewerCanClose",
+          "viewerCanDeleteHeadRef",
+          "viewerCanDisableAutoMerge",
+          "viewerCanEditFiles",
+          "viewerCanEnableAutoMerge",
+          "viewerCanMergeAsAdmin",
+          "viewerCanReact",
+          "viewerCanReopen",
+          "viewerCanSubscribe",
+          "viewerCanUpdate",
+          "viewerCanUpdateBranch",
+          "viewerCannotUpdateReasons",
+          "viewerDidAuthor",
+          "viewerLatestReview",
+          "viewerLatestReviewRequest",
+          "viewerMergeBodyText",
+          "viewerMergeHeadlineText",
+          "viewerSubscription"
+        ],
+        "present": true,
+        "selected": [
+          "additions",
+          "author",
+          "authorAssociation",
+          "baseRefName",
+          "baseRefOid",
+          "changedFiles",
+          "closedAt",
+          "commits",
+          "createdAt",
+          "databaseId",
+          "deletions",
+          "headRefName",
+          "headRefOid",
+          "headRepository",
+          "isDraft",
+          "labels",
+          "latestReviews",
+          "mergeCommit",
+          "mergeable",
+          "mergedAt",
+          "number",
+          "reviewDecision",
+          "reviewRequests",
+          "state",
+          "title",
+          "updatedAt",
+          "url"
+        ]
+      },
+      "PullRequestCommit": {
+        "fields": [
+          "commit",
+          "id",
+          "pullRequest",
+          "resourcePath",
+          "url"
+        ],
+        "present": true,
+        "selected": [
+          "commit"
+        ]
+      },
+      "PullRequestReview": {
+        "fields": [
+          "author",
+          "authorAssociation",
+          "authorCanPushToRepository",
+          "body",
+          "bodyHTML",
+          "bodyText",
+          "comments",
+          "commit",
+          "createdAt",
+          "createdViaEmail",
+          "databaseId",
+          "editor",
+          "fullDatabaseId",
+          "id",
+          "includesCreatedEdit",
+          "isMinimized",
+          "lastEditedAt",
+          "minimizedReason",
+          "onBehalfOf",
+          "publishedAt",
+          "pullRequest",
+          "reactionGroups",
+          "reactions",
+          "repository",
+          "resourcePath",
+          "state",
+          "submittedAt",
+          "updatedAt",
+          "url",
+          "userContentEdits",
+          "viewerCanDelete",
+          "viewerCanMinimize",
+          "viewerCanReact",
+          "viewerCanUpdate",
+          "viewerCannotUpdateReasons",
+          "viewerDidAuthor"
+        ],
+        "present": true,
+        "selected": [
+          "author",
+          "state",
+          "submittedAt"
         ]
       },
       "Ref": {
@@ -808,6 +1099,7 @@
           "isFork",
           "nameWithOwner",
           "object",
+          "pullRequests",
           "refs",
           "releases",
           "rulesets",
@@ -881,6 +1173,53 @@
           "bypassMode",
           "organizationAdmin",
           "repositoryRoleName"
+        ]
+      },
+      "ReviewRequest": {
+        "fields": [
+          "asCodeOwner",
+          "databaseId",
+          "id",
+          "pullRequest",
+          "requestedReviewer"
+        ],
+        "present": true,
+        "selected": [
+          "requestedReviewer"
+        ]
+      },
+      "StatusCheckRollup": {
+        "fields": [
+          "commit",
+          "contexts",
+          "id",
+          "state"
+        ],
+        "present": true,
+        "selected": [
+          "contexts",
+          "state"
+        ]
+      },
+      "StatusContext": {
+        "fields": [
+          "avatarUrl",
+          "commit",
+          "context",
+          "createdAt",
+          "creator",
+          "description",
+          "id",
+          "isRequired",
+          "state",
+          "targetUrl"
+        ],
+        "present": true,
+        "selected": [
+          "context",
+          "creator",
+          "state",
+          "targetUrl"
         ]
       },
       "Tag": {

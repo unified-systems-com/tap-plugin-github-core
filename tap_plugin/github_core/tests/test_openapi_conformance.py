@@ -227,7 +227,9 @@ def test_the_traversed_set_covers_what_the_query_actually_selects() -> None:
 
     from tap_plugin.github_core.collectors.github_collector import graphql_client
 
-    query = graphql_client._CONFIG_QUERY
+    # Both queries: the config layer and the pull-request layer (github-core#82) — a second
+    # query is a second place a stale field can hide.
+    query = graphql_client._CONFIG_QUERY + graphql_client._PULL_REQUEST_QUERY
     # Field selections: `name`, `alias: name`, `name(args)`. Not a GraphQL parser — it does not
     # need to be, because over-collecting identifiers only makes this assertion stricter.
     identifiers = set(re.findall(r"(?:^|\s)(?:[A-Za-z_]+:\s*)?([a-z][A-Za-z0-9_]*)\s*[({\n]", query))

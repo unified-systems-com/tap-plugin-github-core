@@ -1,0 +1,30 @@
+{
+  "slug": "OPENS_PULL_REQUEST__github_core",
+  "name": "Opens Pull Request",
+  "description": "The account or App that opened the pull request. `author_association` says what the author was to the repository at the time — a MEMBER's proposal and a first-time contributor's are different admissions to the same gate.",
+  "sources": [
+    "github_core__github_account",
+    "github_core__github_app"
+  ],
+  "targets": [
+    "github_core__pull_request"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "pulls",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "author_association"
+    ],
+    "properties": {
+      "author_association": {
+        "type": "string",
+        "description": "GitHub's `CommentAuthorAssociation` for the author on this repository (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, NONE, MANNEQUIN) — settles whether the proposal came from inside or outside the trust boundary."
+      }
+    }
+  }
+}

@@ -1,0 +1,1213 @@
+{
+  "_captured": "2026-09-08 via gh api graphql (read:org classic PAT, account notgeorge) against unified-systems-com/tap: first 20 pull requests by UPDATED_AT desc, a representative window kept (one per state x rollup state), totalCount preserved. The two 99xxx rows are SYNTHETIC, derived from the captured shape (a fork head with no rollup; a Bot author) and labelled so.",
+  "repository": {
+    "nameWithOwner": "unified-systems-com/tap",
+    "pullRequests": {
+      "totalCount": 178,
+      "nodes": [
+        {
+          "number": 339,
+          "databaseId": 4473030061,
+          "title": "fix(deps): update dependency cytoscape to v3.34.3",
+          "state": "MERGED",
+          "isDraft": false,
+          "url": "https://github.com/unified-systems-com/tap/pull/339",
+          "author": {
+            "__typename": "Bot",
+            "login": "tap-renovate"
+          },
+          "authorAssociation": "CONTRIBUTOR",
+          "headRefName": "renovate/browser-libraries-(package-lock.json)",
+          "headRefOid": "7c645beb5587fcea4165be638f805af62489944b",
+          "headRepository": {
+            "nameWithOwner": "unified-systems-com/tap"
+          },
+          "baseRefName": "main",
+          "baseRefOid": "16a3f456fad0f34dc442fd7bd90a715de395679e",
+          "createdAt": "2026-09-08T10:07:31Z",
+          "updatedAt": "2026-09-08T23:25:29Z",
+          "closedAt": "2026-09-08T23:25:29Z",
+          "mergedAt": "2026-09-08T23:25:29Z",
+          "mergeCommit": {
+            "oid": "bc976a77bd08bba2b59178ac680b0e63dfcd7676"
+          },
+          "mergeable": "UNKNOWN",
+          "reviewDecision": "APPROVED",
+          "additions": 5,
+          "deletions": 5,
+          "changedFiles": 2,
+          "labels": {
+            "nodes": [
+              {
+                "name": "renovate"
+              }
+            ]
+          },
+          "reviewRequests": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "notgeorge"
+                }
+              }
+            ]
+          },
+          "latestReviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "criticalsec"
+                },
+                "state": "APPROVED",
+                "submittedAt": "2026-09-08T23:25:24Z"
+              }
+            ]
+          },
+          "commits": {
+            "totalCount": 2,
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "7c645beb5587fcea4165be638f805af62489944b",
+                  "statusCheckRollup": {
+                    "state": "SUCCESS",
+                    "contexts": {
+                      "totalCount": 18,
+                      "nodes": [
+                        {
+                          "__typename": "CheckRun",
+                          "name": "capture / Capture PR diff",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328657/job/102246517072",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (actions)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281323755/job/102246505044",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "setup",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246515849",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (javascript-typescript)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281323755/job/102246504667",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (python)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281323755/job/102246504947",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "secret-scan",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246515866",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "dco",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246515626",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "rids",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246515835",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "line (test_all, test_all)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246580868",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "line (samsite, samsite)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246580896",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "cold-boot",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246580814",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "lean-boot",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246580827",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "api-fuzz / api-fuzz",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246581053",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "gate",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102249117079",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Codacy Static Code Analysis",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://app.codacy.com/gh/unified-systems-com/tap/pull-requests/339",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "codacy-production"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "CodeQL",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/runs/102246687895",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-advanced-security"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "SonarCloud",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/runs/102246701724",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-advanced-security"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "SonarCloud Code Analysis",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://sonarcloud.io/dashboard?id=unified-systems-com_tap&pullRequest=339",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "sonarqubecloud"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 344,
+          "databaseId": 4477453010,
+          "title": "chore(main): release 0.1.6",
+          "state": "OPEN",
+          "isDraft": false,
+          "url": "https://github.com/unified-systems-com/tap/pull/344",
+          "author": {
+            "__typename": "Bot",
+            "login": "tap-release-please"
+          },
+          "authorAssociation": "CONTRIBUTOR",
+          "headRefName": "release-please--branches--main--components--tap",
+          "headRefOid": "7375a1f8703684923e494fcd8f9da95539a5be70",
+          "headRepository": {
+            "nameWithOwner": "unified-systems-com/tap"
+          },
+          "baseRefName": "main",
+          "baseRefOid": "142907b937f66f9dd1a59b722131a7532a71202d",
+          "createdAt": "2026-09-08T18:40:23Z",
+          "updatedAt": "2026-09-08T22:50:53Z",
+          "closedAt": null,
+          "mergedAt": null,
+          "mergeCommit": null,
+          "mergeable": "UNKNOWN",
+          "reviewDecision": "REVIEW_REQUIRED",
+          "additions": 29,
+          "deletions": 4,
+          "changedFiles": 5,
+          "labels": {
+            "nodes": [
+              {
+                "name": "autorelease: pending"
+              }
+            ]
+          },
+          "reviewRequests": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "notgeorge"
+                }
+              },
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "criticalsec"
+                }
+              }
+            ]
+          },
+          "latestReviews": {
+            "nodes": []
+          },
+          "commits": {
+            "totalCount": 2,
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "7375a1f8703684923e494fcd8f9da95539a5be70",
+                  "statusCheckRollup": {
+                    "state": "SUCCESS",
+                    "contexts": {
+                      "totalCount": 18,
+                      "nodes": [
+                        {
+                          "__typename": "CheckRun",
+                          "name": "capture / Capture PR diff",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045368/job/102264918695",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (actions)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287041966/job/102264910307",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "setup",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265307633",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (javascript-typescript)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287041966/job/102264910568",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (python)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287041966/job/102264910590",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "secret-scan",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265307920",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "dco",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265308210",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "rids",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265307865",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "line (test_all, test_all)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265347356",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "line (samsite, samsite)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265347472",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "cold-boot",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265347366",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "lean-boot",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265347313",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "api-fuzz / api-fuzz",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102265347542",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "gate",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34287045190/job/102267607711",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Codacy Static Code Analysis",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://app.codacy.com/gh/unified-systems-com/tap/pull-requests/344",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "codacy-production"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "CodeQL",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/runs/102265070027",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-advanced-security"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "SonarCloud",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/runs/102265135958",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-advanced-security"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "SonarCloud Code Analysis",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://sonarcloud.io/dashboard?id=unified-systems-com_tap&pullRequest=344",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "sonarqubecloud"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 346,
+          "databaseId": 4477548917,
+          "title": "docs(preplugin): git_core planning spec for the /new-plugin spec-first road \u2014 three neutral nodes (repository, ref, commit), identity helpers, shared-write rules, kernel fixture, consumer contract [via double-tap-git-serious]",
+          "state": "CLOSED",
+          "isDraft": false,
+          "url": "https://github.com/unified-systems-com/tap/pull/346",
+          "author": {
+            "__typename": "User",
+            "login": "notgeorge"
+          },
+          "authorAssociation": "MEMBER",
+          "headRefName": "session/double-tap-git-serious",
+          "headRefOid": "cd3f960fd30cb96f9c3e5f0af630cf6def306c1f",
+          "headRepository": {
+            "nameWithOwner": "unified-systems-com/tap"
+          },
+          "baseRefName": "main",
+          "baseRefOid": "7c52f712c774536c01434adc1de654a9ddff4f8e",
+          "createdAt": "2026-09-08T18:52:12Z",
+          "updatedAt": "2026-09-08T21:42:47Z",
+          "closedAt": "2026-09-08T21:42:47Z",
+          "mergedAt": null,
+          "mergeCommit": null,
+          "mergeable": "MERGEABLE",
+          "reviewDecision": "REVIEW_REQUIRED",
+          "additions": 254,
+          "deletions": 0,
+          "changedFiles": 1,
+          "labels": {
+            "nodes": []
+          },
+          "reviewRequests": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "criticalsec"
+                }
+              }
+            ]
+          },
+          "latestReviews": {
+            "nodes": []
+          },
+          "commits": {
+            "totalCount": 1,
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "cd3f960fd30cb96f9c3e5f0af630cf6def306c1f",
+                  "statusCheckRollup": {
+                    "state": "FAILURE",
+                    "contexts": {
+                      "totalCount": 17,
+                      "nodes": [
+                        {
+                          "__typename": "CheckRun",
+                          "name": "capture / Capture PR diff",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603404/job/102194061201",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (actions)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265600101/job/102194054150",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "setup",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194059660",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (javascript-typescript)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265600101/job/102194053956",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (python)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265600101/job/102194054243",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "secret-scan",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194059911",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "dco",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194059882",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "rids",
+                          "status": "COMPLETED",
+                          "conclusion": "FAILURE",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194059989",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "line",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194110802",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "cold-boot",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194110521",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "lean-boot",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194110870",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "api-fuzz",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194110786",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "gate",
+                          "status": "COMPLETED",
+                          "conclusion": "FAILURE",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34265603129/job/102194143113",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Codacy Static Code Analysis",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://app.codacy.com/gh/unified-systems-com/tap/pull-requests/346",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "codacy-production"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "CodeQL",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/runs/102194242112",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-advanced-security"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "SonarCloud",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/runs/102194206300",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-advanced-security"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "SonarCloud Code Analysis",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://sonarcloud.io/dashboard?id=unified-systems-com_tap&pullRequest=346",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "sonarqubecloud"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 99001,
+          "databaseId": null,
+          "title": "SYNTHETIC fork PR (no rollup)",
+          "state": "MERGED",
+          "isDraft": false,
+          "url": "https://github.com/unified-systems-com/tap/pull/339",
+          "author": {
+            "__typename": "User",
+            "login": "outsider"
+          },
+          "authorAssociation": "FIRST_TIME_CONTRIBUTOR",
+          "headRefName": "patch-1",
+          "headRefOid": "7c645beb5587fcea4165be638f805af62489944b",
+          "headRepository": {
+            "nameWithOwner": "someone-else/tap"
+          },
+          "baseRefName": "main",
+          "baseRefOid": "16a3f456fad0f34dc442fd7bd90a715de395679e",
+          "createdAt": "2026-09-08T10:07:31Z",
+          "updatedAt": "2026-09-08T23:25:29Z",
+          "closedAt": "2026-09-08T23:25:29Z",
+          "mergedAt": "2026-09-08T23:25:29Z",
+          "mergeCommit": {
+            "oid": "bc976a77bd08bba2b59178ac680b0e63dfcd7676"
+          },
+          "mergeable": "UNKNOWN",
+          "reviewDecision": "APPROVED",
+          "additions": 5,
+          "deletions": 5,
+          "changedFiles": 2,
+          "labels": {
+            "nodes": [
+              {
+                "name": "renovate"
+              }
+            ]
+          },
+          "reviewRequests": {
+            "nodes": []
+          },
+          "latestReviews": {
+            "nodes": []
+          },
+          "commits": {
+            "totalCount": 2,
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "7c645beb5587fcea4165be638f805af62489944b",
+                  "statusCheckRollup": null
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 99002,
+          "databaseId": null,
+          "title": "SYNTHETIC bot PR",
+          "state": "MERGED",
+          "isDraft": false,
+          "url": "https://github.com/unified-systems-com/tap/pull/339",
+          "author": {
+            "__typename": "Bot",
+            "login": "renovate"
+          },
+          "authorAssociation": "CONTRIBUTOR",
+          "headRefName": "renovate/browser-libraries-(package-lock.json)",
+          "headRefOid": "7c645beb5587fcea4165be638f805af62489944b",
+          "headRepository": {
+            "nameWithOwner": "unified-systems-com/tap"
+          },
+          "baseRefName": "main",
+          "baseRefOid": "16a3f456fad0f34dc442fd7bd90a715de395679e",
+          "createdAt": "2026-09-08T10:07:31Z",
+          "updatedAt": "2026-09-08T23:25:29Z",
+          "closedAt": "2026-09-08T23:25:29Z",
+          "mergedAt": "2026-09-08T23:25:29Z",
+          "mergeCommit": {
+            "oid": "bc976a77bd08bba2b59178ac680b0e63dfcd7676"
+          },
+          "mergeable": "UNKNOWN",
+          "reviewDecision": "APPROVED",
+          "additions": 5,
+          "deletions": 5,
+          "changedFiles": 2,
+          "labels": {
+            "nodes": [
+              {
+                "name": "renovate"
+              }
+            ]
+          },
+          "reviewRequests": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "notgeorge"
+                }
+              }
+            ]
+          },
+          "latestReviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "criticalsec"
+                },
+                "state": "APPROVED",
+                "submittedAt": "2026-09-08T23:25:24Z"
+              }
+            ]
+          },
+          "commits": {
+            "totalCount": 2,
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "7c645beb5587fcea4165be638f805af62489944b",
+                  "statusCheckRollup": {
+                    "state": "SUCCESS",
+                    "contexts": {
+                      "totalCount": 18,
+                      "nodes": [
+                        {
+                          "__typename": "CheckRun",
+                          "name": "capture / Capture PR diff",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328657/job/102246517072",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (actions)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281323755/job/102246505044",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "setup",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246515849",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (javascript-typescript)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281323755/job/102246504667",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Analyze (python)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281323755/job/102246504947",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "secret-scan",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246515866",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "dco",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246515626",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "rids",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246515835",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "line (test_all, test_all)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246580868",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "line (samsite, samsite)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246580896",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "cold-boot",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246580814",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "lean-boot",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246580827",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "api-fuzz / api-fuzz",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102246581053",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "gate",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/actions/runs/34281328278/job/102249117079",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-actions"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "Codacy Static Code Analysis",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://app.codacy.com/gh/unified-systems-com/tap/pull-requests/339",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "codacy-production"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "CodeQL",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/runs/102246687895",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-advanced-security"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "SonarCloud",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/unified-systems-com/tap/runs/102246701724",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "github-advanced-security"
+                            }
+                          }
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "SonarCloud Code Analysis",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://sonarcloud.io/dashboard?id=unified-systems-com_tap&pullRequest=339",
+                          "checkSuite": {
+                            "app": {
+                              "slug": "sonarqubecloud"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

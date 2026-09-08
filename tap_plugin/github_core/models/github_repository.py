@@ -50,6 +50,8 @@ class GithubRepository(BaseModel):
             "type": "string",
             "enum": ["", CUSTOM_PROPERTIES_OBSERVED, CUSTOM_PROPERTIES_UNOBSERVABLE],
         },
+        "pull_requests_observability": {"type": "string", "enum": ["", "observed", "unobservable"]},
+        "pull_requests_total": {"type": ["integer", "null"]},
         "configuration": {"type": "object"},
         "tags": {"type": "object"},
     }
@@ -83,6 +85,15 @@ class GithubRepository(BaseModel):
             "validation": "jsonschema",
             "schema": {"type": "string", "enum": ["", CUSTOM_PROPERTIES_OBSERVED, CUSTOM_PROPERTIES_UNOBSERVABLE]},
         },
+        # Same three states for the pull-request surface: `observed` (the config layer answered
+        # `pullRequests` — zero is then a fact), `unobservable` (the field degraded), `""` (a
+        # repos-only scope runs no config-layer query).
+        "pull_requests_observability": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "enum": ["", "observed", "unobservable"]},
+        },
+        # GitHub's totalCount, so the cap on the collected window is visible beside the rows.
+        "pull_requests_total": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
@@ -114,6 +125,11 @@ class GithubRepository(BaseModel):
     #: could not read them — the map means nothing), `""` (the collector never ran the surface,
     #: e.g. a user-owned repository, where custom properties do not exist).
     custom_properties_observability = models.CharField(max_length=16, blank=True, default="")
+    #: Whether this repository's pull requests were read (`observed` | `unobservable` | `""` never
+    #: asked) and how many GitHub reports in total, so a collected window of thirty is never
+    #: mistaken for all of them (req-github-core-pull-requests).
+    pull_requests_observability = models.CharField(max_length=16, blank=True, default="")
+    pull_requests_total = models.IntegerField(null=True, blank=True)
     configuration = models.JSONField(default=dict, blank=True)
     tags = models.JSONField(default=dict, blank=True)
 

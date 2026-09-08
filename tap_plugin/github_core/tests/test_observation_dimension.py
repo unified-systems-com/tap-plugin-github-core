@@ -23,7 +23,10 @@ EDGES_DIR = Path(github_models.__file__).parent.parent / "edges"
 # version was pushed. A release rides the config-layer GraphQL transport, and transport is
 # not layer.
 EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "RuleSuite",
-                    "GithubRelease", "ActionsArtifact", "GithubPackage", "GithubPackageVersion"}
+                    "GithubRelease", "ActionsArtifact", "GithubPackage", "GithubPackageVersion",
+                    # A pull request is an act — someone opened it — and carries the executed
+                    # check rollup on its head; it is not configuration anyone wrote (github-core#82).
+                    "PullRequest"}
 # SCOPED_TO_REF is sourced on actions_cache, which is execution — the layer follows the
 # source model rather than a second map (req-github-core-dimensions-6).
 # TRIGGERED_EVALUATION / BYPASSED_RULE / EVALUATED_ON are all sourced on rule_suite, which is execution.
@@ -34,6 +37,9 @@ EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "Rul
 EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "RUNS_JOB", "EXECUTED_ON_RUNNER", "SCOPED_TO_REF",
                    "TRIGGERED_EVALUATION", "BYPASSED_RULE", "EVALUATED_ON_REF",
                    "BUILDS_RELEASE", "UPLOADS_ARTIFACT", "BUILDS_PACKAGE_VERSION", "TARGETS_REF",
+                   # Pull-request edges follow their pull-request end (github-core#82): the
+                   # author's act, and the proposal's joins onto the neutral refs and commit.
+                   "OPENS_PULL_REQUEST", "PROPOSES_REF", "TARGETS_BASE_REF", "PROPOSES_COMMIT",
                    "PUBLISHES_PACKAGE_VERSION"}
 # Sources span both layers, so the layer belongs to the endpoint, not the edge
 # type; the collector sets it per emitted edge (req-github-core-dimensions-6).

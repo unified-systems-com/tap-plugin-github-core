@@ -1,0 +1,26 @@
+{
+  "slug": "PROPOSES_REF__github_core",
+  "name": "Proposes Ref",
+  "description": "The pull request proposes merging this branch (its head ref). Drawn only when the head lives in the base repository and the ref was observed in this batch; a fork's head is recorded on the node as `head_repository` with no edge, because the fork's refs are not in scope.",
+  "sources": [
+    "github_core__pull_request"
+  ],
+  "targets": [
+    "git_core__git_ref"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "pulls",
+    "github.observation": "execution"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ref_name": {
+        "type": "string",
+        "description": "The branch name as the pull request names it, without the `refs/heads/` prefix — carried so the edge reads without dereferencing the ref."
+      }
+    }
+  }
+}
