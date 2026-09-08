@@ -12,7 +12,7 @@ GitHub Actions deployment-plumbing models and the GitHub collector — account-s
 - Six v0 models: `github_account`, `github_repository`, `github_workflow`,
   `github_actions_run`, `github_actions_job`, `github_runner`
 - Six v0 edge types: `OWNS_REPO`, `DEFINES_WORKFLOW`, `EXECUTES_WORKFLOW`,
-  `HAS_ACTIONS_JOB`, `EXECUTED_ON`, `REFERENCES_RESOURCE`
+  `RUNS_JOB`, `EXECUTED_ON_RUNNER`, `REFERENCES_RESOURCE`
 - `github_pat` secret kind (PAT credential validation)
 - `GitHubCollector` — `CollectorBase` subclass; two-phase run (collection +
   link enrichment) against the configured scope: `owner` (enumerated; `repos` as an

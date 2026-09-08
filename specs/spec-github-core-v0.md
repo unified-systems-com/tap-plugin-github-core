@@ -76,25 +76,25 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-releases | [Releases — The First Output](#releases--the-first-output) | In Development | 2026-09-02 (github-core#31): `github_release` from the config-layer GraphQL query at no extra request, keyed on `owner/repo` + release id; `PUBLISHES_RELEASE` containment, `TARGETS_REF` onto the tag, and a DERIVED `BUILDS_RELEASE` whose `match_kind` labels its own evidence. Three states on the repository node (`outputs_observability`). |
 | req-github-core-packages | [GitHub Packages — The Collection Seam](#github-packages--the-collection-seam) | In Development | 2026-09-02 (github-core#31): `github_package` / `github_package_version` carrying a purl, so `supply_chain_core` (vocabulary decision 4) can claim them by identity. **Not observable with the product credential**: GitHub marks the packages endpoints `enabledForGitHubApps: false`; measured as a 400 on the container listing. Recorded as `unobservable`, never zero. Adds `organization:packages:read` to the derived permission set — existing installations must re-accept. |
 | req-github-core-ruleset | [Ruleset Collection](#ruleset-collection) | In Development | 2026-08-27 (pulled by git-serious): `github_ruleset` node keyed on GitHub's global `databaseId`, sourced from the config-layer GraphQL query that already returned rulesets but discarded them. The id is the prerequisite for every other ruleset surface — bypass actors, rule suites, version history — all of which are keyed by it. Attachment edge deferred pending its slug. |
-| req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
+| req-github-core-edges | [Edge Vocabulary](#edge-vocabulary) | Implemented | Platform/account/repo/workflow/run/job/runner spine (incl. `HOSTS_ACCOUNT`) plus cross-grid `REFERENCES_RESOURCE` and `FEDERATES_VIA_PROVIDER` — eight edge files registered. `TRUSTS_ISSUER` is now the generic `identity_core`-owned edge (wildcard source); github's enrichment still emits it. |
 | req-github-core-actions-used | [Actions Used](#actions-used) | In Development | 2026-09-02 (github-core#45, ranked first by `build-github-corpus`): `github_action` node keyed on the action path, shared across the scope, plus `USES_ACTION` carrying the pin. The parser no longer labels every non-SHA ref `tag`; a mutable name is resolved only against an in-scope repository's refs and is otherwise `unresolved` / `unobservable`. |
 | req-github-core-workflow-chains | [Workflow Chains](#workflow-chains) | In Development | 2026-09-02 (github-core#29, #52): `CALLS_WORKFLOW` (job → reusable workflow, the `USES_ACTION` pin grammar + `secrets_inherit`) and `TRIGGERS_WORKFLOW` (completing → triggered, from `on.workflow_run`), both resolved in a post-pass over the whole scope; an unresolved callee or name is recorded on the node, never fabricated. |
 | req-github-core-artifacts | [Artifacts](#artifacts) | In Development | 2026-09-02 (github-core#55): `actions_artifact` from the repository listing (newest first, capped, total reported) joined by `UPLOADS_ARTIFACT` from the producing run when it is in the batch; `expired` observed, never inferred (shape C). Declared upload/download steps on the job; no download edge — GitHub keeps no record of downloads. |
 | req-github-core-commits | [Commits](#commits) | Implemented | 2026-09-08 (github-core#76/#78): the commit's INTRINSIC half is the neutral `git_core__git_commit` (identity `sha1:oid`, one node however many hosts store it; `STORES_COMMIT` from the neutral repository, `RESOLVES_COMMIT` from the ref); GitHub's OBSERVED half — resolved logins, signature verdict in three states — is `commit_observation`, keyed per host + repository stable id + commit (`OBSERVES_COMMIT`, `OBSERVED_IN_REPOSITORY`). Sliced from a `CommitSlice` fragment on the config-layer refs query at no extra request. |
-| req-github-core-refs | [Refs](#refs) | Implemented | Branches and tags, one type. Since github-core#76/#78 the ref is the neutral `git_core__git_ref` (identity = neutral repository id + full path; `DECLARES_REF__git_core` from the neutral repository this record `HOSTS_REPOSITORY`); this plugin emits it and targets it from `PROTECTS` / `SCOPED_TO` / `EVALUATED_ON_REF` / `TARGETS_REF`. Row added per github-core#69. |
+| req-github-core-refs | [Refs](#refs) | Implemented | Branches and tags, one type. Since github-core#76/#78 the ref is the neutral `git_core__git_ref` (identity = neutral repository id + full path; `DECLARES_REF__git_core` from the neutral repository this record `HOSTS_REPOSITORY`); this plugin emits it and targets it from `PROTECTS` / `SCOPED_TO_REF` / `EVALUATED_ON_REF` / `TARGETS_REF`. Row added per github-core#69. |
 | req-github-core-status-checks | [Status Checks](#status-checks) | In Development | 2026-09-02 (github-core#61): `status_check` keyed `<owner>#<context>` from the ruleset detail's `required_status_checks` parameters; `REQUIRES_CHECK` with the rule's qualifiers; `PRODUCES_CHECK` derived from job display names with stated confidence, only toward required contexts an Actions job may produce. A refused detail is counted as not observable, never as no requirement. |
-| req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
+| req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON_REPOSITORY` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
 | req-github-core-collector | [Collector Runtime](#collector-runtime) | Implemented | Two-phase run + degraded-runner + no-delete + single-attempt + incremental + non-terminal refresh + empty-body-404 retry + per-run-/jobs degrade |
 | req-github-core-manifests | [Collection And Link Manifests](#collection-and-link-manifests) | Implemented | Two manifests + JSON Schemas, validated at load; link manifest is data-driven |
 | req-github-core-workflow-parse | [Workflow File Parsing](#workflow-file-parsing) | Implemented | YAML parse + raw retention + in-memory fetch + scope-bound ref extraction + local-action detection |
-| req-github-core-runner | [Runner Semantics](#runner-semantics) | Implemented | Durable runner nodes + matchable EXECUTED_ON + observed-runner-on-job + no-ephemeral-runner-nodes |
+| req-github-core-runner | [Runner Semantics](#runner-semantics) | Implemented | Durable runner nodes + matchable EXECUTED_ON_RUNNER + observed-runner-on-job + no-ephemeral-runner-nodes |
 | req-github-core-grid-links | [Existing Grid Links](#existing-grid-links) | Implemented | Enrichment phase + exact-only + warn-only failures + Gryphon read path (via `=~` regex operator); OIDC link verified end-to-end against samsite + AWS |
 | req-github-core-python-deps | [Plugin Python Dependency](#plugin-python-dependency) | Implemented | `PyYAML` is plugin-owned via root uv workspace; first proof of `req-plugin-arch-python-deps` |
 | req-github-core-dependabot-alerts | [Dependabot Alerts](#dependabot-alerts) | Proposed | 2026-09-03: GitHub's own vulnerable-dependency findings, per repository, landed as `dependabot_alert` nodes joined to the `github_action` (by package) and `github_workflow` (by manifest path) they flag. The App already holds `repository:vulnerability_alerts:read` (exploratory); the manifest declaration is what is missing. Not yet observable on our own org; fixture in place. |
 | req-github-core-backlog-references | [Variables And Secret References (Backlog)](#variables-and-secret-references-backlog) | Backlog | Two-source-of-truth model, hotlink contract implication, provenance shape; pick up when critical path |
-| req-github-core-backlog-run-attempts | [Multi-Attempt Run Observation (Backlog)](#multi-attempt-run-observation-backlog) | Backlog | Per-attempt run + job fan-out, re-run-failed-jobs subtlety, HAS_ACTIONS_JOB lifecycle; pick up when critical path |
+| req-github-core-backlog-run-attempts | [Multi-Attempt Run Observation (Backlog)](#multi-attempt-run-observation-backlog) | Backlog | Per-attempt run + job fan-out, re-run-failed-jobs subtlety, RUNS_JOB lifecycle; pick up when critical path |
 | req-github-core-backlog-grid-vocab-links | [Grid-Vocabulary Reference Resolution (Backlog)](#grid-vocabulary-reference-resolution-backlog) | Backlog | Replace the parser's regex shape-guessing with matching against the known grid vocabulary (regions/zones/dist-ids); removes junk refs, recovers `${{ }}`-embedded matches, needs confidence markers |
 | req-github-core-backlog-app-relationships | [GitHub App Relationships (Backlog)](#github-app-relationships-backlog) | Backlog | Model what apps *do* beyond being enabled — e.g. Dependabot opens dependency-bump PRs against the repo, code scanning posts alerts. Edges like `OPENS_PR` / `RAISES_ALERT` once there's a consumer |
 | req-github-core-nongoals | [v0 Non-Goals](#v0-non-goals) | Implemented | Full GitHub inventory, Sigstore/Rekor, deletion/reaping, schedules, references, multi-attempt runs — boundaries hold |
@@ -225,7 +225,7 @@ Models:
 - `github_actions_run` — one workflow run (latest observed state; multi-attempt tracking deferred to `req-github-core-backlog-run-attempts`).
 - `github_actions_job` — one job within a workflow run. Step details live in `configuration` in v0.
 - `github_runner` — durable registered self-hosted runner configuration when visible through the API.
-- `github_app` — a GitHub App or first-party platform app (e.g. Dependabot) enabled on a repository. Generic across GitHub's app surface (managed apps, third-party apps, OIDC token-issuing apps); keyed by app slug so one node is shared across every repo that enables it, with `ENABLED_ON` edges fanning in. See [GitHub Apps](#github-apps). **The application only** — one account's installation of it is `app_installation`.
+- `github_app` — a GitHub App or first-party platform app (e.g. Dependabot) enabled on a repository. Generic across GitHub's app surface (managed apps, third-party apps, OIDC token-issuing apps); keyed by app slug so one node is shared across every repo that enables it, with `ENABLED_ON_REPOSITORY` edges fanning in. See [GitHub Apps](#github-apps). **The application only** — one account's installation of it is `app_installation`.
 
 The **self-tier vocabulary** (added 2026-08-27, `spec-github-core-vocabulary.md`):
 
@@ -244,7 +244,7 @@ the GitHub Actions issuer node during collection, but through
 `identity_core.issuer.oidc_issuer_node_envelope` — the vocabulary and the id/URL
 normalization live in identity_core, and any other observer (AWS, Sigstore,
 samsite) converges on the same node by its canonical-URL id. github enables the
-issuer on each repo (`ENABLED_ON`, source now `identity_core__oidc_issuer`).
+issuer on each repo (`ENABLED_ON_REPOSITORY`, source now `identity_core__oidc_issuer`).
 
 Variables (`github_actions_variable`) and secret references
 (`github_actions_secret_ref`) are deferred to
@@ -416,23 +416,23 @@ V0 edge types:
 | `OWNS_REPO` | `github_account` -> `github_repository` | Account owns repo. |
 | `DEFINES_WORKFLOW` | `github_repository` -> `github_workflow` | Repo contains workflow definition. |
 | `EXECUTES_WORKFLOW` | `github_actions_run` -> `github_workflow` | Run executes workflow. |
-| `HAS_ACTIONS_JOB` | `github_actions_run` -> `github_actions_job` | Run contains job. v0 reflects the latest-attempt job set; multi-attempt tracking deferred. |
-| `EXECUTED_ON` | `github_actions_job` -> `github_runner` | Job executed on a durable runner node when matchable. (Distinct from `computing_core.RUNS_ON`, which models program-on-compute-environment.) |
+| `RUNS_JOB` | `github_actions_run` -> `github_actions_job` | Run contains job. v0 reflects the latest-attempt job set; multi-attempt tracking deferred. |
+| `EXECUTED_ON_RUNNER` | `github_actions_job` -> `github_runner` | Job executed on a durable runner node when matchable. (Distinct from `computing_core.RUNS_ON`, which models program-on-compute-environment.) |
 | `REFERENCES_RESOURCE` | GitHub node -> external grid node | Conservative exact-match link to existing AWS nodes (resolved in the enrichment phase). |
-| `FEDERATES_VIA` | `github_repository` -> `aws_iam_oidc_provider` | Repo federates into AWS through the GitHub Actions OIDC provider (URL `token.actions.githubusercontent.com`). Chains with the AWS-side `FEDERATES_INTO` (provider -> deploy role). Derived link resolved in the enrichment phase. |
+| `FEDERATES_VIA_PROVIDER` | `github_repository` -> `aws_iam_oidc_provider` | Repo federates into AWS through the GitHub Actions OIDC provider (URL `token.actions.githubusercontent.com`). Chains with the AWS-side `FEDERATES_INTO` (provider -> deploy role). Derived link resolved in the enrichment phase. |
 | `TRUSTS_ISSUER` | `aws_iam_oidc_provider` -> `identity_core__oidc_issuer` | The AWS IAM OIDC provider registers trust in an OIDC issuer — its scheme-less `url` matches the issuer's `host`. **The edge type is the generic `identity_core`-owned `TRUSTS_ISSUER__identity_core`** (wildcard source — trusting an issuer is a cross-cloud federation relationship, not AWS-specific); github_core no longer owns it, but its enrichment phase still *emits* it (edge types resolve globally, and github is today the plugin that runs a grid-link engine + mints the issuer in the same run). Derived link resolved in the enrichment phase (not hotlink-backed). |
 | `DEFINES_JOB` | `github_workflow` -> `workflow_job` | A workflow file declares a job. Properties `{job_key, order}`. |
 | `DEPENDS_ON_JOB` | `workflow_job` -> `workflow_job` | The `needs:` graph — what a job compromised early can reach later. Property `{condition}`. |
 | `HAS_REF` | `github_repository` -> `git_ref` | Repo contains a branch or tag. |
 | `PROTECTS` | `github_ruleset` -> `github_repository` \| `git_ref` | A ruleset gates a repository (`match_kind: declared`) or a specific observed ref (`match_kind: resolved`, with the `ref_pattern` that matched). |
 | `BYPASSES` | `github_account` \| `github_app` \| `app_installation` -> `github_ruleset` | An actor may bypass a ruleset. **Absence of this edge is not absence of bypass** — see `req-github-core-rulesets`. |
-| `HAS_ENVIRONMENT` | `github_repository` -> `github_environment` | Repo declares a deployment environment. |
+| `DECLARES_ENVIRONMENT` | `github_repository` -> `github_environment` | Repo declares a deployment environment. |
 | `USES_ENVIRONMENT` | `workflow_job` -> `github_environment` | A declared job deploys through an environment's protection rules. Its absence beside a deploying job is the finding. |
-| `HAS_CACHE` | `github_repository` -> `actions_cache` | Repo holds a stored cache entry. |
-| `SCOPED_TO` | `actions_cache` -> `git_ref` | A cache entry belongs to an observed ref's scope; absence usually means a pull-request ref. |
-| `HAS_INSTALLATION` | `github_app` -> `app_installation` | The application, and one installation of it. |
-| `INSTALLED_ON` | `app_installation` -> `github_account` | The account that granted the installation. |
-| `ENABLED_ON` | `github_app` \| `app_installation` \| `identity_core__oidc_issuer` -> `github_repository` | A GitHub App, platform app, or the Actions OIDC issuer is enabled on the repo. Emitted during the per-repo walk. The issuer source type lives in `identity_core`. See [GitHub Apps](#github-apps). |
+| `STORES_CACHE` | `github_repository` -> `actions_cache` | Repo holds a stored cache entry. |
+| `SCOPED_TO_REF` | `actions_cache` -> `git_ref` | A cache entry belongs to an observed ref's scope; absence usually means a pull-request ref. |
+| `REGISTERS_INSTALLATION` | `github_app` -> `app_installation` | The application, and one installation of it. |
+| `INSTALLED_ON_ACCOUNT` | `app_installation` -> `github_account` | The account that granted the installation. |
+| `ENABLED_ON_REPOSITORY` | `github_app` \| `app_installation` \| `identity_core__oidc_issuer` -> `github_repository` | A GitHub App, platform app, or the Actions OIDC issuer is enabled on the repo. Emitted during the per-repo walk. The issuer source type lives in `identity_core`. See [GitHub Apps](#github-apps). |
 
 Secret and variable reference edges (`REFERENCES_SECRET`, `REFERENCES_VARIABLE`)
 are deferred to `req-github-core-backlog-references`.
@@ -445,8 +445,8 @@ ownership, or runtime control.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-edges-1 | Containment + Execution Spine | Implemented | The platform/account/repo/workflow/run/job/runner edges (`HOSTS_ACCOUNT`, `OWNS_REPO`, `DEFINES_WORKFLOW`, `EXECUTES_WORKFLOW`, `HAS_ACTIONS_JOB`, `EXECUTED_ON`) are declared and constrained. | `HOSTS_ACCOUNT` is the top-of-tree containment edge synthesized with the platform singleton. |
-| req-github-core-edges-2 | Cross-Grid Edges | Implemented | The v0 cross-grid edges github owns are `REFERENCES_RESOURCE` (conservative resource reference) and `FEDERATES_VIA` (repo -> AWS OIDC provider federation). The enrichment phase also emits `TRUSTS_ISSUER` (AWS OIDC provider -> `identity_core__oidc_issuer`), the generic `identity_core`-owned type. All resolve in the enrichment phase. | Secret/variable reference edges deferred. |
+| req-github-core-edges-1 | Containment + Execution Spine | Implemented | The platform/account/repo/workflow/run/job/runner edges (`HOSTS_ACCOUNT`, `OWNS_REPO`, `DEFINES_WORKFLOW`, `EXECUTES_WORKFLOW`, `RUNS_JOB`, `EXECUTED_ON_RUNNER`) are declared and constrained. | `HOSTS_ACCOUNT` is the top-of-tree containment edge synthesized with the platform singleton. |
+| req-github-core-edges-2 | Cross-Grid Edges | Implemented | The v0 cross-grid edges github owns are `REFERENCES_RESOURCE` (conservative resource reference) and `FEDERATES_VIA_PROVIDER` (repo -> AWS OIDC provider federation). The enrichment phase also emits `TRUSTS_ISSUER` (AWS OIDC provider -> `identity_core__oidc_issuer`), the generic `identity_core`-owned type. All resolve in the enrichment phase. | Secret/variable reference edges deferred. |
 | req-github-core-edges-3 | Conservative Resource Semantics | Implemented | `REFERENCES_RESOURCE` is used only for exact, unambiguous matches and does not overstate deployment semantics. | Enforced by the link-manifest schema (`match_mode: exact`-only enum) and the resolver's one-candidate-only emission rule. |
 
 ### Declared Jobs
@@ -865,7 +865,7 @@ policy; that field is left `null` (unobserved) rather than defaulted, because de
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-environments-1 | Environments Collected | Implemented | Each repository's environments land as `github_environment` joined by `HAS_ENVIRONMENT`, with their protection rules. | Free from the config layer. |
+| req-github-core-environments-1 | Environments Collected | Implemented | Each repository's environments land as `github_environment` joined by `DECLARES_ENVIRONMENT`, with their protection rules. | Free from the config layer. |
 | req-github-core-environments-2 | Declared Jobs Link To Them | Implemented | A job declaring `environment:` (in either written form) gets a `USES_ENVIRONMENT` edge to that environment. | |
 | req-github-core-environments-3 | Unobserved Fields Stay Null | Implemented | `deployment_branch_policy` and `can_admins_bypass` are null until a transport that reads them is added. | Null is unobserved; a default would be a claim. |
 
@@ -891,8 +891,8 @@ The join is a named gap. `WRITES_CACHE` / `RESTORES_CACHE` wait for it.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-caches-1 | Entries Collected | Implemented | Stored cache entries land as `actions_cache` joined by `HAS_CACHE`, carrying key, version, ref, size and access times. | Degrades with a warning on 403/404 like runners. |
-| req-github-core-caches-2 | Ref Scope Resolved | Implemented | `SCOPED_TO` links an entry to an observed `git_ref`. Its absence is informative — usually a pull-request ref — and is not treated as an error. | |
+| req-github-core-caches-1 | Entries Collected | Implemented | Stored cache entries land as `actions_cache` joined by `STORES_CACHE`, carrying key, version, ref, size and access times. | Degrades with a warning on 403/404 like runners. |
+| req-github-core-caches-2 | Ref Scope Resolved | Implemented | `SCOPED_TO_REF` links an entry to an observed `git_ref`. Its absence is informative — usually a pull-request ref — and is not treated as an error. | |
 | req-github-core-caches-3 | Truncation Reported | Implemented | The per-repository cap is stated with the total, since entries are returned most-recently-accessed first. | |
 | req-github-core-caches-4 | Declared Usage Not Guessed | Implemented | Cache key expressions are stored as written and never evaluated; no edge claims a declared step wrote a particular entry. | The gap is named rather than papered over. |
 
@@ -930,7 +930,7 @@ repositories and then shows you one row about itself. Read-only, like everything
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-app-installations-1 | Split From The Application | Implemented | `app_installation` holds installation id, granted permissions, repository selection, events and suspension; `github_app` keeps the application. Joined by `HAS_INSTALLATION`, and to the account by `INSTALLED_ON`. | |
+| req-github-core-app-installations-1 | Split From The Application | Implemented | `app_installation` holds installation id, granted permissions, repository selection, events and suspension; `github_app` keeps the application. Joined by `REGISTERS_INSTALLATION`, and to the account by `INSTALLED_ON_ACCOUNT`. | |
 | req-github-core-app-installations-2 | PAT Mode Claims Nothing | Implemented | Running as a token records that the inventory is unreachable rather than emitting an empty one. | An empty inventory is otherwise indistinguishable from a clean account. |
 | req-github-core-app-installations-4 | Account Inventory Preferred, Fallback Named | Implemented | The collector reads `/orgs/{owner}/installations` (which Apps reach this account) and falls back to `/app/installations` (its own installation) only when refused — warning that the absence of other Apps is then not evidence there are none, and recording which scope the answer came from. | Requires `organization:administration:read`; declared in the collection manifest so the App's permission set derives it rather than carrying it as an unexplained extra. |
 | req-github-core-app-installations-3 | Repository Selection Retained | Implemented | `repository_selection: all` is stored as-is: such an installation follows the account into new repositories without anyone granting it again. | |
@@ -1100,10 +1100,10 @@ RID: `req-github-core-app`
 Status: `Implemented`
 
 A `github_app` node models a GitHub App or first-party platform app enabled on
-a repository, linked by `ENABLED_ON`. The type is generic so the same shape
+a repository, linked by `ENABLED_ON_REPOSITORY`. The type is generic so the same shape
 covers GitHub's managed apps (Dependabot, code scanning), third-party apps, and
 OIDC token-issuing apps; the node is a singleton keyed by app slug, with one
-`ENABLED_ON` edge per repo that enables it.
+`ENABLED_ON_REPOSITORY` edge per repo that enables it.
 
 #### Detection
 
@@ -1112,7 +1112,7 @@ under a synthetic `dynamic/<app>/...` path (e.g. Dependabot appears as
 `dynamic/dependabot/dependabot-updates`). These are not repo CI workflows — they
 are platform apps enabled on the repo. The collector recognizes the synthetic
 path prefixes (a small declared map) during the per-repo workflow walk and emits
-a `github_app` + `ENABLED_ON` instead of a `github_workflow` + `DEFINES_WORKFLOW`,
+a `github_app` + `ENABLED_ON_REPOSITORY` instead of a `github_workflow` + `DEFINES_WORKFLOW`,
 skipping the YAML fetch (no real file exists at the dynamic path). Detection is
 thus a side effect of collection that already happens — no extra API calls, and
 consumers (e.g. samsite) get the app node for free without doing anything.
@@ -1125,9 +1125,9 @@ prefix map.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-app-1 | Generic App Type | Implemented | `github_app` is a generic type (slug-keyed singleton) covering managed, third-party, and token-issuing apps; `ENABLED_ON` links it to repositories. | Reused beyond Dependabot. |
-| req-github-core-app-2 | Dependabot Detected At Collection | Implemented | The collector reclassifies the synthetic `dynamic/dependabot/...` Actions entry into a `github_app` (`slug=dependabot`) + `ENABLED_ON` edge, not a `github_workflow`. | Declared synthetic-path prefix map; no extra API calls. |
-| req-github-core-app-3 | App Node Deduped | Implemented | The `github_app` node is emitted once per run (deduped by slug) even when enabled on multiple repos; `ENABLED_ON` edges still fan in per repo. | Run-level dedup set. |
+| req-github-core-app-1 | Generic App Type | Implemented | `github_app` is a generic type (slug-keyed singleton) covering managed, third-party, and token-issuing apps; `ENABLED_ON_REPOSITORY` links it to repositories. | Reused beyond Dependabot. |
+| req-github-core-app-2 | Dependabot Detected At Collection | Implemented | The collector reclassifies the synthetic `dynamic/dependabot/...` Actions entry into a `github_app` (`slug=dependabot`) + `ENABLED_ON_REPOSITORY` edge, not a `github_workflow`. | Declared synthetic-path prefix map; no extra API calls. |
+| req-github-core-app-3 | App Node Deduped | Implemented | The `github_app` node is emitted once per run (deduped by slug) even when enabled on multiple repos; `ENABLED_ON_REPOSITORY` edges still fan in per repo. | Run-level dedup set. |
 
 ### Dimension Strategy
 ----
@@ -1294,7 +1294,7 @@ Collection policy:
 - v0 does not model multiple run attempts. The collector uses GitHub's default
   jobs endpoint (`GET /runs/{run_id}/jobs`, not `/attempts/{n}/jobs`), which
   returns the latest-attempt snapshot. If a re-run happens between collections,
-  the run node is upserted with the latest state and HAS_ACTIONS_JOB reflects the
+  the run node is upserted with the latest state and RUNS_JOB reflects the
   newest job set — but old job nodes from the prior attempt persist (per the
   no-deletion rule) and can produce graph clutter. Multi-attempt tracking is
   deferred to `req-github-core-backlog-run-attempts`.
@@ -1435,7 +1435,7 @@ GitHub runners have two relevant shapes:
 v0 creates `github_runner` nodes only for durable registered runner
 configuration. Workflow jobs always retain observed runner fields in
 `configuration`. If a job's observed runner id matches a durable runner node,
-the collector emits `EXECUTED_ON`; otherwise the job remains self-contained.
+the collector emits `EXECUTED_ON_RUNNER`; otherwise the job remains self-contained.
 
 GitHub-hosted ephemeral runner observations do not become durable runner nodes
 in v0.
@@ -1446,7 +1446,7 @@ in v0.
 | --- | --- | :---: | --- | --- |
 | req-github-core-runner-1 | Durable Runner Nodes | Implemented | Registered self-hosted runners become `github_runner` nodes when visible. | Collector iterates `/actions/runners` response; one node per runner. |
 | req-github-core-runner-2 | Job Runner Observation | Implemented | Every job stores observed runner fields in configuration when present. | `runner_id`, `runner_name`, `runner_group_id`, `labels` persisted on `github_actions_job.configuration`. |
-| req-github-core-runner-3 | Matchable EXECUTED_ON | Implemented | `EXECUTED_ON` is emitted only when an observed job runner matches a durable runner node. | Collector keeps `runner_uuid_by_id` from collected runners and emits `EXECUTED_ON` only when `job.runner_id` is in that map. |
+| req-github-core-runner-3 | Matchable EXECUTED_ON_RUNNER | Implemented | `EXECUTED_ON_RUNNER` is emitted only when an observed job runner matches a durable runner node. | Collector keeps `runner_uuid_by_id` from collected runners and emits `EXECUTED_ON_RUNNER` only when `job.runner_id` is in that map. |
 | req-github-core-runner-4 | GitHub-Hosted Blobbed | Implemented | GitHub-hosted ephemeral runner observations do not become runner nodes in v0. | No node creation in the job loop; observed runner data stays in `job.configuration`. |
 
 ### Existing Grid Links
@@ -1471,9 +1471,9 @@ The link manifest supports two source-side shapes:
   structural rules where the join key isn't node-specific. First user:
   `repo_federates_with_github_oidc_provider` matches every collected
   `github_repository` against the canonical GitHub Actions OIDC issuer URL
-  on `aws_iam_oidc_provider.url`, emitting a `FEDERATES_VIA` edge. (A rule's
+  on `aws_iam_oidc_provider.url`, emitting a `FEDERATES_VIA_PROVIDER` edge. (A rule's
   `edge_type` is declared in the manifest; the federation rule is the one
-  structural rule that emits `FEDERATES_VIA` rather than `REFERENCES_RESOURCE`.)
+  structural rule that emits `FEDERATES_VIA_PROVIDER` rather than `REFERENCES_RESOURCE`.)
 
 Rules may also declare a `near_match_pattern` (case-insensitive regex). When
 exact resolution returns zero candidates AND the target field of any row
@@ -1495,7 +1495,7 @@ GitHubCollector.run():
     3. Enrichment phase  — query landed GitHub nodes for the configured repos,
                             run link manifest rules against grid candidates,
                             emit cross-grid link edges (REFERENCES_RESOURCE,
-                            FEDERATES_VIA, TRUSTS_ISSUER) as a second GRIFT batch
+                            FEDERATES_VIA_PROVIDER, TRUSTS_ISSUER) as a second GRIFT batch
                             (edges only — sources and targets already exist)
 ```
 
@@ -1561,10 +1561,10 @@ future capability deferred with the rest of variable/secret-ref work in
 | req-github-core-grid-links-1 | Search/Gryphon Read Path | Implemented | Link resolution uses TAP's canonical search/Gryphon read surfaces. | `enrichment.py` runs four Gryphon Searches per rule: source-node fetch (`MATCH (n:<source_type>) WHERE n.data.full_name IN [...]`), exact-match candidate (`WHERE n.data.<field> = $value`), near-match (`WHERE n.data.<field> =~ $pattern AND NOT n.data.<field> = $exact`), and the labelless target-name lookup falls out of the spine envelope's `name` field (no extra query needed). The `=~` operator landed in `req-grid-traversal-lang-regex` on 2026-05-28. |
 | req-github-core-grid-links-2 | Exact Match Only | Implemented | Links are emitted only for exact unambiguous matches. | Manifest schema constrains `match_mode` to the `exact` enum value; resolver emits only when `len(candidates) == 1`. |
 | req-github-core-grid-links-3 | Ambiguity Warns | Implemented | Multiple matches produce a structured warning and no edge. | Resolver records a `LINK_AMBIGUOUS` warn per multi-candidate hit. |
-| req-github-core-grid-links-4 | Enrichment Phase | Implemented | Link resolution executes as a follow-on phase after the main GitHub GRIFT batch commits, emitting a second GRIFT batch containing only cross-grid link edges (`REFERENCES_RESOURCE`, `FEDERATES_VIA`, `TRUSTS_ISSUER`). | `GithubCollector.run()` submits collection batch, then `resolve_links()` runs, then a second `submit_grift` if any edges resolved. The `TRUSTS_ISSUER` rule has an AWS-node source (`aws_iam_oidc_provider`), proving the resolver is not github-source-only. |
+| req-github-core-grid-links-4 | Enrichment Phase | Implemented | Link resolution executes as a follow-on phase after the main GitHub GRIFT batch commits, emitting a second GRIFT batch containing only cross-grid link edges (`REFERENCES_RESOURCE`, `FEDERATES_VIA_PROVIDER`, `TRUSTS_ISSUER`). | `GithubCollector.run()` submits collection batch, then `resolve_links()` runs, then a second `submit_grift` if any edges resolved. The `TRUSTS_ISSUER` rule has an AWS-node source (`aws_iam_oidc_provider`), proving the resolver is not github-source-only. |
 | req-github-core-grid-links-5 | Re-Resolve Every Run | Implemented | Every collector run re-resolves links against all configured-repo GitHub nodes, not just newly-changed ones. | `_source_queryset_for_repos` filters by `full_name__in=repos` and walks every matching landed node every run. |
 | req-github-core-grid-links-6 | Enrichment Failures Warn Only | Implemented | Enrichment-phase failures emit structured warnings; they do not roll back the already-committed GitHub batch. | Enrichment has no abort path; missing target models log + skip, multi-candidate hits warn + skip. |
-| req-github-core-grid-links-7 | Not Hotlink-Backed | Implemented | The enrichment-resolved edges (`REFERENCES_RESOURCE`, `FEDERATES_VIA`, `TRUSTS_ISSUER`) are derived links, not hotlinks: no `HOTLINKS` declaration, no pre-commit consistency-phase participation. | `TRUSTS_ISSUER` is deliberately derived: its source `aws_iam_oidc_provider` is written by aws_core, which neither knows about nor emits the edge — a hotlink there would fail on every provider write (see AGENTS.md "apply mechanisms by fit"). |
+| req-github-core-grid-links-7 | Not Hotlink-Backed | Implemented | The enrichment-resolved edges (`REFERENCES_RESOURCE`, `FEDERATES_VIA_PROVIDER`, `TRUSTS_ISSUER`) are derived links, not hotlinks: no `HOTLINKS` declaration, no pre-commit consistency-phase participation. | `TRUSTS_ISSUER` is deliberately derived: its source `aws_iam_oidc_provider` is written by aws_core, which neither knows about nor emits the edge — a hotlink there would fail on every provider write (see AGENTS.md "apply mechanisms by fit"). |
 | req-github-core-grid-links-8 | Missing Target Vocabulary Degrades | Implemented | A link rule whose source or target entity type is not registered in the running composition is skipped and recorded (`LINK_RULE_SKIPPED` warning + `skipped_rules` on the result); enrichment never aborts because another plugin is absent. | Found by git-serious composing github_core without aws_core (2026-08-26). |
 
 ### Plugin Python Dependency
@@ -1821,7 +1821,7 @@ GitHub workflow runs can be re-run, producing multiple "attempts" — each
 attempt has its own job_ids (GitHub mints new job_ids per attempt) and its
 own per-job lifecycle. v0 collapses this to a single observation per `run_id`
 because the Sam demo path doesn't involve re-runs, and modeling attempts
-adds non-trivial complexity around HAS_ACTIONS_JOB lifecycle, "re-run failed jobs"
+adds non-trivial complexity around RUNS_JOB lifecycle, "re-run failed jobs"
 semantics, and orphan handling.
 
 Pick this up when re-run visibility becomes critical path — most likely
@@ -1837,7 +1837,7 @@ The end state models each attempt as a distinct execution observation:
 - `github_actions_job` natural key remains `owner/repo + job_id` (job_ids
   are per-attempt at GitHub source, so they're naturally distinct without
   TAP-side synthesis)
-- Each per-attempt run node has its own `HAS_ACTIONS_JOB` fan-out to its own per-
+- Each per-attempt run node has its own `RUNS_JOB` fan-out to its own per-
   attempt job nodes
 - Same logical-job-across-attempts query pattern via `job.name + run.run_id`
   (e.g., "all attempts of the deploy job for this run")
@@ -1870,8 +1870,8 @@ DESC LIMIT 1 per name`), not a model concern.
 - `GET /runs/{run_id}/attempts/{n}/jobs` — returns that specific attempt's
   jobs (what the multi-attempt model uses per attempt)
 
-**HAS_ACTIONS_JOB lifecycle on re-collection.** With per-attempt run nodes, each
-attempt's HAS_ACTIONS_JOB edges are static — once observed, the attempt and its
+**RUNS_JOB lifecycle on re-collection.** With per-attempt run nodes, each
+attempt's RUNS_JOB edges are static — once observed, the attempt and its
 jobs don't change. There's no "swap the edge set on re-run" problem because
 each attempt is its own run node. This is structurally simpler than the v0
 shape, which has the messy edge-clutter issue described in
@@ -1885,7 +1885,7 @@ concern, not model.
 
 **v0's documented gap.** Under v0, a re-run between collections leaves the
 graph in a slightly confusing state: the run node is upserted with the
-latest-attempt status, HAS_ACTIONS_JOB picks up the new attempt's jobs, but old
+latest-attempt status, RUNS_JOB picks up the new attempt's jobs, but old
 attempt-1 jobs persist (no deletion). The operator sees a run with more jobs
 than ran in any single attempt. This is a known limitation, not a bug —
 the demo doesn't hit it, and the fix lives here.
@@ -1901,9 +1901,9 @@ the demo doesn't hit it, and the fix lives here.
   `req-github-core-collector-6` (no deletion semantics). History matters
   for compliance / audit use cases — successful and failed attempts are
   both load-bearing observations.
-- **"Build cross-attempt HAS_ACTIONS_JOB edges so the run node fan-outs to all
+- **"Build cross-attempt RUNS_JOB edges so the run node fan-outs to all
   attempts' jobs."** Rejected for the per-attempt-run-node model: each
-  attempt is its own run node, so HAS_ACTIONS_JOB is naturally scoped. Cross-
+  attempt is its own run node, so RUNS_JOB is naturally scoped. Cross-
   attempt navigation is a query, not a structural edge.
 
 #### Acceptance Criteria
@@ -1911,11 +1911,11 @@ the demo doesn't hit it, and the fix lives here.
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-backlog-run-attempts-1 | Per-Attempt Run Nodes | Backlog | `github_actions_run` natural key includes `run_attempt`; each attempt is a distinct node. | |
-| req-github-core-backlog-run-attempts-2 | Per-Attempt Job Fan-Out | Backlog | Each per-attempt run node has its own `HAS_ACTIONS_JOB` edges to that attempt's job nodes. | Job natural key stays `owner/repo + job_id`; GitHub job_ids are per-attempt. |
+| req-github-core-backlog-run-attempts-2 | Per-Attempt Job Fan-Out | Backlog | Each per-attempt run node has its own `RUNS_JOB` edges to that attempt's job nodes. | Job natural key stays `owner/repo + job_id`; GitHub job_ids are per-attempt. |
 | req-github-core-backlog-run-attempts-3 | Attempts Endpoint | Backlog | Collector queries `GET /runs/{run_id}/attempts/{n}/jobs` per attempt instead of the default jobs endpoint. | |
 | req-github-core-backlog-run-attempts-4 | Re-Run Failed Semantics | Backlog | The collector records exactly what each attempt's endpoint returns; no synthesis to fill in successful jobs from earlier attempts. | "Latest full state" is a derived query, not a stored shape. |
-| req-github-core-backlog-run-attempts-5 | Static Per-Attempt Edges | Backlog | Once an attempt's HAS_ACTIONS_JOB edges land, they are not modified by re-collection of that attempt. | Each attempt is immutable once terminal. |
-| req-github-core-backlog-run-attempts-6 | v0 Graph Clutter Resolved | Backlog | Implementing this requirement resolves the documented v0 limitation in `req-github-core-collector-8` where re-runs cause HAS_ACTIONS_JOB to span attempts. | |
+| req-github-core-backlog-run-attempts-5 | Static Per-Attempt Edges | Backlog | Once an attempt's RUNS_JOB edges land, they are not modified by re-collection of that attempt. | Each attempt is immutable once terminal. |
+| req-github-core-backlog-run-attempts-6 | v0 Graph Clutter Resolved | Backlog | Implementing this requirement resolves the documented v0 limitation in `req-github-core-collector-8` where re-runs cause RUNS_JOB to span attempts. | |
 
 ### Grid-Vocabulary Reference Resolution (Backlog)
 ----
@@ -1999,20 +1999,20 @@ RID: `req-github-core-backlog-app-relationships`
 
 Status: `Backlog`
 
-`req-github-core-app` models that an app is *enabled on* a repo (`ENABLED_ON`).
+`req-github-core-app` models that an app is *enabled on* a repo (`ENABLED_ON_REPOSITORY`).
 It does not model what apps *do*. Future work, once a consumer needs it:
 
 - **Dependabot opens dependency-bump PRs** against the repo — a `github_app -OPENS_PR-> github_pull_request` (and a `github_pull_request` model) story, distinct from the deploy-time alerts fetch.
 - **Code scanning / secret scanning raise alerts** — a `github_app -RAISES_ALERT->` story.
 - App→workflow consumption (e.g. a deploy workflow querying the Dependabot alerts API as a VDR gate input) — a `FETCH_ALERTS`-style edge, if it can be detected from the workflow body or the alerts API rather than guessed.
 
-These are deferred until there is a concrete graph consumer; v0 stops at presence (`ENABLED_ON`).
+These are deferred until there is a concrete graph consumer; v0 stops at presence (`ENABLED_ON_REPOSITORY`).
 
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-backlog-app-relationships-1 | App Action Edges | Backlog | Model app *behaviors* (PR authoring, alert raising, alert serving) as distinct edges once a consumer needs them, rather than overloading `ENABLED_ON`. | Keeps presence separate from behavior. |
+| req-github-core-backlog-app-relationships-1 | App Action Edges | Backlog | Model app *behaviors* (PR authoring, alert raising, alert serving) as distinct edges once a consumer needs them, rather than overloading `ENABLED_ON_REPOSITORY`. | Keeps presence separate from behavior. |
 
 ### v0 Non-Goals
 ----

@@ -45,4 +45,4 @@ Emitted for every release the config-layer query returned (`repository:contents:
 
 - **Source:** `github_core__github_repository` — the repository the release belongs to.
 - **Target:** `github_core__github_release` — the release.
-- **Dimensions:** `github.platform`, `github.surface: releases`, `github.observation: declaration` — containment sourced on a declared object, following `HAS_CACHE`.
+- **Dimensions:** `github.platform`, `github.surface: releases`, `github.observation: declaration` — containment sourced on a declared object, following `STORES_CACHE`.

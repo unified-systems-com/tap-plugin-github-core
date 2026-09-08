@@ -218,7 +218,7 @@ def _group_action_calls(
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
 # list under synthetic ``dynamic/<app>/...`` paths. These are not repo CI
 # workflows — they are platform apps enabled on the repo — so we reclassify
-# them as github_app + ENABLED_ON instead of github_workflow. Map the synthetic
+# them as github_app + ENABLED_ON_REPOSITORY instead of github_workflow. Map the synthetic
 # path prefix to the app's stable slug + display metadata.
 _SYNTHETIC_APP_BY_PATH_PREFIX: dict[str, dict[str, str]] = {
     "dynamic/dependabot/": {
@@ -646,7 +646,7 @@ class GithubCollector(CollectorBase):
             _SITE_RUN_STARTED, "RUN_STARTED", "GitHub Core collection started."
         )
         # github_app nodes are singletons shared across repos; dedupe the node
-        # emission across the whole run (the ENABLED_ON edges still fan in).
+        # emission across the whole run (the ENABLED_ON_REPOSITORY edges still fan in).
         self._emitted_app_ids: set[str] = set()
         # Account type of the observed owner ("Organization" | "User"), learned when
         # the account node is emitted; steers owner-scoped app URLs.
@@ -894,7 +894,7 @@ class GithubCollector(CollectorBase):
         # --- submission phase ---
         # Collapse envelopes that repeat across repos before submission. Several nodes and
         # edges are legitimately shared by every repo in a scope — the account, the platform,
-        # the OIDC issuer and its ENABLED_ON edges — and the per-repo walk emits one copy each
+        # the OIDC issuer and its ENABLED_ON_REPOSITORY edges — and the per-repo walk emits one copy each
         # time. At a one-repo scope that never showed; at 19 repos GRIFT rejected the batch
         # for duplicate entity ids and NOTHING landed. Deduping is correct rather than
         # defensive: these are the same observation seen from several repos, and identity is
@@ -997,7 +997,7 @@ class GithubCollector(CollectorBase):
         if enrichment.edge_envelopes:
             enrichment_batch = assemble_batch(
                 batch_name=f"github_core enrichment: {scope_label}",
-                description="Cross-grid link edges (REFERENCES_RESOURCE, FEDERATES_VIA) resolved from the grid-link manifest.",
+                description="Cross-grid link edges (REFERENCES_RESOURCE, FEDERATES_VIA_PROVIDER) resolved from the grid-link manifest.",
                 nodes=[],
                 edges=enrichment.edge_envelopes,
             )
@@ -1338,10 +1338,10 @@ class GithubCollector(CollectorBase):
 
         # The Actions OIDC issuer (synthesized once as a platform singleton) is
         # enabled for every repo's workflows to mint identity tokens — mirror the
-        # github_app ENABLED_ON pattern so it connects into the repo it serves.
+        # github_app ENABLED_ON_REPOSITORY pattern so it connects into the repo it serves.
         edges.append(
             self._edge(
-                "ENABLED_ON__github_core",
+                "ENABLED_ON_REPOSITORY__github_core",
                 oidc_issuer_id(_OIDC_ISSUER_URL),
                 repo_uuid,
                 repo_dims,
@@ -1375,7 +1375,7 @@ class GithubCollector(CollectorBase):
         for wf in workflows:
             path = wf.get("path", "")
             # Synthetic platform-app entries (e.g. Dependabot) come back here but
-            # are not repo CI workflows; reclassify them as github_app + ENABLED_ON
+            # are not repo CI workflows; reclassify them as github_app + ENABLED_ON_REPOSITORY
             # and skip the YAML fetch (no real file exists at the dynamic/ path).
             app_meta = next(
                 (
@@ -1464,7 +1464,7 @@ class GithubCollector(CollectorBase):
             client, full_name, already_fetched_run_ids={r["id"] for r in run_payloads}
         )
         run_payloads.extend(refreshed)
-        # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
+        # Held for the EXECUTED_ON_RUNNER pass below rather than re-fetched: the runner match needs
         # the same job payloads, and at account scope a second walk is one extra API call per
         # RUN — the single largest cost in the whole collection.
         jobs_by_run: dict[int, list[dict[str, Any]]] = {}
@@ -1578,7 +1578,7 @@ class GithubCollector(CollectorBase):
             client, full_name, observation_dims, ref_uuid_by_ref, nodes, edges
         )
 
-        # EXECUTED_ON edges (only when an observed job runner_id matches a durable runner node).
+        # EXECUTED_ON_RUNNER edges (only when an observed job runner_id matches a durable runner node).
         # Reuses the job payloads collected above — the runner nodes simply were not known yet
         # when the jobs were first walked, which is an ordering constraint, not a reason to fetch
         # them again.
@@ -1589,7 +1589,7 @@ class GithubCollector(CollectorBase):
                     rn_uuid = runner_uuid_by_id[j["runner_id"]]
                     edges.append(
                         self._edge(
-                            "EXECUTED_ON__github_core",
+                            "EXECUTED_ON_RUNNER__github_core",
                             j_uuid,
                             rn_uuid,
                             observation_dims,
@@ -1615,7 +1615,7 @@ class GithubCollector(CollectorBase):
         req-github-core-collector-8) because the run's end time is derived from
         them — see `_run_completed_at` (github-core#46). Returns the job payloads
         (empty when the endpoint degraded) so the caller can hold them for the
-        EXECUTED_ON pass without a second walk.
+        EXECUTED_ON_RUNNER pass without a second walk.
 
         Args:
             client: The REST client for this collection.
@@ -1708,9 +1708,7 @@ class GithubCollector(CollectorBase):
                 )
             )
             edges.append(
-                self._edge(
-                    "HAS_ACTIONS_JOB__github_core", run_uuid, j_uuid, observation_dims
-                )
+                self._edge("RUNS_JOB__github_core", run_uuid, j_uuid, observation_dims)
             )
         return jobs or []
 
@@ -2063,12 +2061,14 @@ class GithubCollector(CollectorBase):
             )
             edges.append(
                 edge_envelope(
-                    entity_id=edge_id("PROTECTS__github_core", rs_uuid, repo_uuid),
-                    edge_type="PROTECTS__github_core",
+                    entity_id=edge_id(
+                        "PROTECTS_REPOSITORY__github_core", rs_uuid, repo_uuid
+                    ),
+                    edge_type="PROTECTS_REPOSITORY__github_core",
                     source_id=rs_uuid,
                     target_id=repo_uuid,
                     dimensions=rules_dims,
-                    properties={"match_kind": "declared"},
+                    properties={},
                 )
             )
             self._emit_protected_refs(
@@ -2132,12 +2132,12 @@ class GithubCollector(CollectorBase):
                 continue
             edges.append(
                 edge_envelope(
-                    entity_id=edge_id("PROTECTS__github_core", rs_uuid, ref_uuid),
-                    edge_type="PROTECTS__github_core",
+                    entity_id=edge_id("PROTECTS_REF__github_core", rs_uuid, ref_uuid),
+                    edge_type="PROTECTS_REF__github_core",
                     source_id=rs_uuid,
                     target_id=ref_uuid,
                     dimensions=dims,
-                    properties={"match_kind": "resolved", "ref_pattern": pattern},
+                    properties={"ref_pattern": pattern},
                 )
             )
 
@@ -2414,7 +2414,10 @@ class GithubCollector(CollectorBase):
             )
             edges.append(
                 self._edge(
-                    "HAS_ENVIRONMENT__github_core", repo_uuid, env_uuid, deploy_dims
+                    "DECLARES_ENVIRONMENT__github_core",
+                    repo_uuid,
+                    env_uuid,
+                    deploy_dims,
                 )
             )
         return uuid_by_name
@@ -3476,7 +3479,7 @@ class GithubCollector(CollectorBase):
     ) -> None:
         """Collect stored cache entries and scope each to the ref that produced it.
 
-        The `SCOPED_TO` edge is emitted only when the entry's ref is one we observed. Its absence
+        The `SCOPED_TO_REF` edge is emitted only when the entry's ref is one we observed. Its absence
         is usually the interesting case rather than a gap: an entry scoped to `refs/pull/42/merge`
         came from a pull request, and a cache written outside a branch and restored inside it is
         the shape five incidents share.
@@ -3522,12 +3525,12 @@ class GithubCollector(CollectorBase):
                 )
             )
             edges.append(
-                self._edge("HAS_CACHE__github_core", repo_uuid, cache_uuid, dims)
+                self._edge("STORES_CACHE__github_core", repo_uuid, cache_uuid, dims)
             )
             ref_uuid = ref_uuid_by_ref.get(ref)
             if ref_uuid is not None:
                 edges.append(
-                    self._edge("SCOPED_TO__github_core", cache_uuid, ref_uuid, dims)
+                    self._edge("SCOPED_TO_REF__github_core", cache_uuid, ref_uuid, dims)
                 )
         if total > len(entries):
             self.record_warn(
@@ -4291,13 +4294,16 @@ class GithubCollector(CollectorBase):
                     )
                 edges.append(
                     self._edge(
-                        "HAS_INSTALLATION__github_core", app_uuid, inst_uuid, apps_dims
+                        "REGISTERS_INSTALLATION__github_core",
+                        app_uuid,
+                        inst_uuid,
+                        apps_dims,
                     )
                 )
             if account_login:
                 edges.append(
                     self._edge(
-                        "INSTALLED_ON__github_core",
+                        "INSTALLED_ON_ACCOUNT__github_core",
                         inst_uuid,
                         account_id(account_login),
                         apps_dims,
@@ -4324,7 +4330,7 @@ class GithubCollector(CollectorBase):
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
-        """Emit a github_app node (deduped, singleton by slug) + ENABLED_ON edge
+        """Emit a github_app node (deduped, singleton by slug) + ENABLED_ON_REPOSITORY edge
         for a platform app detected enabled on ``full_name``."""
         apps_dims = {**repo_dims, "github.surface": "apps"}
         app_uuid = github_app_id(app_meta["slug"])
@@ -4352,7 +4358,9 @@ class GithubCollector(CollectorBase):
                 )
             )
         edges.append(
-            self._edge("ENABLED_ON__github_core", app_uuid, repo_uuid, apps_dims)
+            self._edge(
+                "ENABLED_ON_REPOSITORY__github_core", app_uuid, repo_uuid, apps_dims
+            )
         )
         self.record_info(
             _SITE_DEPENDABOT_APP,

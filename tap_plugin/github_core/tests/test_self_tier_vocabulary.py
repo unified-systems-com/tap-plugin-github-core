@@ -874,9 +874,12 @@ class TestAppInventoryScope:
         ]
         assert {n["node"]["app_slug"] for n in installs} == {"renovate", "sonar"}
         assert any(
-            e["edge"]["edge_type"] == "HAS_INSTALLATION__github_core" for e in edges
+            e["edge"]["edge_type"] == "REGISTERS_INSTALLATION__github_core"
+            for e in edges
         )
-        assert any(e["edge"]["edge_type"] == "INSTALLED_ON__github_core" for e in edges)
+        assert any(
+            e["edge"]["edge_type"] == "INSTALLED_ON_ACCOUNT__github_core" for e in edges
+        )
 
     def test_a_refused_account_inventory_falls_back_and_says_so(self) -> None:
         """The fallback answer is about ourselves. Reporting it as the account's inventory would
@@ -1025,14 +1028,15 @@ class TestVocabularyIsDeclared:
             "HOSTS_REPOSITORY__github_core",
             "OBSERVES_COMMIT__github_core",
             "OBSERVED_IN_REPOSITORY__github_core",
-            "PROTECTS__github_core",
+            "PROTECTS_REPOSITORY__github_core",
+            "PROTECTS_REF__github_core",
             "EXEMPTS_ACTOR__github_core",
-            "HAS_ENVIRONMENT__github_core",
+            "DECLARES_ENVIRONMENT__github_core",
             "USES_ENVIRONMENT__github_core",
-            "HAS_CACHE__github_core",
-            "SCOPED_TO__github_core",
-            "HAS_INSTALLATION__github_core",
-            "INSTALLED_ON__github_core",
+            "STORES_CACHE__github_core",
+            "SCOPED_TO_REF__github_core",
+            "REGISTERS_INSTALLATION__github_core",
+            "INSTALLED_ON_ACCOUNT__github_core",
         }
         assert expected <= set(edges)
         for slug in expected:
@@ -1343,10 +1347,7 @@ class TestPerRepoWalk:
         """`~DEFAULT_BRANCH` is a token, not a pattern: it must select `main` and nothing else."""
         _nodes, edges, _client, _warns = _walk_one_repo(monkeypatch)
         resolved = [
-            e
-            for e in edges
-            if e["edge"]["edge_type"] == "PROTECTS__github_core"
-            and e["edge"]["properties"].get("match_kind") == "resolved"
+            e for e in edges if e["edge"]["edge_type"] == "PROTECTS_REF__github_core"
         ]
         assert len(resolved) == 1
         assert resolved[0]["edge"]["properties"]["ref_pattern"] == "~DEFAULT_BRANCH"
@@ -1378,7 +1379,7 @@ class TestPerRepoWalk:
         branch a privileged job restores it on."""
         _nodes, edges, _client, _warns = _walk_one_repo(monkeypatch)
         scoped = [
-            e for e in edges if e["edge"]["edge_type"] == "SCOPED_TO__github_core"
+            e for e in edges if e["edge"]["edge_type"] == "SCOPED_TO_REF__github_core"
         ]
         assert len(scoped) == 1  # refs/heads/main resolves; refs/pull/7/merge does not
 
@@ -1409,7 +1410,7 @@ class TestPerRepoWalk:
         assert types.count("DEFINES_JOB__github_core") == 2
 
     def test_each_run_is_fetched_for_jobs_once(self, monkeypatch) -> None:
-        """The EXECUTED_ON pass reuses the job payloads instead of walking every run a second
+        """The EXECUTED_ON_RUNNER pass reuses the job payloads instead of walking every run a second
         time — at account scope that second walk was one extra API call per RUN, and runs are the
         largest thing collected. It cost a 10-minute collection its boot timeout before it was
         found."""

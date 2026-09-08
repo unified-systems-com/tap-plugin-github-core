@@ -14,7 +14,7 @@ The run carries the fields that make a declared risk concrete: `event` (was this
 
 - Record executions so declared risk can be measured against actual behaviour.
 - Carry the trigger event and head commit, the two properties that decide whether an execution was trusted.
-- Join execution back to declaration via [`EXECUTES_WORKFLOW`](EXECUTES_WORKFLOW.md), and forward to its jobs via [`HAS_ACTIONS_JOB`](HAS_ACTIONS_JOB.md).
+- Join execution back to declaration via [`EXECUTES_WORKFLOW`](EXECUTES_WORKFLOW.md), and forward to its jobs via [`RUNS_JOB`](RUNS_JOB.md).
 
 ## Identity
 

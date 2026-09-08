@@ -1,7 +1,7 @@
 {
-  "slug": "HAS_ENVIRONMENT__github_core",
-  "name": "Has Environment",
-  "description": "A repository declares a deployment environment.",
+  "slug": "DECLARES_ENVIRONMENT__github_core",
+  "name": "Declares Environment",
+  "description": "A repository declares a deployment environment. (Renamed from HAS_ENVIRONMENT in the github-core#79 wave: slugs name a mechanical action and its object.)",
   "sources": [
     "github_core__github_repository"
   ],

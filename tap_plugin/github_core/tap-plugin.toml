@@ -5,8 +5,8 @@ name = "TAP GitHub Core"
 description = "GitHub Actions models — the pipeline as declared (workflows, jobs, rulesets, environments) and as run (runs, jobs, runners, caches) — and what it produces (releases, artifacts, packages)."
 
 depends_on = [
-    { slug = "git_core", note = "The neutral Git vocabulary (github-core#76): the collector mints git_core__git_repository / git_ref / git_commit through tap_plugin.git_core.identity and targets those types from DECLARES_REF-adjacent edges (PROTECTS, SCOPED_TO, EVALUATED_ON_REF, TARGETS_REF) and from commit_observation." },
-    { slug = "identity_core", note = "ENABLED_ON sources the identity_core__oidc_issuer type; the collector mints the issuer node via identity_core.issuer (the OIDC vocabulary lives there, not here)." },
+    { slug = "git_core", note = "The neutral Git vocabulary (github-core#76): the collector mints git_core__git_repository / git_ref / git_commit through tap_plugin.git_core.identity and targets those types from DECLARES_REF-adjacent edges (PROTECTS, SCOPED_TO_REF, EVALUATED_ON_REF, TARGETS_REF) and from commit_observation." },
+    { slug = "identity_core", note = "ENABLED_ON_REPOSITORY sources the identity_core__oidc_issuer type; the collector mints the issuer node via identity_core.issuer (the OIDC vocabulary lives there, not here)." },
 ]
 
 [models]
@@ -34,28 +34,29 @@ github_core__actions_artifact = "tap_plugin.github_core.models.actions_artifact.
 
 [edges]
 HOSTS_ACCOUNT__github_core = "edges/HOSTS_ACCOUNT.edge.json"
-ENABLED_ON__github_core = "edges/ENABLED_ON.edge.json"
+ENABLED_ON_REPOSITORY__github_core = "edges/ENABLED_ON_REPOSITORY.edge.json"
 OWNS_REPO__github_core = "edges/OWNS_REPO.edge.json"
 DEFINES_WORKFLOW__github_core = "edges/DEFINES_WORKFLOW.edge.json"
 EXECUTES_WORKFLOW__github_core = "edges/EXECUTES_WORKFLOW.edge.json"
-HAS_ACTIONS_JOB__github_core = "edges/HAS_ACTIONS_JOB.edge.json"
-EXECUTED_ON__github_core = "edges/EXECUTED_ON.edge.json"
+RUNS_JOB__github_core = "edges/RUNS_JOB.edge.json"
+EXECUTED_ON_RUNNER__github_core = "edges/EXECUTED_ON_RUNNER.edge.json"
 REFERENCES_RESOURCE__github_core = "edges/REFERENCES_RESOURCE.edge.json"
-FEDERATES_VIA__github_core = "edges/FEDERATES_VIA.edge.json"
+FEDERATES_VIA_PROVIDER__github_core = "edges/FEDERATES_VIA_PROVIDER.edge.json"
 DEFINES_JOB__github_core = "edges/DEFINES_JOB.edge.json"
 DEPENDS_ON_JOB__github_core = "edges/DEPENDS_ON_JOB.edge.json"
 HOSTS_REPOSITORY__github_core = "edges/HOSTS_REPOSITORY.edge.json"
-PROTECTS__github_core = "edges/PROTECTS.edge.json"
+PROTECTS_REPOSITORY__github_core = "edges/PROTECTS_REPOSITORY.edge.json"
+PROTECTS_REF__github_core = "edges/PROTECTS_REF.edge.json"
 TRIGGERED_EVALUATION__github_core = "edges/TRIGGERED_EVALUATION.edge.json"
 BYPASSED_RULE__github_core = "edges/BYPASSED_RULE.edge.json"
 EVALUATED_ON_REF__github_core = "edges/EVALUATED_ON_REF.edge.json"
 EXEMPTS_ACTOR__github_core = "edges/EXEMPTS_ACTOR.edge.json"
-HAS_ENVIRONMENT__github_core = "edges/HAS_ENVIRONMENT.edge.json"
+DECLARES_ENVIRONMENT__github_core = "edges/DECLARES_ENVIRONMENT.edge.json"
 USES_ENVIRONMENT__github_core = "edges/USES_ENVIRONMENT.edge.json"
-HAS_CACHE__github_core = "edges/HAS_CACHE.edge.json"
-SCOPED_TO__github_core = "edges/SCOPED_TO.edge.json"
-HAS_INSTALLATION__github_core = "edges/HAS_INSTALLATION.edge.json"
-INSTALLED_ON__github_core = "edges/INSTALLED_ON.edge.json"
+STORES_CACHE__github_core = "edges/STORES_CACHE.edge.json"
+SCOPED_TO_REF__github_core = "edges/SCOPED_TO_REF.edge.json"
+REGISTERS_INSTALLATION__github_core = "edges/REGISTERS_INSTALLATION.edge.json"
+INSTALLED_ON_ACCOUNT__github_core = "edges/INSTALLED_ON_ACCOUNT.edge.json"
 USES_ACTION__github_core = "edges/USES_ACTION.edge.json"
 CALLS_WORKFLOW__github_core = "edges/CALLS_WORKFLOW.edge.json"
 TRIGGERS_WORKFLOW__github_core = "edges/TRIGGERS_WORKFLOW.edge.json"

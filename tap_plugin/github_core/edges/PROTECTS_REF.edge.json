@@ -1,0 +1,26 @@
+{
+  "slug": "PROTECTS_REF__github_core",
+  "name": "Protects Ref",
+  "description": "A ruleset gates one specific ref: its include/exclude patterns were matched against a ref actually observed on the grid on the day of collection, so this edge is what the declared intent turned out to cover. A pattern matching nothing yields no edge, which is a real answer (a ruleset protecting a branch that does not exist). The RESOLVED half of the former PROTECTS (github-core#79 wave); the ref is the neutral git_core__git_ref (github-core#76).",
+  "sources": [
+    "github_core__github_ruleset"
+  ],
+  "targets": [
+    "git_core__git_ref"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "rules",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ref_pattern": {
+        "type": "string",
+        "description": "The condition token or fnmatch pattern that selected the target (`~DEFAULT_BRANCH`, `refs/heads/release/*`). Preserved as written."
+      }
+    }
+  }
+}

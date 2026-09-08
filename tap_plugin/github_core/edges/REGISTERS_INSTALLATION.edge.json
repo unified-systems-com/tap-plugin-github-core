@@ -1,0 +1,16 @@
+{
+  "slug": "REGISTERS_INSTALLATION__github_core",
+  "name": "Registers Installation",
+  "description": "A registered GitHub App is installed somewhere. The application is one node; each installation of it carries its own approved permissions. (Renamed from HAS_INSTALLATION in the github-core#79 wave: slugs name a mechanical action and its object.)",
+  "sources": [
+    "github_core__github_app"
+  ],
+  "targets": [
+    "github_core__app_installation"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "apps",
+    "github.observation": "declaration"
+  }
+}

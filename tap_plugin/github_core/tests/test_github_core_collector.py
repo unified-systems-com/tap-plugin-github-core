@@ -47,12 +47,12 @@ class TestManifests:
         assert manifest["manifest_version"] == "0"
         edge_types = {r["edge_type"] for r in manifest["rules"]}
         # YAML-ref rules emit REFERENCES_RESOURCE; the structural OIDC rule emits
-        # FEDERATES_VIA (repo -> aws_iam_oidc_provider); the issuer-convergence
+        # FEDERATES_VIA_PROVIDER (repo -> aws_iam_oidc_provider); the issuer-convergence
         # rule emits TRUSTS_ISSUER (aws_iam_oidc_provider -> identity_core__oidc_issuer),
         # the generic identity_core-owned edge type this github enrichment rule emits.
         assert edge_types == {
             "REFERENCES_RESOURCE__github_core",
-            "FEDERATES_VIA__github_core",
+            "FEDERATES_VIA_PROVIDER__github_core",
             "TRUSTS_ISSUER__identity_core",
         }
 
@@ -89,9 +89,9 @@ class TestManifests:
         rule = oidc[0]
         assert rule["source_constant"] == "token.actions.githubusercontent.com"
         assert rule["near_match_pattern"] == r"(?i)githubusercontent\.com"
-        # The federation rule emits the dedicated FEDERATES_VIA edge (not the
+        # The federation rule emits the dedicated FEDERATES_VIA_PROVIDER edge (not the
         # generic REFERENCES_RESOURCE) — repo -> aws_iam_oidc_provider.
-        assert rule["edge_type"] == "FEDERATES_VIA__github_core"
+        assert rule["edge_type"] == "FEDERATES_VIA_PROVIDER__github_core"
 
 
 class TestPATSchema:

@@ -1,4 +1,4 @@
-# HAS_ACTIONS_JOB
+# RUNS_JOB
 
 ## Blurb
 
@@ -8,7 +8,7 @@ A run contains an executed job — containment within a single execution.
 
 A run is the unit a human reasons about; a job is the unit that actually holds a machine, a token and a set of steps. This edge lets analysis descend from one to the other: from "this run was triggered by a fork" to "and this job inside it ran on a self-hosted runner".
 
-It is also the path by which a run reaches [`EXECUTED_ON`](EXECUTED_ON.md), since it is the job, not the run, that observes a runner.
+It is also the path by which a run reaches [`EXECUTED_ON_RUNNER`](EXECUTED_ON_RUNNER.md), since it is the job, not the run, that observes a runner.
 
 ## Goals
 
@@ -18,7 +18,7 @@ It is also the path by which a run reaches [`EXECUTED_ON`](EXECUTED_ON.md), sinc
 
 ## Identity
 
-Edge id is `uuid5(ns, "edge:HAS_ACTIONS_JOB__github_core:<source id>:<target id>")`, deterministic from the pair.
+Edge id is `uuid5(ns, "edge:RUNS_JOB__github_core:<source id>:<target id>")`, deterministic from the pair.
 
 ## Boundaries
 
@@ -46,7 +46,7 @@ Derived from `GET /repos/{o}/{r}/actions/runs/{run_id}/jobs` at **`repository:ac
 
 ## Prior Art
 
-- `specs/spec-github-core-vocabulary.md` (2026-08-27) — `HAS_ACTIONS_JOB` in the existing spine; `INSTANCE_OF_JOB` with `{run_attempt}` recorded as the declaration↔execution bridge this edge is not.
+- `specs/spec-github-core-vocabulary.md` (2026-08-27) — `RUNS_JOB` in the existing spine; `INSTANCE_OF_JOB` with `{run_attempt}` recorded as the declaration↔execution bridge this edge is not.
 - `specs/spec-github-core-v0.md` `req-github-core-backlog-run-attempts` (2026-08-27) — the multi-attempt gap and the re-run-failed-jobs subtlety.
 - GitHub REST API, version `2022-11-28` — Workflow Jobs endpoints.
 

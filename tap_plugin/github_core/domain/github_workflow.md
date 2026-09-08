@@ -49,7 +49,7 @@ A credential with `actions:read` but not `contents:read` therefore yields workfl
 
 **GraphQL does not help here.** GitHub's GraphQL API serves the configuration layer; the Actions operation layer — runs and jobs — is REST-only, and there is no GraphQL workflow-definition surface to substitute. Collecting workflows means REST plus the contents API.
 
-**Not observable at all:** the *effective* per-job permissions actually granted at run time. The declaration is visible; the resolved grant is not returned by the runs API. Cloud-side OIDC trust conditions (the other half of any `id-token: write` federation) are invisible from GitHub entirely — they live in the cloud provider's account, which is exactly why [`FEDERATES_VIA`](FEDERATES_VIA.md) exists as a cross-grid link.
+**Not observable at all:** the *effective* per-job permissions actually granted at run time. The declaration is visible; the resolved grant is not returned by the runs API. Cloud-side OIDC trust conditions (the other half of any `id-token: write` federation) are invisible from GitHub entirely — they live in the cloud provider's account, which is exactly why [`FEDERATES_VIA_PROVIDER`](FEDERATES_VIA_PROVIDER.md) exists as a cross-grid link.
 
 ## Authoritative Source
 

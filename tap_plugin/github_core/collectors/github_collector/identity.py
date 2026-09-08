@@ -38,7 +38,7 @@ def workflow_id(full_name: str, workflow_id_int: int | str) -> UUID:
 
 def github_app_id(slug: str) -> UUID:
     # Natural key is the app slug ("dependabot"); one app node is shared across
-    # every repo that enables it (ENABLED_ON edges fan in).
+    # every repo that enables it (ENABLED_ON_REPOSITORY edges fan in).
     return _id("github_core__github_app", slug)
 
 

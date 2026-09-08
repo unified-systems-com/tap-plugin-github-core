@@ -1,0 +1,16 @@
+{
+  "slug": "RUNS_JOB__github_core",
+  "name": "Runs Job",
+  "description": "Run contains a job. v0 reflects the latest-attempt job set (multi-attempt deferred to req-github-core-backlog-run-attempts). (Renamed from HAS_ACTIONS_JOB in the github-core#79 wave: slugs name a mechanical action and its object.)",
+  "sources": [
+    "github_core__github_actions_run"
+  ],
+  "targets": [
+    "github_core__github_actions_job"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "execution"
+  }
+}

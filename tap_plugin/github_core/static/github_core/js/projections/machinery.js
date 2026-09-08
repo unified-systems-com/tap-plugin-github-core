@@ -67,9 +67,9 @@ const E = {
     dependsOnJob: "DEPENDS_ON_JOB__github_core",
     hostsRepository: "HOSTS_REPOSITORY__github_core",
     declaresRef: "DECLARES_REF__git_core",
-    protects: "PROTECTS__github_core",
-    hasEnvironment: "HAS_ENVIRONMENT__github_core",
-    enabledOn: "ENABLED_ON__github_core",
+    protects: "PROTECTS_REPOSITORY__github_core",
+    hasEnvironment: "DECLARES_ENVIRONMENT__github_core",
+    enabledOn: "ENABLED_ON_REPOSITORY__github_core",
 };
 
 // Scene-local synthetic edges so nesting can be declared for things the
