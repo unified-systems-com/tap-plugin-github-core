@@ -477,7 +477,8 @@
         "allowed_values",
         "values_editable_by",
         "source_type",
-        "url"
+        "url",
+        "require_explicit_values"
       ],
       "permission": "organization:custom_properties:read",
       "permission_failure": "degrade_with_warning",

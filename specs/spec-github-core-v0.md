@@ -741,8 +741,9 @@ test as an independently-edited declaration with its own history and its own tab
 
 **Unset is a fact, and it is on the wire.** The values listing reports every declared property per
 repository with `value: null` when unset (measured 2026-09-08). The map is nonetheless built over the
-declared names first, so a repository the listing did not mention still lands as null against the
-definitions that were read, never as an empty map. Three states on the repository,
+declared names first, so an entry the listing omitted for a reported repository is still null. A
+collected repository the listing did not report at all is `unobservable` with an empty map and is
+named in a warning — an omitted row is a row we did not get, not five unset values. Three states on the repository,
 `custom_properties_observability`, the `bypass_observability` ruling applied: `observed` (an empty
 map is then a fact), `unobservable` (the definitions or the values were refused — no definition node
 is minted when the schema is refused, and the map must not render as "none set"), `""` (never asked:
@@ -759,7 +760,7 @@ exploratory grant.
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-custom-properties-1 | Definitions Land As Nodes | Implemented | Every property the organization's schema endpoint reports lands as one `github_custom_property` per (owner, name) carrying its type, allowed values, required flag, default, description, editability and source. | Names never normalized. |
-| req-github-core-custom-properties-2 | Values Stamped On The Repository | Implemented | Every collected repository carries `custom_properties` with one key per declared property, the reported value or null when unset, and `custom_properties_observability = observed`. | The map is built over the declared names first. |
+| req-github-core-custom-properties-2 | Values Stamped On The Repository | Implemented | Every collected repository the listing reports carries `custom_properties` with one key per declared property, the reported value or null when unset, and `custom_properties_observability = observed`; a collected repository the listing omits is `unobservable` with an empty map and a warning naming it. | The map is built over the declared names first; an omitted row is never promoted to all-unset. |
 | req-github-core-custom-properties-3 | Refused Is Not Empty | Implemented | A refused schema read mints no definition and marks every collected repository `unobservable` with an empty map and a warning; a refused values read lands the definitions and marks the values `unobservable`. | Shape E. |
 | req-github-core-custom-properties-4 | Not Asked Is Not Refused | Implemented | A user-owned scope or a repos-only scope skips the surface with an information record; repositories keep `""`, never `unobservable`. | Three states, never two. |
 | req-github-core-custom-properties-5 | Permission Derived From The Manifest | Implemented | Both sources declare `organization:custom_properties:read`; the ledger entry is `requested` citing exactly those two sources; the OpenAPI extract carries both paths. | No new grant on the App. |

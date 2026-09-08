@@ -153,6 +153,7 @@ _SITE_CUSTOM_PROPERTIES_UNOBSERVABLE = "a404"
 _SITE_CUSTOM_PROPERTIES_VALUES_UNOBSERVABLE = "fd72"
 _SITE_CUSTOM_PROPERTIES_COLLECTED = "3cba"
 _SITE_CUSTOM_PROPERTIES_SKIPPED = "906a"
+_SITE_CUSTOM_PROPERTIES_REPOSITORY_UNLISTED = "6d8f"
 
 #: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
 #: three calls against a repository that is NOT in scope; past the cap an edge lands as
@@ -3644,7 +3645,7 @@ class GithubCollector(CollectorBase):
                 f"The credential needs organization custom-properties read.",
                 message_data={"owner": owner, "status": exc.status},
             )
-            self._stamp_custom_properties(state, {})
+            self._stamp_custom_properties(owner, state, {})
             return state
         try:
             rows = client.get_paginated(f"/orgs/{owner}/properties/values", params={"per_page": "100"})
@@ -3706,7 +3707,7 @@ class GithubCollector(CollectorBase):
                     if prop:
                         values[prop] = entry.get("value")
                 values_by_repo[full_name] = values
-        self._stamp_custom_properties(state, values_by_repo, names)
+        self._stamp_custom_properties(owner, state, values_by_repo)
         stamped = [name for name in self._repo_envelopes if name in values_by_repo]
         unset = sum(1 for name in stamped for value in values_by_repo[name].values() if value is None)
         self.record_info(
@@ -3727,23 +3728,35 @@ class GithubCollector(CollectorBase):
 
     def _stamp_custom_properties(
         self,
+        owner: str,
         state: str,
         values_by_repo: dict[str, dict[str, Any]],
-        names: list[str] | None = None,
     ) -> None:
         """Write the surface state and each repository's values map onto its envelope.
 
-        A collected repository the values listing did not mention (it can happen when a
-        repository was created between the walk and this call) still gets the declared names as
-        null — unset against the definitions we did read — rather than an empty map.
+        A collected repository the values listing did not mention has values we did NOT observe.
+        The listing omits what the credential cannot see there, and an omission is not "all
+        unset" — so such a repository is stamped `unobservable` with an empty map and named in a
+        warning, while the repositories the listing did report keep `observed` (Codex on PR #81:
+        promoting an absent row to observed-unset would be an inference wearing a fact's clothes).
         """
+        unlisted: list[str] = []
         for full_name, envelope in self._repo_envelopes.items():
             node = envelope["node"]
-            node["custom_properties_observability"] = state
-            if state != _OBSERVED:
-                node["custom_properties"] = {}
-                continue
-            node["custom_properties"] = values_by_repo.get(full_name) or dict.fromkeys(names or [])
+            values = values_by_repo.get(full_name) if state == _OBSERVED else None
+            if state == _OBSERVED and values is None:
+                unlisted.append(full_name)
+            node["custom_properties_observability"] = _UNOBSERVABLE if values is None else state
+            node["custom_properties"] = values or {}
+        if unlisted:
+            self.record_warn(
+                _SITE_CUSTOM_PROPERTIES_REPOSITORY_UNLISTED,
+                "CUSTOM_PROPERTIES_REPOSITORY_UNLISTED",
+                f"{len(unlisted)} collected repositor{'y' if len(unlisted) == 1 else 'ies'} absent from "
+                f"{owner}'s custom-property values listing — their values are NOT observed, which is not "
+                f"the same as none being set: {', '.join(sorted(unlisted))}",
+                message_data={"owner": owner, "repositories": sorted(unlisted)},
+            )
 
     def _emit_github_app(
         self,

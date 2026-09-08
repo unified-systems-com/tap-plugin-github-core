@@ -146,8 +146,10 @@ class TestDefinitionsLand:
         assert row.entity.dimensions.get("github.surface") == "custom-properties"
 
     def test_identity_is_deterministic_and_distinct_from_other_owner_scoped_types(self) -> None:
-        assert custom_property_id(_OWNER, "criticality") == custom_property_id(_OWNER, "criticality")
-        assert custom_property_id(_OWNER, "criticality") != custom_property_id("other-org", "criticality")
+        minted = custom_property_id(_OWNER, "criticality")
+        # The same natural key, built from a literal rather than the module constant, mints the same id.
+        assert custom_property_id("unified-systems-com", "criticality") == minted
+        assert custom_property_id("other-org", "criticality") != minted
         assert custom_property_id(_OWNER, "gate") != status_check_id(_OWNER, "gate")
 
 
@@ -174,12 +176,17 @@ class TestValuesStampedOnTheRepository:
         assert set(node["custom_properties"]) == _ALL_FIVE
         assert all(value is None for value in node["custom_properties"].values())
 
-    def test_a_repository_the_listing_never_mentions_is_unset_against_the_definitions(self) -> None:
+    def test_a_repository_the_listing_never_mentions_is_unobservable_not_all_unset(self) -> None:
+        # An omitted row is not evidence of five unset values; it is a row we did not get.
         collector = _collector()
         _collect(collector, _FakeClient())
         node = _repo_node(collector, _UNLISTED)
-        assert node["custom_properties_observability"] == "observed"
-        assert node["custom_properties"] == dict.fromkeys(_ALL_FIVE)
+        assert node["custom_properties_observability"] == "unobservable"
+        assert node["custom_properties"] == {}
+        assert _codes(collector.warns) == ["CUSTOM_PROPERTIES_REPOSITORY_UNLISTED"]
+        assert collector.warns[0][1]["message_data"]["repositories"] == [_UNLISTED]
+        # The reported repositories are unaffected by their neighbour's omission.
+        assert _repo_node(collector, _POPULATED)["custom_properties_observability"] == "observed"
 
     def test_the_run_summary_counts_what_it_saw(self) -> None:
         collector = _collector()
