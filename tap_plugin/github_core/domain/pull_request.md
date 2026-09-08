@@ -80,11 +80,11 @@ GraphQL is chosen over REST because it is the only transport that carries `revie
 - `created_at`, `updated_at`, `closed_at`, `merged_at` — GitHub's timestamps; null when the event has not happened.
 - `commit_count`, `additions`, `deletions`, `changed_files` — size, as GitHub counts it.
 - `labels` — label names, in GitHub's order.
-- `review_requests` — `[{"kind": "user"|"team", "login"}]`: who has been asked and has not answered. The *waiting on me* queue reads this.
+- `review_requests` — `[{"kind": "user"|"team", "login"}]`: who has been asked and has not answered. The *waiting on me* queue reads this — after checking `configuration.lists_truncated`, since the page holds ten.
 - `latest_reviews` — `[{"login", "state", "submitted_at"}]`: each reviewer's latest verdict (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`).
 - `checks_rollup_state` — GitHub's combined verdict on the head commit (`SUCCESS`, `FAILURE`, `PENDING`, `ERROR`, `EXPECTED`) or `""` when no rollup exists: nothing ran, which must not render green.
 - `checks_observability` — whether the rollup was READ: `observed` (GitHub answered, possibly `null` — the blank above is then a fact), `unobservable` (the rollup or its contexts were refused and pruned — the blank means nothing, and the run warns per repository), `""` (never asked). The `bypass_observability` ruling applied to the rollup: a refused read must not serialize like "nothing ran".
 - `checks` — the rollup's contexts: `[{"kind": "check_run"|"status", "check_run_id", "name", "status", "conclusion", "app", "url"}]`. A check run names the producing App's slug and carries GitHub's `check_run_id` — a rerun mints a new, higher id for the same (app, name), so a consumer keeps the latest by id instead of guessing from the url; a commit status names its creator's login, which is what the older API records, and has no id (null). Both kinds in one list because a required context may be either.
 - `html_url` — the pull request page.
-- `configuration` — JSONB for detail not promoted to a column; carries `checks_total` (the rollup's own count) and `checks_truncated` (whether the page held fewer than that).
+- `configuration` — JSONB for detail not promoted to a column; carries `checks_total` (the rollup's own count) and `checks_truncated` (whether the page held fewer than that), and the same pair for the three capped lists — `labels_total`, `review_requests_total`, `latest_reviews_total` beside one `lists_truncated` flag — so a page of ten is never read as everyone who was asked.
 - `tags` — TAP's tag map.

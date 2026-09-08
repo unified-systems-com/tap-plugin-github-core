@@ -244,11 +244,13 @@ query($login: String!, $cursor: String) {
               additions
               deletions
               changedFiles
-              labels(first: %(pr_labels)d) { nodes { name } }
+              labels(first: %(pr_labels)d) { totalCount nodes { name } }
               reviewRequests(first: %(pr_reviews)d) {
+                totalCount
                 nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } }
               }
               latestReviews(first: %(pr_reviews)d) {
+                totalCount
                 nodes { author { login } state submittedAt }
               }
               commits(last: 1) {
@@ -666,6 +668,12 @@ class GithubGraphQLClient:
                         if rv
                     ],
                     "html_url": str(node.get("url") or ""),
+                    # GitHub's own counts for the three capped lists, so a page of ten is never
+                    # read as all of them — a reviewer beyond the cap would otherwise vanish from
+                    # "waiting on me". None when the connection did not report a count.
+                    "labels_total": (node.get("labels") or {}).get("totalCount"),
+                    "review_requests_total": (node.get("reviewRequests") or {}).get("totalCount"),
+                    "latest_reviews_total": (node.get("latestReviews") or {}).get("totalCount"),
                     # The rollup: `""` when the head commit carries none (nothing ran), never SUCCESS —
                     # and `checks_observability` says whether that blank was answered or refused.
                     "checks_rollup_state": str(rollup.get("state") or "") if rollup_observed else "",

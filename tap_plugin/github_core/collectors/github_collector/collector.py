@@ -170,6 +170,7 @@ _SITE_PULL_REQUEST_CHECKS_TRUNCATED = "2ce1"
 _SITE_GRAPHQL_PULLS = "8d2d"
 _SITE_GRAPHQL_PULLS_FAILED = "7e0f"
 _SITE_PULL_REQUEST_CHECKS_UNOBSERVABLE = "323f"
+_SITE_PULL_REQUEST_LISTS_TRUNCATED = "ace8"
 
 #: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
 #: three calls against a repository that is NOT in scope; past the cap an edge lands as
@@ -2100,6 +2101,7 @@ class GithubCollector(CollectorBase):
         by_state: dict[str, int] = {}
         checks_truncated = 0
         checks_unobservable = 0
+        lists_truncated_count = 0
         for pr in pulls:
             number = pr.get("number")
             if number is None:
@@ -2110,6 +2112,16 @@ class GithubCollector(CollectorBase):
                 checks_truncated += 1
             if pr["checks_observability"] == _UNOBSERVABLE:
                 checks_unobservable += 1
+            # The three capped lists: GitHub's count beside what the page held, and one flag a
+            # consumer can read before trusting `review_requests` as everyone who was asked.
+            list_totals = {
+                key: pr.pop(f"{key}_total", None) for key in ("labels", "review_requests", "latest_reviews")
+            }
+            lists_truncated = any(
+                total is not None and total > len(pr[key]) for key, total in list_totals.items()
+            )
+            if lists_truncated:
+                lists_truncated_count += 1
             by_state[pr["state"]] = by_state.get(pr["state"], 0) + 1
             fields = {
                 **pr,
@@ -2118,6 +2130,10 @@ class GithubCollector(CollectorBase):
                     # The rollup's own count, so a matrix wider than the page shows as a gap.
                     "checks_total": checks_total,
                     "checks_truncated": checks_total is not None and checks_total > len(pr["checks"]),
+                    "labels_total": list_totals["labels"],
+                    "review_requests_total": list_totals["review_requests"],
+                    "latest_reviews_total": list_totals["latest_reviews"],
+                    "lists_truncated": lists_truncated,
                 },
                 "tags": {},
             }
@@ -2178,6 +2194,15 @@ class GithubCollector(CollectorBase):
                 f"their build status is NOT observed, which is not the same as nothing having run; "
                 f"`checks_observability` says so on each.",
                 message_data={"repo": full_name, "pull_requests": checks_unobservable},
+            )
+        if lists_truncated_count:
+            self.record_warn(
+                _SITE_PULL_REQUEST_LISTS_TRUNCATED,
+                "PULL_REQUEST_LISTS_TRUNCATED",
+                f"{full_name}: {lists_truncated_count} pull request(s) carry more labels, review requests or "
+                f"reviews than the page of ten returned; `configuration.lists_truncated` says so on each, and "
+                f"`review_requests` is then NOT everyone who was asked.",
+                message_data={"repo": full_name, "pull_requests": lists_truncated_count},
             )
         if checks_truncated:
             self.record_warn(

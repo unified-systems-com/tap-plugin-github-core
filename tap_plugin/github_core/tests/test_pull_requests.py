@@ -278,6 +278,32 @@ class TestBuildStatusFromTheRollup:
             "conclusion": "SUCCESS", "app": "codacy-production", "url": "https://app.codacy.com/x",
         }
 
+    def test_the_capped_lists_carry_githubs_counts_and_are_not_truncated_on_the_wire(self) -> None:
+        _, nodes, _ = _emit(_collector())
+        first = _captured()
+        conf = _pulls(nodes)[first["number"]]["node"]["configuration"]
+        assert conf["review_requests_total"] == len(first["review_requests"])
+        assert conf["latest_reviews_total"] == len(first["latest_reviews"])
+        assert conf["labels_total"] == len(first["labels"])
+        assert conf["lists_truncated"] is False
+
+    def test_an_eleventh_review_request_is_reported_not_dropped_silently(self) -> None:
+        # The page holds ten; GitHub's count says eleven. The node must say the list is short,
+        # or "waiting on me" quietly loses a reviewer.
+        repo = json.loads(json.dumps(_FIXTURE["repository"]))
+        first = next(n for n in repo["pullRequests"]["nodes"] if n["number"] < 90000)
+        first["reviewRequests"] = {
+            "totalCount": 11,
+            "nodes": [{"requestedReviewer": {"__typename": "User", "login": f"r{i}"}} for i in range(10)],
+        }
+        collector = _collector({_REPO: repo})
+        _, nodes, _ = _emit(collector)
+        fields = _pulls(nodes)[first["number"]]["node"]
+        assert len(fields["review_requests"]) == 10
+        assert fields["configuration"]["review_requests_total"] == 11
+        assert fields["configuration"]["lists_truncated"] is True
+        assert "PULL_REQUEST_LISTS_TRUNCATED" in _codes(collector.warns)
+
     def test_a_rollup_wider_than_the_page_is_marked_truncated(self) -> None:
         repo = json.loads(json.dumps(_FIXTURE["repository"]))
         first = next(n for n in repo["pullRequests"]["nodes"] if n["number"] < 90000)
@@ -285,7 +311,8 @@ class TestBuildStatusFromTheRollup:
         collector = _collector({_REPO: repo})
         _, nodes, _ = _emit(collector)
         fields = _pulls(nodes)[first["number"]]["node"]
-        assert fields["configuration"] == {"checks_total": 250, "checks_truncated": True}
+        assert fields["configuration"]["checks_total"] == 250
+        assert fields["configuration"]["checks_truncated"] is True
         assert "PULL_REQUEST_CHECKS_TRUNCATED" in _codes(collector.warns)
 
 

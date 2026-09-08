@@ -783,6 +783,12 @@
       "target": "github_core__pull_request"
     },
     {
+      "slug": "OPENS_PULL_REQUEST__github_core",
+      "source": "github_core__github_app",
+      "target": "github_core__pull_request",
+      "condition": "the author is a Bot actor: its login is the App's slug"
+    },
+    {
       "slug": "PROPOSES_REF__github_core",
       "source": "github_core__pull_request",
       "target": "git_core__git_ref"
