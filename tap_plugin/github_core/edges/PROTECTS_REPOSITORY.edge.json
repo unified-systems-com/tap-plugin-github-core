@@ -1,0 +1,21 @@
+{
+  "slug": "PROTECTS_REPOSITORY__github_core",
+  "name": "Protects Repository",
+  "description": "A ruleset gates a repository: the ruleset applies to it and its ref patterns are recorded verbatim on the ruleset node. One ruleset defined at the organization protects many repositories, so this edge carries application while the node carries definition. The DECLARED half of the former PROTECTS (split in the github-core#79 wave: one edge, one relationship — the resolved-per-ref half is PROTECTS_REF).",
+  "sources": [
+    "github_core__github_ruleset"
+  ],
+  "targets": [
+    "github_core__github_repository"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "rules",
+    "github.observation": "declaration"
+  },
+  "property_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

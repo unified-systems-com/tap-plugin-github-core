@@ -59,12 +59,21 @@ class ActionsCache(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
-        "cache_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
+        "cache_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "key": {"validation": "jsonschema", "schema": {"type": "string"}},
         "version": {"validation": "jsonschema", "schema": {"type": "string"}},
         "ref": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "size_in_bytes": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "size_in_bytes": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }

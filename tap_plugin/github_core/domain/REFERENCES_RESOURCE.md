@@ -24,7 +24,7 @@ Edge id is `uuid5(ns, "edge:REFERENCES_RESOURCE__github_core:<source id>:<target
 
 ## Boundaries
 
-**Derived, not hotlink-backed.** It carries the same provenance pair as [`FEDERATES_VIA`](FEDERATES_VIA.md) — `link_rule` (which rule matched) and `matched_value` (what it keyed on), mutually `dependentRequired` — so no edge can claim a rule without naming its evidence.
+**Derived, not hotlink-backed.** It carries the same provenance pair as [`FEDERATES_VIA_PROVIDER`](FEDERATES_VIA_PROVIDER.md) — `link_rule` (which rule matched) and `matched_value` (what it keyed on), mutually `dependentRequired` — so no edge can claim a rule without naming its evidence.
 
 Explicitly **not** claimed: deployment, ownership, runtime control, or causation. A workflow that names a distribution id in a comment produces the same edge as one that invalidates it.
 

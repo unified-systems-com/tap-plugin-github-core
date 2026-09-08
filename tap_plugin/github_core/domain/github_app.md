@@ -8,7 +8,7 @@ A GitHub App as a *registered application* — Dependabot, a CI integration, git
 
 Apps are the third-party population of a GitHub organisation. Each one holds a set of permissions on repositories it is installed on, acts under its own identity, and — unlike a human — never leaves. Seven of the surveyed sources model the installation concept and the corpus is explicit that **the application and the grant are different objects**: `github_app` keeps the application; `app_installation` (a corpus concept at the *self* tier, not yet built) would carry the grant.
 
-This node exists so that "what third parties can write to this repository" has somewhere to start. Today it answers the shallower question — which apps are enabled where, via [`ENABLED_ON`](ENABLED_ON.md).
+This node exists so that "what third parties can write to this repository" has somewhere to start. Today it answers the shallower question — which apps are enabled where, via [`ENABLED_ON_REPOSITORY`](ENABLED_ON_REPOSITORY.md).
 
 There is a deliberate reflexivity here worth naming: git-serious is itself installed as a GitHub App, so a complete inventory shows the observer inside it, with its own permissions on display.
 
@@ -22,7 +22,7 @@ There is a deliberate reflexivity here worth naming: git-serious is itself insta
 
 Natural key: **`slug`** — the app's URL slug (`dependabot`). Entity id is `uuid5(ns, "github_core__github_app:<slug>")`.
 
-One node per application, shared across every repository that enables it; the [`ENABLED_ON`](ENABLED_ON.md) edges fan in. That is the correct shape *because* the application is the shared thing — the per-repository fact is the grant, which is the object this type deliberately does not model yet.
+One node per application, shared across every repository that enables it; the [`ENABLED_ON_REPOSITORY`](ENABLED_ON_REPOSITORY.md) edges fan in. That is the correct shape *because* the application is the shared thing — the per-repository fact is the grant, which is the object this type deliberately does not model yet.
 
 The slug rather than `app_id` because the slug is what appears in URLs, in actor names (`dependabot[bot]`), and in the synthetic entries GitHub returns for its own services — so an app node can be minted from a mention. `app_id` is carried as a field.
 

@@ -8,7 +8,7 @@ A repository — the single most-modelled concept in this domain, and the unit a
 
 Fifteen of the sources surveyed for the vocabulary corpus model a repository; nothing else in the domain comes close. That is not because a repository is interesting in itself but because it is the **join point**: rulesets target it, workflows live in it, runners register to it, secrets are scoped to it, Apps are installed on it, and OIDC federation is claimed by its `full_name`. A question about CI/CD security is nearly always a question about one repository or a set of them.
 
-In this plugin it holds the containment middle: owned by an account via [`OWNS_REPO`](OWNS_REPO.md), defining workflows via [`DEFINES_WORKFLOW`](DEFINES_WORKFLOW.md), and federating outward via [`FEDERATES_VIA`](FEDERATES_VIA.md).
+In this plugin it holds the containment middle: owned by an account via [`OWNS_REPO`](OWNS_REPO.md), defining workflows via [`DEFINES_WORKFLOW`](DEFINES_WORKFLOW.md), and federating outward via [`FEDERATES_VIA_PROVIDER`](FEDERATES_VIA_PROVIDER.md).
 
 ## Goals
 
@@ -20,11 +20,13 @@ In this plugin it holds the containment middle: owned by an account via [`OWNS_R
 
 Natural key: **`full_name`** — `owner/repo`. Entity id is `uuid5(ns, "github_core__github_repository:<full_name>")`.
 
-`full_name` is load-bearing far beyond this node. It is the string in every API path, in `uses: owner/repo@ref`, and — critically — inside the **OIDC subject claim** (`repo:owner/repo:ref:...`) that the [`FEDERATES_VIA`](FEDERATES_VIA.md) link matches on. Keying on it means all of those resolve to the same node without a lookup.
+`full_name` is load-bearing far beyond this node. It is the string in every API path, in `uses: owner/repo@ref`, and — critically — inside the **OIDC subject claim** (`repo:owner/repo:ref:...`) that the [`FEDERATES_VIA_PROVIDER`](FEDERATES_VIA_PROVIDER.md) link matches on. Keying on it means all of those resolve to the same node without a lookup.
 
 The cost is the same as for the account: a **transfer or rename produces a new node**, and `github_id` is what joins the old to the new. GitHub redirects the old path, so both names keep resolving in the API while only one resolves on the grid — a known and accepted asymmetry, recorded here so it is not rediscovered as a bug.
 
 ## Boundaries
+
+- **Not the repository as a Git object.** Since github-core#76 that is the neutral `git_core__git_repository` this record links to with `HOSTS_REPOSITORY`; refs and stored commits hang off the neutral node. This record keeps the hosting facts.
 
 Deliberately **not** covered:
 

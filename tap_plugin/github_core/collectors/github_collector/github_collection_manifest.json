@@ -18,7 +18,7 @@
         "full_name"
       ],
       "permission": "repository:metadata:read",
-      "description": "Scope enumeration (req-github-core-org-scope): every repository under the envelope's `owner` (org first, user on 404), paginated to the end of the Link chain; the run records the count and whether the walk was complete. Skipped when the envelope is repos-only."
+      "description": "Scope enumeration (req-github-core-org-scope): every repository under the envelope's `owner` (org first, user on 404), paginated to the end of the Link chain; the run records the count and whether the walk was complete. Skipped when the envelope is repos-only. Since github-core#76 the same payload also mints the neutral git_core__git_repository (forge = host, stable_id = the numeric `id`) linked by HOSTS_REPOSITORY; a payload without `id` mints no neutral repository and the run says so."
     },
     {
       "name": "account",
@@ -150,33 +150,48 @@
       "name": "refs",
       "kind": "custom_fn",
       "path": "POST /graphql (repository.refs)",
-      "target_entity_type": "github_core__git_ref",
+      "target_entity_type": "git_core__git_ref",
       "fields": [
         "ref",
         "ref_type",
         "name",
         "head_sha",
         "target_sha",
+        "target_type",
         "is_default"
       ],
       "permission": "repository:contents:read",
-      "description": "Branches and tags with the commit each points at (req-github-core-refs). Arrives inside the config-layer query at no extra request; declared separately because it needs its own permission statement. Contents read is already in the union for workflow file bodies, so this widens nothing."
+      "description": "Branches and tags with the commit each points at (req-github-core-refs), emitted as the NEUTRAL git_core__git_ref (github-core#76): identity is the neutral repository's id + the full ref path, minted by tap_plugin.git_core.identity; DECLARES_REF__git_core from the neutral repository. Arrives inside the config-layer query at no extra request; declared separately because it needs its own permission statement. Contents read is already in the union for workflow file bodies, so this widens nothing."
     },
     {
       "name": "commits",
       "kind": "custom_fn",
       "path": "POST /graphql (repository.refs.target ...CommitSlice)",
-      "target_entity_type": "github_core__git_commit",
+      "target_entity_type": "git_core__git_commit",
       "fields": [
-        "full_name",
-        "sha",
+        "hash_algorithm",
+        "oid",
         "committed_date",
         "authored_date",
         "author_name",
         "author_email",
-        "author_login",
         "committer_name",
-        "committer_email",
+        "committer_email"
+      ],
+      "permission": "repository:contents:read",
+      "description": "The commit at every collected ref's head — its INTRINSIC half as the neutral git_core__git_commit (github-core#76: identity = hash algorithm + oid, one node however many hosts store it; STORES_COMMIT__git_core from the neutral repository, RESOLVES_COMMIT__git_core from the ref). The observed half — resolved logins and the signature verdict — is the `commit_observations` source. A fragment on the `refs` source's target: scalar fields on nodes the config-layer query already requests, measured at rateLimit.cost 1; no extra request, no extra permission."
+    },
+    {
+      "name": "commit_observations",
+      "kind": "custom_fn",
+      "path": "POST /graphql (repository.refs.target ...CommitSlice)",
+      "target_entity_type": "github_core__commit_observation",
+      "fields": [
+        "full_name",
+        "repository_github_id",
+        "hash_algorithm",
+        "sha",
+        "author_login",
         "committer_login",
         "signature_kind",
         "signature_state",
@@ -185,7 +200,7 @@
         "signed_by_github"
       ],
       "permission": "repository:contents:read",
-      "description": "The commit at every collected ref's head, sliced to identity-as-observed and signature verification state (req-github-core-commits). A fragment on the `refs` source's target \u2014 scalar fields on nodes the config-layer query already requests, measured at no additional rate-limit cost on 2026-09-02 \u2014 so it widens nothing. `signature: null` is recorded as `unsigned` (an observed value); a degraded field is surfaced by the config layer and emits no commit. Keyed on the repository plus the SHA: GitHub persists the signature verification record per repository NETWORK, so a SHA-only node could merge two networks' verdicts."
+      "description": "GitHub's OBSERVATION of the commit at each ref head (req-github-core-commits): the accounts it resolved author/committer emails to (a login only when resolved; empty is observed-absent) and its signature verification verdict in three states (state / unsigned / unobservable). Keyed per host + repository stable id + commit identity because the verification record is persisted per repository network; OBSERVES_COMMIT → the neutral commit, OBSERVED_IN_REPOSITORY → the hosting record. Same fragment, same request, same permission as `commits`."
     },
     {
       "name": "rulesets",
@@ -215,7 +230,7 @@
       ],
       "permission": "repository:administration:read",
       "permission_failure": "degrade_with_warning",
-      "description": "Required check contexts (req-github-core-status-checks): one node per (owner, context) named by any ruleset's required_status_checks rule, from the REST ruleset detail the `rulesets` source already fetches \u2014 so this widens nothing. A ruleset whose detail was refused carries a type-only rule with no contexts; those are COUNTED as not observable and mint nothing, never rendered as a ruleset without required checks. PRODUCES_CHECK is derived toward these nodes from workflow job display names (exact, or the matrix template) when the requirement allows an Actions check; a check nobody requires has no node."
+      "description": "Required check contexts (req-github-core-status-checks): one node per (owner, context) named by any ruleset's required_status_checks rule, from the REST ruleset detail the `rulesets` source already fetches — so this widens nothing. A ruleset whose detail was refused carries a type-only rule with no contexts; those are COUNTED as not observable and mint nothing, never rendered as a ruleset without required checks. PRODUCES_CHECK is derived toward these nodes from workflow job display names (exact, or the matrix template) when the requirement allows an Actions check; a check nobody requires has no node."
     },
     {
       "name": "environments",
@@ -274,7 +289,7 @@
       ],
       "permission": "repository:actions:read",
       "permission_failure": "degrade_with_warning",
-      "description": "Artifacts a repository's runs uploaded, newest first, with the producing run on each (req-github-core-artifacts). The REPOSITORY listing rather than the per-run endpoint: one call per page instead of one per run, and it carries `workflow_run.id`, which is the UPLOADS_ARTIFACT source. Expired artifacts stay listed with `expired: true` \u2014 an immutable event with a retention window (github-core#14, shape C) \u2014 so absence from this listing is never read as expiry or deletion. Capped per repository with the total reported. GitHub keeps no record of who DOWNLOADED an artifact; the declared download steps live on workflow_job.configuration.artifact_steps and no download edge is emitted."
+      "description": "Artifacts a repository's runs uploaded, newest first, with the producing run on each (req-github-core-artifacts). The REPOSITORY listing rather than the per-run endpoint: one call per page instead of one per run, and it carries `workflow_run.id`, which is the UPLOADS_ARTIFACT source. Expired artifacts stay listed with `expired: true` — an immutable event with a retention window (github-core#14, shape C) — so absence from this listing is never read as expiry or deletion. Capped per repository with the total reported. GitHub keeps no record of who DOWNLOADED an artifact; the declared download steps live on workflow_job.configuration.artifact_steps and no download edge is emitted."
     },
     {
       "name": "app_installations",
@@ -480,12 +495,12 @@
       "target": "github_core__github_workflow"
     },
     {
-      "slug": "HAS_ACTIONS_JOB__github_core",
+      "slug": "RUNS_JOB__github_core",
       "source": "github_core__github_actions_run",
       "target": "github_core__github_actions_job"
     },
     {
-      "slug": "EXECUTED_ON__github_core",
+      "slug": "EXECUTED_ON_RUNNER__github_core",
       "source": "github_core__github_actions_job",
       "target": "github_core__github_runner",
       "condition": "job.runner_id matches runner.runner_id"
@@ -502,14 +517,21 @@
       "condition": "job.needs names another job in the same file"
     },
     {
-      "slug": "HAS_REF__github_core",
-      "source": "github_core__github_repository",
-      "target": "github_core__git_ref"
+      "slug": "DECLARES_REF__git_core",
+      "source": "git_core__git_repository",
+      "target": "git_core__git_ref",
+      "condition": "git_core-owned edge type; emitted by this collector for every observed ref"
     },
     {
-      "slug": "PROTECTS__github_core",
+      "slug": "PROTECTS_REPOSITORY__github_core",
       "source": "github_core__github_ruleset",
       "target": "github_core__github_repository"
+    },
+    {
+      "slug": "PROTECTS_REF__github_core",
+      "source": "github_core__github_ruleset",
+      "target": "git_core__git_ref",
+      "condition": "the ruleset's include/exclude ref patterns matched a ref observed in this collection"
     },
     {
       "slug": "EXEMPTS_ACTOR__github_core",
@@ -518,7 +540,7 @@
       "condition": "an actor GitHub actually disclosed; see req-github-core-rulesets-bypass"
     },
     {
-      "slug": "HAS_ENVIRONMENT__github_core",
+      "slug": "DECLARES_ENVIRONMENT__github_core",
       "source": "github_core__github_repository",
       "target": "github_core__github_environment"
     },
@@ -529,23 +551,23 @@
       "condition": "job.environment matches environment.name"
     },
     {
-      "slug": "HAS_CACHE__github_core",
+      "slug": "STORES_CACHE__github_core",
       "source": "github_core__github_repository",
       "target": "github_core__actions_cache"
     },
     {
-      "slug": "SCOPED_TO__github_core",
+      "slug": "SCOPED_TO_REF__github_core",
       "source": "github_core__actions_cache",
-      "target": "github_core__git_ref",
+      "target": "git_core__git_ref",
       "condition": "cache.ref matches an observed git_ref.ref"
     },
     {
-      "slug": "HAS_INSTALLATION__github_core",
+      "slug": "REGISTERS_INSTALLATION__github_core",
       "source": "github_core__github_app",
       "target": "github_core__app_installation"
     },
     {
-      "slug": "INSTALLED_ON__github_core",
+      "slug": "INSTALLED_ON_ACCOUNT__github_core",
       "source": "github_core__app_installation",
       "target": "github_core__github_account"
     },
@@ -563,7 +585,7 @@
     {
       "slug": "TARGETS_REF__github_core",
       "source": "github_core__github_release",
-      "target": "github_core__git_ref",
+      "target": "git_core__git_ref",
       "condition": "refs/tags/<release.tag_name> is an observed git_ref"
     },
     {
@@ -596,10 +618,10 @@
       "condition": "artifact.workflow_run.id names a run in the same batch; otherwise counted as unlinked"
     },
     {
-      "slug": "POINTS_AT__github_core",
-      "source": "github_core__git_ref",
-      "target": "github_core__git_commit",
-      "condition": "the ref's head commit carried a commit slice in the config layer"
+      "slug": "RESOLVES_COMMIT__git_core",
+      "source": "git_core__git_ref",
+      "target": "git_core__git_commit",
+      "condition": "git_core-owned; the ref's head commit carried a commit slice in the config layer"
     },
     {
       "slug": "REQUIRES_CHECK__github_core",
@@ -629,6 +651,28 @@
       "source": "github_core__github_actions_run",
       "target": "github_core__github_package_version",
       "condition": "a container tag sha-<short> (or full sha) matches a collected run's head_sha"
+    },
+    {
+      "slug": "HOSTS_REPOSITORY__github_core",
+      "source": "github_core__github_repository",
+      "target": "git_core__git_repository",
+      "condition": "the repository payload carried a numeric `id`"
+    },
+    {
+      "slug": "STORES_COMMIT__git_core",
+      "source": "git_core__git_repository",
+      "target": "git_core__git_commit",
+      "condition": "git_core-owned; one per commit observed at a ref head in this repository"
+    },
+    {
+      "slug": "OBSERVES_COMMIT__github_core",
+      "source": "github_core__commit_observation",
+      "target": "git_core__git_commit"
+    },
+    {
+      "slug": "OBSERVED_IN_REPOSITORY__github_core",
+      "source": "github_core__commit_observation",
+      "target": "github_core__github_repository"
     }
   ]
 }

@@ -140,7 +140,9 @@ def _env(
         "repositories": {"nodes": list(repos), "edges": []},
         "protects": {
             "nodes": [*rulesets, *repos],
-            "edges": [_edge(a, b, "PROTECTS__github_core") for a, b in protects],
+            "edges": [
+                _edge(a, b, "PROTECTS_REPOSITORY__github_core") for a, b in protects
+            ],
         },
         "requires": {
             "nodes": [*rulesets, *checks],
@@ -506,8 +508,8 @@ class TestThroughTheGraph:
         create_edge(
             rs.entity,
             repo.entity,
-            "PROTECTS__github_core",
-            {"ref_pattern": "~DEFAULT_BRANCH", "match_kind": "declared"},
+            "PROTECTS_REPOSITORY__github_core",
+            {},
         )
         create_edge(
             rs.entity,

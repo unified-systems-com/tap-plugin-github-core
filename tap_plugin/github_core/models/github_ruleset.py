@@ -63,7 +63,10 @@ class GithubRuleset(BaseModel):
         "source_type": {"type": "string"},
         "conditions": {"type": "object"},
         "rules": {"type": "array"},
-        "bypass_observability": {"type": "string", "enum": [BYPASS_OBSERVED, BYPASS_UNOBSERVABLE]},
+        "bypass_observability": {
+            "type": "string",
+            "enum": [BYPASS_OBSERVED, BYPASS_UNOBSERVABLE],
+        },
         "bypass_actor_count": {"type": ["integer", "null"]},
         "html_url": {"type": "string"},
         "configuration": {"type": "object"},
@@ -72,7 +75,10 @@ class GithubRuleset(BaseModel):
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
         "owner_login": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "ruleset_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "ruleset_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "target": {"validation": "jsonschema", "schema": {"type": "string"}},
         "enforcement": {"validation": "jsonschema", "schema": {"type": "string"}},
@@ -82,17 +88,25 @@ class GithubRuleset(BaseModel):
         "rules": {"validation": "jsonschema", "schema": {"type": "array"}},
         "bypass_observability": {
             "validation": "jsonschema",
-            "schema": {"type": "string", "enum": [BYPASS_OBSERVED, BYPASS_UNOBSERVABLE]},
+            "schema": {
+                "type": "string",
+                "enum": [BYPASS_OBSERVED, BYPASS_UNOBSERVABLE],
+            },
         },
         # null is the honest value while `bypass_observability` is `unobservable`: not zero.
-        "bypass_actor_count": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "bypass_actor_count": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
     CREATE_REQUIRED: ClassVar[list[str]] = ["ruleset_id"]
 
-    owner_login = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    owner_login = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     ruleset_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     name = models.CharField(max_length=255, blank=True, default="")
     #: `branch`, `tag` or `push` — GitHub's own enum, and the reason `git_ref` is one type.

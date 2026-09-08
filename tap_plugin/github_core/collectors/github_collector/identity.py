@@ -38,7 +38,7 @@ def workflow_id(full_name: str, workflow_id_int: int | str) -> UUID:
 
 def github_app_id(slug: str) -> UUID:
     # Natural key is the app slug ("dependabot"); one app node is shared across
-    # every repo that enables it (ENABLED_ON edges fan in).
+    # every repo that enables it (ENABLED_ON_REPOSITORY edges fan in).
     return _id("github_core__github_app", slug)
 
 
@@ -52,27 +52,22 @@ def workflow_job_id(full_name: str, workflow_id_int: int | str, job_key: str) ->
     return _id("github_core__workflow_job", f"{full_name}#{workflow_id_int}#{job_key}")
 
 
-def git_ref_id(full_name: str, ref: str) -> UUID:
-    """A ref, keyed on its FULL path (`refs/heads/main`).
+def commit_observation_id(
+    host: str, repository_github_id: int | str, hash_algorithm: str, oid: str
+) -> UUID:
+    """GitHub's OBSERVATION of a commit in one repository (ruling 0.2, github-core#76).
 
-    The full path rather than the short name, because a branch and a tag may share one
-    (`refs/heads/release` and `refs/tags/release` are different objects with the same name).
+    Keyed on the host, the repository's STABLE id (never `owner/repo`, which renames) and the
+    commit identity. The commit itself is the neutral `git_core__git_commit`, minted by
+    `tap_plugin.git_core.identity.git_commit_id`; this record is the forge's half — resolved
+    logins and the signature verdict — persisted per repository network, so it is per
+    repository by construction and can never merge two networks' verdicts. The cross-fork join
+    on the network root is a follow-on once `Repository.parent` is collected.
     """
-    return _id("github_core__git_ref", f"{full_name}#{ref}")
-
-
-def git_commit_id(full_name: str, sha: str) -> UUID:
-    """A commit as observed in ONE repository: `owner/repo` plus the SHA.
-
-    Not the bare SHA, although a commit object is content-addressed: GitHub persists a commit's
-    signature VERIFICATION record per repository *network* ("if the same commit is pushed again
-    to the same repository or to any of its forks, the existing verification record is reused"),
-    so the same SHA in two unrelated networks can legitimately carry two different records, and
-    a SHA-only key would let one repository's verdict overwrite another's (PR #60 review). A
-    repository is inside exactly one network, so this key can never merge two records. The
-    cross-fork join is a follow-on keyed on the network root once `parent` is collected.
-    """
-    return _id("github_core__git_commit", f"{full_name}#{sha.lower()}")
+    return _id(
+        "github_core__commit_observation",
+        f"{host}#{repository_github_id}#{hash_algorithm}:{oid.lower()}",
+    )
 
 
 def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
@@ -170,14 +165,19 @@ def package_id(owner: str, package_type: str, name: str) -> UUID:
     return _id("github_core__github_package", f"{owner}#{package_type}#{name}")
 
 
-def package_version_id(owner: str, package_type: str, name: str, version_id_int: int | str) -> UUID:
+def package_version_id(
+    owner: str, package_type: str, name: str, version_id_int: int | str
+) -> UUID:
     """A version, scoped under its package and keyed on GitHub's version id.
 
     GitHub's id rather than the version name: for a container the name is a digest, which is
     content-addressed and would key correctly, but for npm/maven a version string can be
     unpublished and re-published as different bytes, and the id is what tells them apart.
     """
-    return _id("github_core__github_package_version", f"{owner}#{package_type}#{name}#{version_id_int}")
+    return _id(
+        "github_core__github_package_version",
+        f"{owner}#{package_type}#{name}#{version_id_int}",
+    )
 
 
 #: GitHub Packages registry host per package type — the `repository_url` a purl needs to say
@@ -189,7 +189,12 @@ _REGISTRY_HOST_BY_TYPE = {
     "nuget": "nuget.pkg.github.com",
 }
 #: purl type per GitHub package type where the purl spec has one of its own.
-_PURL_TYPE_BY_TYPE = {"npm": "npm", "maven": "maven", "rubygems": "gem", "nuget": "nuget"}
+_PURL_TYPE_BY_TYPE = {
+    "npm": "npm",
+    "maven": "maven",
+    "rubygems": "gem",
+    "nuget": "nuget",
+}
 
 
 def package_purl(package_type: str, owner: str, name: str, version: str = "") -> str:
@@ -250,7 +255,10 @@ def uses_action_edge_id(job_uuid: UUID, action_uuid: UUID, declared_ref: str) ->
     refs — `actions/checkout@v4` in one step and `actions/checkout@<sha>` in another — is two
     facts, and an id that ignored the ref would keep only the last one after envelope collapse.
     """
-    return uuid5(GITHUB_CORE_NAMESPACE, f"edge:USES_ACTION__github_core:{job_uuid}:{action_uuid}:{declared_ref}")
+    return uuid5(
+        GITHUB_CORE_NAMESPACE,
+        f"edge:USES_ACTION__github_core:{job_uuid}:{action_uuid}:{declared_ref}",
+    )
 
 
 def edge_id(edge_type: str, source: UUID, target: UUID) -> UUID:

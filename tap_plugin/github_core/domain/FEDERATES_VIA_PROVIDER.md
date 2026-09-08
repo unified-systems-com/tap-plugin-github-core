@@ -1,4 +1,4 @@
-# FEDERATES_VIA
+# FEDERATES_VIA_PROVIDER
 
 ## Blurb
 
@@ -8,7 +8,7 @@ A GitHub repository federates into AWS through an IAM OIDC provider — a **deri
 
 OIDC federation replaced long-lived cloud keys in CI, and it moved the trust decision somewhere neither side can see alone. GitHub knows it mints tokens for a repository; AWS knows it trusts an issuer and a subject pattern. Nothing in GitHub's API says which cloud account trusts you, and nothing in AWS's says which repository is on the other end of the claim it matches.
 
-The grid is the only place both halves are present, so this edge is the join. It chains: `repository --FEDERATES_VIA--> oidc_provider --FEDERATES_INTO--> deploy_role`. Following it end to end answers a question neither provider can: **which repository can assume which cloud role.**
+The grid is the only place both halves are present, so this edge is the join. It chains: `repository --FEDERATES_VIA_PROVIDER--> oidc_provider --FEDERATES_INTO--> deploy_role`. Following it end to end answers a question neither provider can: **which repository can assume which cloud role.**
 
 The corpus notes we are ahead of the field here — the published GitHub graph schemas surveyed have no OIDC issuer at all.
 
@@ -20,7 +20,7 @@ The corpus notes we are ahead of the field here — the published GitHub graph s
 
 ## Identity
 
-Edge id is `uuid5(ns, "edge:FEDERATES_VIA__github_core:<source id>:<target id>")`. Resolved during the **enrichment** phase from the grid-link manifest's structural-constant rule, after both endpoints are on the grid.
+Edge id is `uuid5(ns, "edge:FEDERATES_VIA_PROVIDER__github_core:<source id>:<target id>")`. Resolved during the **enrichment** phase from the grid-link manifest's structural-constant rule, after both endpoints are on the grid.
 
 ## Boundaries
 

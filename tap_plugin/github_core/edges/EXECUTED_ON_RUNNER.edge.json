@@ -1,0 +1,16 @@
+{
+  "slug": "EXECUTED_ON_RUNNER__github_core",
+  "name": "Executed On Runner",
+  "description": "Job executed on a durable registered self-hosted runner. Emitted only when an observed job runner_id matches a github_runner node. (Renamed from EXECUTED_ON in the github-core#79 wave: slugs name a mechanical action and its object.)",
+  "sources": [
+    "github_core__github_actions_job"
+  ],
+  "targets": [
+    "github_core__github_runner"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "actions",
+    "github.observation": "execution"
+  }
+}

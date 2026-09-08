@@ -2,12 +2,17 @@
 
 GitHub Actions deployment-plumbing models and the GitHub collector — account-scoped (an org or user's repositories, enumerated) or an explicit repo list.
 
+> **Since v0.6.0 (github-core#76/#78):** repositories, refs and commits are emitted as the neutral
+> `git_core__*` types from [git-core-tap](https://github.com/unified-systems-com/git-core-tap); this
+> plugin keeps the GitHub hosting record (`HOSTS_REPOSITORY` → the neutral repository) and its own
+> `commit_observation` (resolved logins, signature verdict). `git_core` must install before `github_core`.
+
 ## What This Plugin Owns
 
 - Six v0 models: `github_account`, `github_repository`, `github_workflow`,
   `github_actions_run`, `github_actions_job`, `github_runner`
 - Six v0 edge types: `OWNS_REPO`, `DEFINES_WORKFLOW`, `EXECUTES_WORKFLOW`,
-  `HAS_ACTIONS_JOB`, `EXECUTED_ON`, `REFERENCES_RESOURCE`
+  `RUNS_JOB`, `EXECUTED_ON_RUNNER`, `REFERENCES_RESOURCE`
 - `github_pat` secret kind (PAT credential validation)
 - `GitHubCollector` — `CollectorBase` subclass; two-phase run (collection +
   link enrichment) against the configured scope: `owner` (enumerated; `repos` as an

@@ -20,7 +20,9 @@ class GithubRunner(BaseModel):
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_runner"
     ENTITY_NAME: ClassVar[str] = "GitHub Runner"
-    ENTITY_DESCRIPTION: ClassVar[str] = "A durable registered self-hosted GitHub Actions runner."
+    ENTITY_DESCRIPTION: ClassVar[str] = (
+        "A durable registered self-hosted GitHub Actions runner."
+    )
     ENTITY_ICON: ClassVar[str] = "github-runner"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.platform": "github.com",
@@ -41,8 +43,14 @@ class GithubRunner(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
-        "runner_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
+        "runner_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "os": {"validation": "jsonschema", "schema": {"type": "string"}},
         "status": {"validation": "jsonschema", "schema": {"type": "string"}},
@@ -67,7 +75,9 @@ class GithubRunner(BaseModel):
         db_table = "github_core__github_runner"
 
     def get_name(self) -> str:
-        return self.name or (f"Runner {self.runner_id}" if self.runner_id else self.full_name)
+        return self.name or (
+            f"Runner {self.runner_id}" if self.runner_id else self.full_name
+        )
 
     def __str__(self) -> str:
         return self.get_name()

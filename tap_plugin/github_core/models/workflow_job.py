@@ -66,17 +66,29 @@ class WorkflowJob(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
-        "workflow_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
+        "workflow_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "workflow_path": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "job_key": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "job_key": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "runs_on": {"validation": "jsonschema", "schema": {"type": ["array", "null"]}},
         # null vs {} is load-bearing and NOT interchangeable: a job with no `permissions:` block
         # INHERITS (null — unobserved at this level), while `permissions: {}` grants the job token
         # nothing at all. Collapsing them would turn the most locked-down job in a repository into
         # the most permissive one. See the grid's null-is-unobserved convention.
-        "permissions": {"validation": "jsonschema", "schema": {"type": ["object", "string", "null"]}},
+        "permissions": {
+            "validation": "jsonschema",
+            "schema": {"type": ["object", "string", "null"]},
+        },
         "if_condition": {"validation": "jsonschema", "schema": {"type": "string"}},
         "environment": {"validation": "jsonschema", "schema": {"type": "string"}},
         "uses": {"validation": "jsonschema", "schema": {"type": "string"}},

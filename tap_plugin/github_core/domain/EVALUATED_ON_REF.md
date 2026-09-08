@@ -45,7 +45,7 @@ Populated from the rule-suite listing's `ref` at **`repository:administration:re
 
 - GitHub REST API, version `2022-11-28` — *Get rule suites for a repository*.
 - `specs/spec-github-core-v0.md` `req-github-core-refs` — the `git_ref` identity this edge resolves against, and the branch-and-tag-in-one-type ruling.
-- `tap_plugin/github_core/domain/SCOPED_TO.md` — the same emitted-only-when-matchable discipline, for caches.
+- `tap_plugin/github_core/domain/SCOPED_TO_REF.md` — the same emitted-only-when-matchable discipline, for caches.
 
 ## Endpoints
 
