@@ -30,7 +30,6 @@ from tap_plugin.github_core.collectors.github_collector.identity import (
 from tap_plugin.github_core.models.github_custom_property import GithubCustomProperty
 from tap_plugin.github_core.models.github_repository import GithubRepository
 
-from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_node
 
