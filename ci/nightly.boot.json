@@ -9,9 +9,9 @@
         "source": {
           "type": "git",
           "url": "https://github.com/unified-systems-com/git-core-tap",
-          "rev": "main"
+          "rev": "10bb7631f6f42777247a33a9ff14a8af71170d6c"
         },
-        "note": "Package-mode (tap_plugin.git_core). The neutral Git vocabulary github_core emits (github-core#76). DEV-PHASE: `main` until git-core-tap tags v0.1.0; then the tag. Listed first: github_core declares depends_on git_core and the pre-boot gate checks order."
+        "note": "Package-mode (tap_plugin.git_core). The neutral Git vocabulary github_core emits (github-core#76). DEV-PHASE: pinned to the immutable commit of git-core-tap main until it tags v0.1.0 (a moving branch is not a pin — PR# 80 review); then the tag. Listed first: github_core declares depends_on git_core and the pre-boot gate checks order."
       },
       {
         "slug": "identity_core",

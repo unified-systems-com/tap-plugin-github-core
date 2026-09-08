@@ -116,8 +116,28 @@ class TestCommitSlice:
             and s["signature_valid"] is None
         )
 
+    def test_nulls_inside_a_present_signature_stay_null(self) -> None:
+        partial = {
+            **_SIGNED,
+            "signature": {
+                "__typename": "GpgSignature",
+                "isValid": None,
+                "state": "VALID",
+            },
+        }
+        slice_ = GithubGraphQLClient.commit_slice(partial, "e" * 40)
+        assert (
+            slice_ is not None
+            and slice_["signature_valid"] is None
+            and slice_["signature_kind"] == "gpg"
+        )
+
     def test_a_body_without_the_fragment_is_no_slice_at_all(self) -> None:
+        """A degraded field, or a stub without the fragment: nothing to observe, so None —
+        never a node of empty strings that would read as an unsigned commit by nobody.
+        """
         assert GithubGraphQLClient.commit_slice({"oid": "d" * 40}, "d" * 40) is None
+        assert GithubGraphQLClient.commit_slice(_SIGNED, "") is None
 
 
 def _repo_node() -> dict:
@@ -149,6 +169,93 @@ def _repo_node() -> dict:
             ],
         },
     }
+
+
+class TestPrunedErrors:
+    def test_a_field_error_removes_the_key_so_null_cannot_be_read_as_an_answer(
+        self,
+    ) -> None:
+        from tap_plugin.github_core.collectors.github_collector.graphql_client import (
+            prune_errored_paths,
+        )
+
+        data = {
+            "repositoryOwner": {
+                "repositories": {
+                    "nodes": [
+                        {
+                            "branchRefs": {
+                                "nodes": [
+                                    {
+                                        "name": "main",
+                                        "target": {
+                                            "oid": "e" * 40,
+                                            "committedDate": "x",
+                                            "signature": None,
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        errors = [
+            {
+                "type": "FORBIDDEN",
+                "path": [
+                    "repositoryOwner",
+                    "repositories",
+                    "nodes",
+                    0,
+                    "branchRefs",
+                    "nodes",
+                    0,
+                    "target",
+                    "signature",
+                ],
+            }
+        ]
+        assert prune_errored_paths(data, errors) == 1
+        target = data["repositoryOwner"]["repositories"]["nodes"][0]["branchRefs"][
+            "nodes"
+        ][0]["target"]
+        assert "signature" not in target and target["committedDate"] == "x"
+        assert (
+            GithubGraphQLClient.commit_slice(target, "e" * 40)["signature_state"]
+            == "unobservable"
+        )
+
+    def test_an_unresolvable_path_is_skipped_not_fatal(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.graphql_client import (
+            prune_errored_paths,
+        )
+
+        assert (
+            prune_errored_paths(
+                {"a": {}},
+                [{"path": ["a", "b", "c"]}, {"path": []}, {"message": "root"}],
+            )
+            == 0
+        )
+
+
+class TestRefShaping:
+    def test_the_commit_rides_the_ref_and_an_annotated_tag_reaches_the_nested_commit(
+        self,
+    ) -> None:
+        refs = {r["ref"]: r for r in GithubGraphQLClient.refs(_repo_node())[0]}
+        assert refs["refs/heads/main"]["commit"]["sha"] == "e" * 40
+        assert (
+            refs["refs/tags/v2"]["commit"]["sha"] == "e" * 40
+        )  # the commit, not the tag object
+        assert refs["refs/tags/v2"]["target_sha"] == "1" * 40
+        assert refs["refs/tags/v1"]["commit"]["signature_state"] == "unsigned"
+
+    def test_a_ref_whose_commit_was_not_answered_carries_none(self) -> None:
+        refs = {r["ref"]: r for r in GithubGraphQLClient.refs(_repo_node())[0]}
+        assert refs["refs/heads/topic"]["commit"] is None
 
 
 class TestEmission:
