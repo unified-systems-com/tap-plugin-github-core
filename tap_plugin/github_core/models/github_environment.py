@@ -49,13 +49,28 @@ class GithubEnvironment(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
-        "environment_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
-        "name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
+        "environment_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
+        "name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "protection_rules": {"validation": "jsonschema", "schema": {"type": "array"}},
         # null = no policy declared (every branch may deploy); an object = a restriction exists.
-        "deployment_branch_policy": {"validation": "jsonschema", "schema": {"type": ["object", "null"]}},
-        "can_admins_bypass": {"validation": "jsonschema", "schema": {"type": ["boolean", "null"]}},
+        "deployment_branch_policy": {
+            "validation": "jsonschema",
+            "schema": {"type": ["object", "null"]},
+        },
+        "can_admins_bypass": {
+            "validation": "jsonschema",
+            "schema": {"type": ["boolean", "null"]},
+        },
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},

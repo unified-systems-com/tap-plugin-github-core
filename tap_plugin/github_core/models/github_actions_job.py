@@ -45,7 +45,10 @@ class GithubActionsJob(BaseModel):
     # FIELD_VALIDATION_SCHEMA (Django's typed DateTimeField handles validation;
     # JSON-schema "string | null" describes inbound JSON, not at-rest Python).
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "job_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "status": {"validation": "jsonschema", "schema": {"type": "string"}},

@@ -115,7 +115,7 @@ properties must justify why it needs none.
 
 | Slug | Source → target | Tier | Status | Properties, and what they settle |
 | --- | --- | --- | --- | --- |
-| `HOSTS_ACCOUNT` `OWNS_REPO` `DEFINES_WORKFLOW` `EXECUTES_WORKFLOW` `HAS_ACTIONS_JOB` `EXECUTED_ON` `ENABLED_ON` `REFERENCES_RESOURCE` `FEDERATES_VIA` `TRUSTS_ISSUER` | — | self | exists | the current spine |
+| `HOSTS_ACCOUNT` `OWNS_REPO` `DEFINES_WORKFLOW` `EXECUTES_WORKFLOW` `RUNS_JOB` `EXECUTED_ON_RUNNER` `ENABLED_ON_REPOSITORY` `REFERENCES_RESOURCE` `FEDERATES_VIA_PROVIDER` `TRUSTS_ISSUER` | — | self | exists | the current spine |
 | **`DEFINES_JOB`** | workflow → workflow_job | self | new | `{job_key, order}` — job identity within the file |
 | **`DEPENDS_ON_JOB`** | workflow_job → workflow_job | self | new | `{condition}` — the `needs:` graph. **Two independent sources** (a standard's `taskDependencies`, a platform model's depends-on edge); neither earlier pass proposed it. Determines what a compromised early job can reach |
 | `INSTANCE_OF_JOB` | actions_job → workflow_job | friends | new | `{run_attempt}` — the declaration↔execution bridge |

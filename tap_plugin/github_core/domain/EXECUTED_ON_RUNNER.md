@@ -1,4 +1,4 @@
-# EXECUTED_ON
+# EXECUTED_ON_RUNNER
 
 ## Blurb
 
@@ -16,7 +16,7 @@ This edge answers the question the incident corpus cares most about at the machi
 
 ## Identity
 
-Edge id is `uuid5(ns, "edge:EXECUTED_ON__github_core:<source id>:<target id>")`, deterministic from the pair.
+Edge id is `uuid5(ns, "edge:EXECUTED_ON_RUNNER__github_core:<source id>:<target id>")`, deterministic from the pair.
 
 ## Boundaries
 

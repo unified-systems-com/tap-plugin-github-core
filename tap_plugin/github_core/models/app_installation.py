@@ -60,12 +60,18 @@ class AppInstallation(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "installation_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "installation_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "app_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "app_slug": {"validation": "jsonschema", "schema": {"type": "string"}},
         "account_login": {"validation": "jsonschema", "schema": {"type": "string"}},
         "target_type": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "repository_selection": {"validation": "jsonschema", "schema": {"type": "string"}},
+        "repository_selection": {
+            "validation": "jsonschema",
+            "schema": {"type": "string"},
+        },
         "permissions": {"validation": "jsonschema", "schema": {"type": "object"}},
         "events": {"validation": "jsonschema", "schema": {"type": "array"}},
         "suspended": {"validation": "jsonschema", "schema": {"type": "boolean"}},
@@ -78,7 +84,9 @@ class AppInstallation(BaseModel):
     installation_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     app_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     app_slug = models.CharField(max_length=255, blank=True, default="", db_index=True)
-    account_login = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    account_login = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     target_type = models.CharField(max_length=32, blank=True, default="")
     #: `all` or `selected` — an installation with `all` follows the account into new repositories
     #: without anyone granting it again.
@@ -98,7 +106,9 @@ class AppInstallation(BaseModel):
     def get_name(self) -> str:
         if self.app_slug and self.account_login:
             return f"{self.app_slug} @ {self.account_login}"
-        return self.app_slug or (str(self.installation_id) if self.installation_id else "")
+        return self.app_slug or (
+            str(self.installation_id) if self.installation_id else ""
+        )
 
     def __str__(self) -> str:
         return self.get_name()

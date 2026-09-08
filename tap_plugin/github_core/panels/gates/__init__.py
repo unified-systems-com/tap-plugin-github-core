@@ -70,7 +70,7 @@ PEER_SHARE_FRACTION = 0.5
 QUERIES: dict[str, str] = {
     "repositories": "MATCH (r:github_core__github_repository) RETURN r",
     "protects": (
-        "MATCH (rs:github_core__github_ruleset)-[:PROTECTS__github_core]->(r:github_core__github_repository) "
+        "MATCH (rs:github_core__github_ruleset)-[:PROTECTS_REPOSITORY__github_core]->(r:github_core__github_repository) "
         "RETURN rs, r"
     ),
     "requires": (
@@ -369,7 +369,9 @@ def build_rows(env: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     workflows.update(_nodes_by_id(env["defines"]))
 
     protects: dict[str, list[str]] = defaultdict(list)  # repo -> rulesets
-    for rs_id, repo_id, _ in _pairs(env["protects"], "PROTECTS__github_core"):
+    for rs_id, repo_id, _ in _pairs(
+        env["protects"], "PROTECTS_REPOSITORY__github_core"
+    ):
         if rs_id in rulesets and repo_id in repos:
             protects[repo_id].append(rs_id)
     requires: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(

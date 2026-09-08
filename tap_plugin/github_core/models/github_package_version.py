@@ -53,25 +53,44 @@ class GithubPackageVersion(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "version_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
-        "owner_login": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "version_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
+        "owner_login": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "package_type": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "package_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "package_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "version": {"validation": "jsonschema", "schema": {"type": "string"}},
         "purl": {"validation": "jsonschema", "schema": {"type": "string"}},
         "container_tags": {"validation": "jsonschema", "schema": {"type": "array"}},
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "created_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
-        "updated_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
+        "created_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
+        "updated_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
     CREATE_REQUIRED: ClassVar[list[str]] = ["owner_login", "package_name", "version_id"]
 
     version_id = models.BigIntegerField(null=True, blank=True, db_index=True)
-    owner_login = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    owner_login = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     package_type = models.CharField(max_length=32, blank=True, default="")
-    package_name = models.CharField(max_length=512, blank=True, default="", db_index=True)
+    package_name = models.CharField(
+        max_length=512, blank=True, default="", db_index=True
+    )
     #: GitHub's version `name`: for a container this is the manifest digest (`sha256:...`),
     #: for a registry package the version string.
     version = models.CharField(max_length=512, blank=True, default="", db_index=True)
@@ -92,7 +111,9 @@ class GithubPackageVersion(BaseModel):
     def get_name(self) -> str:
         if not self.package_name:
             return ""
-        short = self.version[:19] if self.version.startswith("sha256:") else self.version
+        short = (
+            self.version[:19] if self.version.startswith("sha256:") else self.version
+        )
         return f"{self.package_name}@{short}" if short else self.package_name
 
     def __str__(self) -> str:

@@ -24,14 +24,14 @@ EDGES_DIR = Path(github_models.__file__).parent.parent / "edges"
 # not layer.
 EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "RuleSuite",
                     "GithubRelease", "ActionsArtifact", "GithubPackage", "GithubPackageVersion"}
-# SCOPED_TO is sourced on actions_cache, which is execution — the layer follows the
+# SCOPED_TO_REF is sourced on actions_cache, which is execution — the layer follows the
 # source model rather than a second map (req-github-core-dimensions-6).
 # TRIGGERED_EVALUATION / BYPASSED_RULE / EVALUATED_ON are all sourced on rule_suite, which is execution.
 # Output edges follow their SOURCE: run-sourced (BUILDS_RELEASE, UPLOADS_ARTIFACT,
 # BUILDS_PACKAGE_VERSION), release-sourced (TARGETS_REF) and package-sourced
 # (PUBLISHES_PACKAGE_VERSION) are execution; the repository/account containment edges
-# (PUBLISHES_RELEASE, STORES_ARTIFACT, PUBLISHES_PACKAGE) are declaration, like HAS_CACHE.
-EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "HAS_ACTIONS_JOB", "EXECUTED_ON", "SCOPED_TO",
+# (PUBLISHES_RELEASE, STORES_ARTIFACT, PUBLISHES_PACKAGE) are declaration, like STORES_CACHE.
+EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "RUNS_JOB", "EXECUTED_ON_RUNNER", "SCOPED_TO_REF",
                    "TRIGGERED_EVALUATION", "BYPASSED_RULE", "EVALUATED_ON_REF",
                    "BUILDS_RELEASE", "UPLOADS_ARTIFACT", "BUILDS_PACKAGE_VERSION", "TARGETS_REF",
                    "PUBLISHES_PACKAGE_VERSION"}

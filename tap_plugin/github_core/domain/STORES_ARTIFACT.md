@@ -6,7 +6,7 @@ A repository is holding this uploaded artifact. Containment for artifacts whose 
 
 ## Purpose
 
-The artifact listing is repository-scoped and returns thousands of artifacts across far more runs than any collection window holds. `UPLOADS_ARTIFACT` joins an artifact to its run only when that run is in the batch; without a second edge the rest would be orphans that a view cannot reach. This edge is how every artifact is reachable, the way `HAS_CACHE` reaches every cache entry.
+The artifact listing is repository-scoped and returns thousands of artifacts across far more runs than any collection window holds. `UPLOADS_ARTIFACT` joins an artifact to its run only when that run is in the batch; without a second edge the rest would be orphans that a view cannot reach. This edge is how every artifact is reachable, the way `STORES_CACHE` reaches every cache entry.
 
 ## Goals
 
@@ -21,7 +21,7 @@ Derived: `uuid5(ns, "STORES_ARTIFACT__github_core:<repo_uuid>:<artifact_uuid>")`
 
 - **Not the producer.** That is `UPLOADS_ARTIFACT`, and it is GitHub's attribution rather than a derivation.
 - **No properties, on purpose.** Everything is a field on the artifact.
-- **Named with a verb, not `HAS_`**, per the edge-naming rule (`HAS_` is aspectual, not an action). `HAS_CACHE` predates the rule and is baselined debt; this edge was born after it.
+- **Named with a verb, not `HAS_`**, per the edge-naming rule (`HAS_` is aspectual, not an action). `STORES_CACHE` predates the rule and is baselined debt; this edge was born after it.
 
 ## Neutrality
 
@@ -39,11 +39,11 @@ Emitted for every artifact the listing returned (`repository:actions:read`). On 
 
 ## Prior Art
 
-- `HAS_CACHE` — the containment precedent for run by-products.
+- `STORES_CACHE` — the containment precedent for run by-products.
 - `specs/spec-github-core-v0.md` `req-github-core-artifacts-1`.
 
 ## Endpoints
 
 - **Source:** `github_core__github_repository` — the repository holding the artifact.
 - **Target:** `github_core__actions_artifact` — the artifact.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration` — containment sourced on a declared object, following `HAS_CACHE`.
+- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration` — containment sourced on a declared object, following `STORES_CACHE`.

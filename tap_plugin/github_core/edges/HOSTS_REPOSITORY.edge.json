@@ -1,0 +1,16 @@
+{
+  "slug": "HOSTS_REPOSITORY__github_core",
+  "name": "Hosts Repository",
+  "description": "GitHub's hosting record for a repository — owner, visibility, API configuration, collection observability — links to the neutral git_core repository it hosts (github-core#76). Generic consumers traverse from the neutral node; GitHub views reach the hosting facts through this edge. One per hosting record.",
+  "sources": [
+    "github_core__github_repository"
+  ],
+  "targets": [
+    "git_core__git_repository"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "git",
+    "github.observation": "declaration"
+  }
+}

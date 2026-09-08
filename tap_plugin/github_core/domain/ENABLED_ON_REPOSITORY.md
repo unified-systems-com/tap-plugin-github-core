@@ -1,4 +1,4 @@
-# ENABLED_ON
+# ENABLED_ON_REPOSITORY
 
 ## Blurb
 
@@ -18,7 +18,7 @@ It also carries a second population deliberately. The Actions **OIDC issuer** (`
 
 ## Identity
 
-Edge id is `uuid5(ns, "edge:ENABLED_ON__github_core:<source id>:<target id>")`, deterministic from the pair. One [`github_app`](github_app.md) node is shared across every repository that enables it, so these edges fan in on the app.
+Edge id is `uuid5(ns, "edge:ENABLED_ON_REPOSITORY__github_core:<source id>:<target id>")`, deterministic from the pair. One [`github_app`](github_app.md) node is shared across every repository that enables it, so these edges fan in on the app.
 
 ## Boundaries
 

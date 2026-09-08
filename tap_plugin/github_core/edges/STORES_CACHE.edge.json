@@ -1,7 +1,7 @@
 {
-  "slug": "HAS_CACHE__github_core",
-  "name": "Has Cache",
-  "description": "A repository holds a stored Actions cache entry.",
+  "slug": "STORES_CACHE__github_core",
+  "name": "Stores Cache",
+  "description": "A repository holds a stored Actions cache entry. (Renamed from HAS_CACHE in the github-core#79 wave: slugs name a mechanical action and its object.)",
   "sources": [
     "github_core__github_repository"
   ],

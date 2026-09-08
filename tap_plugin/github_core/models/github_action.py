@@ -72,13 +72,19 @@ class GithubAction(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "action_path": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "action_path": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "kind": {
             "validation": "jsonschema",
             "schema": {"type": "string", "enum": [KIND_REPOSITORY, KIND_DOCKER]},
         },
         "owner": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "repository_full_name": {"validation": "jsonschema", "schema": {"type": "string"}},
+        "repository_full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string"},
+        },
         "subpath": {"validation": "jsonschema", "schema": {"type": "string"}},
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
@@ -88,15 +94,21 @@ class GithubAction(BaseModel):
 
     # The `uses:` path with the ref stripped — the identity input. `actions/checkout`,
     # `actions/cache/restore`, `docker://alpine`.
-    action_path = models.CharField(max_length=512, blank=True, default="", db_index=True)
+    action_path = models.CharField(
+        max_length=512, blank=True, default="", db_index=True
+    )
     # Defaults to the common case so a node minted from a bare path validates; the enum still
     # refuses anything that is neither.
-    kind = models.CharField(max_length=16, blank=True, default=KIND_REPOSITORY, db_index=True)
+    kind = models.CharField(
+        max_length=16, blank=True, default=KIND_REPOSITORY, db_index=True
+    )
     # Who publishes it. Empty for a docker image, whose registry namespace is not a GitHub owner.
     owner = models.CharField(max_length=255, blank=True, default="", db_index=True)
     # The repository the action lives in (`owner/repo`), which is what DEFINED_IN would point at
     # once that edge is built and what the collector resolves pins against when it is in scope.
-    repository_full_name = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    repository_full_name = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     # Path inside that repository for a subdirectory action; "" for the repository root.
     subpath = models.CharField(max_length=512, blank=True, default="")
     name = models.CharField(max_length=512, blank=True, default="")

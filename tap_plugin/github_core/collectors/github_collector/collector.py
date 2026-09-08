@@ -15,6 +15,12 @@ from datetime import datetime
 from typing import Any, ClassVar
 from urllib.parse import quote
 
+from tap_plugin.git_core.identity import (
+    OID_LENGTH,
+    git_commit_id,
+    git_ref_id,
+    git_repository_id,
+)
 from tap_plugin.github_core.models.github_custom_property import GithubCustomProperty
 from tap_plugin.github_core.models.status_check import StatusCheck
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
@@ -48,11 +54,10 @@ from .identity import (
     actions_artifact_id,
     actions_cache_id,
     app_installation_id,
+    commit_observation_id,
     custom_property_id,
     edge_id,
     environment_id,
-    git_commit_id,
-    git_ref_id,
     github_action_id,
     github_app_id,
     job_id,
@@ -118,6 +123,8 @@ _SITE_COLLECTION_PARTIAL = "11d2"
 _SITE_ENVELOPE_COLLAPSED = "32c2"
 _SITE_LINK_RULE_SKIPPED = "1cb8"
 _SITE_REFS_TRUNCATED = "8334"
+#: The hosting record carried no stable id, so no neutral git_core repository (and no refs/commits) could be minted.
+_SITE_NO_STABLE_REPO_ID = "9aa2"
 _SITE_RULESET_BYPASS_UNOBSERVABLE = "d75a"
 _SITE_RULESET_DETAIL_DEGRADED = "21d1"
 _SITE_CACHE_DEGRADED = "21fd"
@@ -163,8 +170,12 @@ _ACTION_REF_RESOLUTION_CAP = 400
 #: exactly `owner/repo` (no dots-only segments, no extra segments) and the ref is a git refname
 #: fragment: no `..`, no leading/trailing `/`, no empty segment — a crafted `../../orgs/x` must fail
 #: HERE, never travel as a request (Grok seat on PR #67).
-_SAFE_REPOSITORY_RE = re.compile(r"^(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+$")
-_SAFE_REF_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.?(?:/|$))(?!.*//)[A-Za-z0-9_.@+/-]+(?<!/)$")
+_SAFE_REPOSITORY_RE = re.compile(
+    r"^(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+$"
+)
+_SAFE_REF_RE = re.compile(
+    r"^(?!/)(?!.*(?:^|/)\.\.?(?:/|$))(?!.*//)[A-Za-z0-9_.@+/-]+(?<!/)$"
+)
 #: An annotated tag may point at another tag object; peel that many levels before giving up.
 _TAG_PEEL_MAX_DEPTH = 3
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -191,7 +202,9 @@ def _check_name_confidence(job_name: str, context: str) -> str | None:
     return None
 
 
-def _group_action_calls(action_refs: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+def _group_action_calls(
+    action_refs: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
     """Fold a job's per-step action refs into one entry per (action path, declared ref).
 
     Two steps calling the same action at the same ref are one relationship with two positions;
@@ -202,14 +215,17 @@ def _group_action_calls(action_refs: list[dict[str, Any]]) -> dict[tuple[str, st
         action_path = str(ref.get("action_path") or ref.get("action") or "")
         if not action_path:
             continue
-        entry = by_call.setdefault((action_path, str(ref.get("ref") or "")), {**ref, "step_indexes": []})
+        entry = by_call.setdefault(
+            (action_path, str(ref.get("ref") or "")), {**ref, "step_indexes": []}
+        )
         entry["step_indexes"].append(int(ref.get("step_index", 0)))
     return by_call
+
 
 # GitHub surfaces enabled platform apps (Dependabot) in the Actions workflow
 # list under synthetic ``dynamic/<app>/...`` paths. These are not repo CI
 # workflows — they are platform apps enabled on the repo — so we reclassify
-# them as github_app + ENABLED_ON instead of github_workflow. Map the synthetic
+# them as github_app + ENABLED_ON_REPOSITORY instead of github_workflow. Map the synthetic
 # path prefix to the app's stable slug + display metadata.
 _SYNTHETIC_APP_BY_PATH_PREFIX: dict[str, dict[str, str]] = {
     "dynamic/dependabot/": {
@@ -269,7 +285,14 @@ _PACKAGE_LIMIT_PER_TYPE = 100
 _PACKAGE_VERSION_LIMIT = 100
 #: GitHub's closed set of package types, as the REST `package_type` parameter spells them. One
 #: listing call per type: the endpoint refuses to enumerate without one.
-_PACKAGE_TYPES: tuple[str, ...] = ("container", "npm", "maven", "rubygems", "docker", "nuget")
+_PACKAGE_TYPES: tuple[str, ...] = (
+    "container",
+    "npm",
+    "maven",
+    "rubygems",
+    "docker",
+    "nuget",
+)
 #: The image-tag convention `publish-images` uses: `sha-<short commit>`. The only derivation that
 #: joins a registry version to the run that built it; everything else is left unjoined and said so.
 _CONTAINER_TAG_SHA_PREFIX = "sha-"
@@ -282,7 +305,9 @@ _OBSERVED = "observed"
 _UNOBSERVABLE = "unobservable"
 
 # Ruleset condition tokens GitHub uses in place of a ref pattern.
-_REF_TOKEN_DEFAULT_BRANCH = "~DEFAULT_BRANCH"  # nosec B105 — GitHub ref token, not a secret
+_REF_TOKEN_DEFAULT_BRANCH = (
+    "~DEFAULT_BRANCH"  # nosec B105 — GitHub ref token, not a secret
+)
 _REF_TOKEN_ALL = "~ALL"  # nosec B105 — GitHub ref token, not a secret
 
 # Which ref type a ruleset's target governs. A `push` ruleset restricts the push itself (file
@@ -293,6 +318,13 @@ _REF_TYPE_BY_RULESET_TARGET = {"branch": "branch", "tag": "tag"}
 # v0 is github.com only; a GHES host would key on its own hostname.
 _PLATFORM_HOST = "github.com"
 _PLATFORM_DIMENSIONS = {"github.platform": "github.com"}
+
+# The neutral git_core rows carry only git_core's own partition key (spec-git_core-v0.md
+# req-git-core-dimensions): the forge is a fact about the OBSERVER and lives on the hosting
+# record and the commit observation, never on the substrate.
+_GIT_REF_DIMENSIONS = {"git.object": "ref"}
+_GIT_COMMIT_DIMENSIONS = {"git.object": "commit"}
+_GIT_RELATION_DIMENSIONS = {"git.object": "relation"}
 
 # GitHub Actions' OIDC issuer URL — the identity convergence node github enables
 # on every repo. The node itself (id, canonical host, provider, display name) is
@@ -318,6 +350,8 @@ def _iso_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
 def _login_of(user: Any) -> str:
     """The `login` of a GitHub user object, or `""` when the payload carried none.
 
@@ -507,7 +541,8 @@ class GithubCollector(CollectorBase):
             checks.append(
                 check_fail(
                     "GITHUB_API_REACHABLE",
-                    f"GitHub /rate_limit failed: status={exc.status} " f"body={exc.body[:200] or '(empty)'}",
+                    f"GitHub /rate_limit failed: status={exc.status} "
+                    f"body={exc.body[:200] or '(empty)'}",
                     readiness_status=CollectorReadinessStatus.ERROR,
                     docs=_DOCS,
                 )
@@ -521,7 +556,8 @@ class GithubCollector(CollectorBase):
         checks.append(
             check_pass(
                 "GITHUB_API_REACHABLE",
-                f"GitHub API reachable; rate limit " f"{core.get('used', '?')}/{core.get('limit', '?')} used.",
+                f"GitHub API reachable; rate limit "
+                f"{core.get('used', '?')}/{core.get('limit', '?')} used.",
                 context={"rate": core},
                 docs=_DOCS,
             )
@@ -535,11 +571,17 @@ class GithubCollector(CollectorBase):
         if owner is not None:
             try:
                 try:
-                    listing = client.get_paginated(f"/orgs/{owner}/repos", params={"type": "all", "per_page": "100"})
+                    listing = client.get_paginated(
+                        f"/orgs/{owner}/repos",
+                        params={"type": "all", "per_page": "100"},
+                    )
                 except GithubAPIError as exc:
                     if exc.status != 404:
                         raise
-                    listing = client.get_paginated(f"/users/{owner}/repos", params={"type": "all", "per_page": "100"})
+                    listing = client.get_paginated(
+                        f"/users/{owner}/repos",
+                        params={"type": "all", "per_page": "100"},
+                    )
             except GithubAPIError as exc:
                 repo_access_ok = False
                 checks.append(
@@ -557,7 +599,11 @@ class GithubCollector(CollectorBase):
                         f"GITHUB_OWNER_ACCESS:{owner}",
                         f"Credential enumerates {len(listing)} repo(s) under {owner}"
                         f"{'' if client.last_walk_complete else ' (walk INCOMPLETE — page cap hit)'}.",
-                        context={"owner": owner, "enumerated": len(listing), "complete": client.last_walk_complete},
+                        context={
+                            "owner": owner,
+                            "enumerated": len(listing),
+                            "complete": client.last_walk_complete,
+                        },
                         docs=_DOCS,
                     )
                 )
@@ -572,7 +618,8 @@ class GithubCollector(CollectorBase):
                 checks.append(
                     check_fail(
                         f"GITHUB_REPO_ACCESS:{repo}",
-                        f"Credential cannot access {repo}: status={exc.status} " f"body={exc.body[:200] or '(empty)'}",
+                        f"Credential cannot access {repo}: status={exc.status} "
+                        f"body={exc.body[:200] or '(empty)'}",
                         readiness_status=CollectorReadinessStatus.ERROR,
                         docs=_DOCS,
                     )
@@ -602,9 +649,11 @@ class GithubCollector(CollectorBase):
         raise GithubCollectorError(message)
 
     def run(self) -> None:
-        self.record_info(_SITE_RUN_STARTED, "RUN_STARTED", "GitHub Core collection started.")
+        self.record_info(
+            _SITE_RUN_STARTED, "RUN_STARTED", "GitHub Core collection started."
+        )
         # github_app nodes are singletons shared across repos; dedupe the node
-        # emission across the whole run (the ENABLED_ON edges still fan in).
+        # emission across the whole run (the ENABLED_ON_REPOSITORY edges still fan in).
         self._emitted_app_ids: set[str] = set()
         # Account type of the observed owner ("Organization" | "User"), learned when
         # the account node is emitted; steers owner-scoped app URLs.
@@ -621,17 +670,27 @@ class GithubCollector(CollectorBase):
         try:
             secret = resolve_github_secret(GITHUB_SECRET_REF)
         except SecretError as exc:
-            self._abort(_SITE_ABORT_SECRET, "SECRET_UNUSABLE", f"github_pat secret unusable: {exc}")
+            self._abort(
+                _SITE_ABORT_SECRET,
+                "SECRET_UNUSABLE",
+                f"github_pat secret unusable: {exc}",
+            )
         data = dict(secret.data)
         run_limit = initial_run_limit(data)
 
         # One seam, two credential kinds (req-github-core-app-auth-1). Nothing below this line
         # knows which arrived, except where an App-only surface is worth attempting.
-        self._auth = GithubAuth(kind=secret.kind, data=data, api_base_url=api_base_url(data))
+        self._auth = GithubAuth(
+            kind=secret.kind, data=data, api_base_url=api_base_url(data)
+        )
         try:
             token = self._auth.token()
         except GithubAppAuthError as exc:
-            self._abort(_SITE_ABORT_SECRET, "GITHUB_APP_AUTH_FAILED", f"App credential unusable: {exc}")
+            self._abort(
+                _SITE_ABORT_SECRET,
+                "GITHUB_APP_AUTH_FAILED",
+                f"App credential unusable: {exc}",
+            )
         self.record_info(
             _SITE_AUTH_MODE,
             "AUTH_MODE",
@@ -640,9 +699,11 @@ class GithubCollector(CollectorBase):
                 filter(
                     None,
                     [
-                        f"App (installation {(self._auth.installation or {}).get('id')})"
-                        if self._auth.has_app
-                        else "",
+                        (
+                            f"App (installation {(self._auth.installation or {}).get('id')})"
+                            if self._auth.has_app
+                            else ""
+                        ),
                         "personal access token" if self._auth.has_pat else "",
                     ],
                 )
@@ -662,7 +723,10 @@ class GithubCollector(CollectorBase):
         # will. Per-source rather than a global preference order, because "prefer the App" would
         # silently lose bypass actors on precisely the deployments that placed both credentials.
         self._pat_client = (
-            GithubClient(token=self._auth.token(prefer=PREFER_PAT), api_base_url=api_base_url(data))
+            GithubClient(
+                token=self._auth.token(prefer=PREFER_PAT),
+                api_base_url=api_base_url(data),
+            )
             if self._auth.has_pat
             else None
         )
@@ -723,11 +787,19 @@ class GithubCollector(CollectorBase):
             try:
                 self._config = self._fetch_config_layer(data, owner)
             except GithubGraphQLError as exc:
-                self._abort(_SITE_ABORT_SCOPE, "GITHUB_GRAPHQL_FAILED", f"config-layer fetch failed: {exc}")
+                self._abort(
+                    _SITE_ABORT_SCOPE,
+                    "GITHUB_GRAPHQL_FAILED",
+                    f"config-layer fetch failed: {exc}",
+                )
         try:
             repos = self._resolve_repos(client, owner, explicit_repos(data))
         except GithubAPIError as exc:
-            self._abort(_SITE_ABORT_SCOPE, f"GITHUB_SCOPE_{exc.status}", f"scope enumeration failed: {exc}")
+            self._abort(
+                _SITE_ABORT_SCOPE,
+                f"GITHUB_SCOPE_{exc.status}",
+                f"scope enumeration failed: {exc}",
+            )
 
         # --- manifests (load-time JSON Schema validation; errors abort) ---
         load_collection_manifest()  # validates; engine is procedural in v0
@@ -771,7 +843,9 @@ class GithubCollector(CollectorBase):
         failed: list[str] = []
         for full_name in repos:
             try:
-                self._collect_repo(client, full_name, run_limit, nodes, edges, platform_uuid)
+                self._collect_repo(
+                    client, full_name, run_limit, nodes, edges, platform_uuid
+                )
             except GithubAPIError as exc:
                 # Contain the failure to its repo. A scope of one repo could treat any API error
                 # as fatal; a scope of nineteen cannot, because across thousands of calls a
@@ -807,8 +881,11 @@ class GithubCollector(CollectorBase):
             # Everything failed: that is not a transient blip, it is a broken credential or a
             # dead API. Fail loudly rather than submitting an empty batch that looks like an
             # organization with nothing in it.
-            self._abort(_SITE_ABORT_API, "GITHUB_API_ALL_REPOS_FAILED",
-                        f"every repo in scope failed to collect ({len(failed)}/{len(repos)})")
+            self._abort(
+                _SITE_ABORT_API,
+                "GITHUB_API_ALL_REPOS_FAILED",
+                f"every repo in scope failed to collect ({len(failed)}/{len(repos)})",
+            )
         if failed:
             # Load-bearing for tombstoning (req-github-core-org-scope-3, tap#140): the scope was
             # completely ENUMERATED but not completely COLLECTED, so absence within this run is
@@ -819,14 +896,17 @@ class GithubCollector(CollectorBase):
                 f"Collected {len(repos) - len(failed)} of {len(repos)} repo(s); "
                 f"{len(failed)} skipped after API errors. Absence in this batch is NOT evidence "
                 f"of deletion.",
-                message_data={"collected": len(repos) - len(failed), "failed": sorted(failed),
-                              "collection_complete": False},
+                message_data={
+                    "collected": len(repos) - len(failed),
+                    "failed": sorted(failed),
+                    "collection_complete": False,
+                },
             )
 
         # --- submission phase ---
         # Collapse envelopes that repeat across repos before submission. Several nodes and
         # edges are legitimately shared by every repo in a scope — the account, the platform,
-        # the OIDC issuer and its ENABLED_ON edges — and the per-repo walk emits one copy each
+        # the OIDC issuer and its ENABLED_ON_REPOSITORY edges — and the per-repo walk emits one copy each
         # time. At a one-repo scope that never showed; at 19 repos GRIFT rejected the batch
         # for duplicate entity ids and NOTHING landed. Deduping is correct rather than
         # defensive: these are the same observation seen from several repos, and identity is
@@ -843,14 +923,19 @@ class GithubCollector(CollectorBase):
         # grid. A run can name a workflow that has since been deleted or renamed, which at a
         # one-repo scope never happened and at nineteen rejected the whole batch for a dangling
         # endpoint. Drop those edges and say how many, rather than losing every repo.
-        edges, dropped = self._drop_dangling_edges(edges, {e["entity"]["entity_id"] for e in nodes})
+        edges, dropped = self._drop_dangling_edges(
+            edges, {e["entity"]["entity_id"] for e in nodes}
+        )
         if dropped:
             self.record_warn(
                 _SITE_EDGE_DROPPED,
                 "EDGES_DROPPED_DANGLING",
                 f"Dropped {len(dropped)} edge(s) whose endpoint was not collected — most often a run "
                 f"naming a workflow that no longer exists.",
-                message_data={"count": len(dropped), "edge_types": sorted({d for d in dropped})},
+                message_data={
+                    "count": len(dropped),
+                    "edge_types": sorted({d for d in dropped}),
+                },
             )
         if node_dupes or edge_dupes:
             self.record_info(
@@ -908,7 +993,10 @@ class GithubCollector(CollectorBase):
                 f"{self._action_ref_state()['skipped']} distinct action ref(s) were not looked up: the per-run "
                 f"resolution cap ({_ACTION_REF_RESOLUTION_CAP}) was reached. Their edges carry "
                 f"`resolution: not_attempted`; an unresolved pin kind there is a budget fact, not an observation.",
-                message_data={"skipped": self._action_ref_state()["skipped"], "cap": _ACTION_REF_RESOLUTION_CAP},
+                message_data={
+                    "skipped": self._action_ref_state()["skipped"],
+                    "cap": _ACTION_REF_RESOLUTION_CAP,
+                },
             )
 
         # --- enrichment phase (link resolution against landed nodes) ---
@@ -921,7 +1009,7 @@ class GithubCollector(CollectorBase):
         if enrichment.edge_envelopes:
             enrichment_batch = assemble_batch(
                 batch_name=f"github_core enrichment: {scope_label}",
-                description="Cross-grid link edges (REFERENCES_RESOURCE, FEDERATES_VIA) resolved from the grid-link manifest.",
+                description="Cross-grid link edges (REFERENCES_RESOURCE, FEDERATES_VIA_PROVIDER) resolved from the grid-link manifest.",
                 nodes=[],
                 edges=enrichment.edge_envelopes,
             )
@@ -936,9 +1024,13 @@ class GithubCollector(CollectorBase):
 
     # ---------- config layer (GraphQL) ----------
 
-    def _fetch_config_layer(self, data: dict[str, Any], owner: str) -> dict[str, dict[str, Any]]:
+    def _fetch_config_layer(
+        self, data: dict[str, Any], owner: str
+    ) -> dict[str, dict[str, Any]]:
         """Fetch every repository's configuration for ``owner`` in one query, keyed by full name."""
-        gql = GithubGraphQLClient(token=self._auth.token(), api_base_url=api_base_url(data))
+        gql = GithubGraphQLClient(
+            token=self._auth.token(), api_base_url=api_base_url(data)
+        )
         repos, notes = gql.fetch_config_layer(owner)
         config = {str(r["nameWithOwner"]): r for r in repos if r.get("nameWithOwner")}
         self.record_info(
@@ -947,7 +1039,11 @@ class GithubCollector(CollectorBase):
             f"Config layer for {owner}: {len(config)} repo(s), "
             f"{sum(len(GithubGraphQLClient.workflow_files(r)) for r in repos)} workflow file(s), "
             f"cost {gql.last_cost} point(s).",
-            message_data={"repos": len(config), "cost": gql.last_cost, "remaining": gql.last_remaining},
+            message_data={
+                "repos": len(config),
+                "cost": gql.last_cost,
+                "remaining": gql.last_remaining,
+            },
         )
         for note in notes:
             # A field the credential could not read. Surfaced, never swallowed: a silently missing
@@ -977,7 +1073,9 @@ class GithubCollector(CollectorBase):
             "html_url": gql.get("url"),
         }
 
-    def _workflow_config(self, client: GithubClient, full_name: str, path: str) -> tuple[str, dict[str, Any]]:
+    def _workflow_config(
+        self, client: GithubClient, full_name: str, path: str
+    ) -> tuple[str, dict[str, Any]]:
         """Workflow YAML from the config layer when present, else the Contents API.
 
         The GraphQL path is the reason the per-file Contents calls disappear — they were both the
@@ -1014,7 +1112,9 @@ class GithubCollector(CollectorBase):
         return kept, dropped
 
     @staticmethod
-    def _collapse_by_entity_id(envelopes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    def _collapse_by_entity_id(
+        envelopes: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int]:
         """Return the envelopes with duplicate ``entity.entity_id`` collapsed, and the count removed.
 
         Order is preserved and the LAST occurrence wins, so the freshest observation of a shared
@@ -1041,7 +1141,9 @@ class GithubCollector(CollectorBase):
 
     # ---------- scope resolution ----------
 
-    def _resolve_repos(self, client: GithubClient, owner: str | None, explicit: list[str]) -> list[str]:
+    def _resolve_repos(
+        self, client: GithubClient, owner: str | None, explicit: list[str]
+    ) -> list[str]:
         """The `owner/repo` full names this run collects (req-github-core-org-scope).
 
         With an `owner`: enumerate the account's repositories (``/orgs/{owner}/repos`` with a
@@ -1056,7 +1158,9 @@ class GithubCollector(CollectorBase):
         if self._config:
             # Already enumerated by the config-layer query; do not walk REST again.
             enumerated = sorted(self._config)
-            return self._apply_filter(owner, enumerated, explicit, account_kind="graphql", complete=True)
+            return self._apply_filter(
+                owner, enumerated, explicit, account_kind="graphql", complete=True
+            )
         params = {"type": "all", "per_page": "100"}
         try:
             listing = client.get_paginated(f"/orgs/{owner}/repos", params=params)
@@ -1067,11 +1171,23 @@ class GithubCollector(CollectorBase):
             listing = client.get_paginated(f"/users/{owner}/repos", params=params)
             account_kind = "user"
         complete = bool(client.last_walk_complete)
-        enumerated = [str(item["full_name"]) for item in listing if isinstance(item, dict) and item.get("full_name")]
-        return self._apply_filter(owner, enumerated, explicit, account_kind=account_kind, complete=complete)
+        enumerated = [
+            str(item["full_name"])
+            for item in listing
+            if isinstance(item, dict) and item.get("full_name")
+        ]
+        return self._apply_filter(
+            owner, enumerated, explicit, account_kind=account_kind, complete=complete
+        )
 
     def _apply_filter(
-        self, owner: str, enumerated: list[str], explicit: list[str], *, account_kind: str, complete: bool
+        self,
+        owner: str,
+        enumerated: list[str],
+        explicit: list[str],
+        *,
+        account_kind: str,
+        complete: bool,
     ) -> list[str]:
         """Apply the optional include-filter to an enumerated scope and record the enumeration."""
         repos = enumerated
@@ -1145,12 +1261,23 @@ class GithubCollector(CollectorBase):
         )
         # platform hosts this account — top-of-tree containment. Deterministic
         # edge id dedupes across repos that share an owner.
-        edges.append(self._edge("HOSTS_ACCOUNT__github_core", platform_uuid, account_uuid, dict(_PLATFORM_DIMENSIONS)))
+        edges.append(
+            self._edge(
+                "HOSTS_ACCOUNT__github_core",
+                platform_uuid,
+                account_uuid,
+                dict(_PLATFORM_DIMENSIONS),
+            )
+        )
 
         # repository. Prefer the config layer already in hand; fall back to REST for a
         # repos-only scope, where no GraphQL enumeration ran.
         gql = self._config.get(full_name)
-        repo_payload = self._repo_payload_from_config(gql) if gql else client.get(f"/repos/{full_name}")
+        repo_payload = (
+            self._repo_payload_from_config(gql)
+            if gql
+            else client.get(f"/repos/{full_name}")
+        )
         repo_uuid = repository_id(full_name)
         repo_envelope = node_envelope(
             entity_id=repo_uuid,
@@ -1179,38 +1306,112 @@ class GithubCollector(CollectorBase):
         )
         nodes.append(repo_envelope)
         self._repo_envelopes[full_name] = repo_envelope
-        edges.append(self._edge("OWNS_REPO__github_core", account_uuid, repo_uuid, repo_dims))
+        edges.append(
+            self._edge("OWNS_REPO__github_core", account_uuid, repo_uuid, repo_dims)
+        )
+
+        # The neutral git_core repository this record HOSTS (github-core#76): identity is the
+        # host plus GitHub's stable numeric id, never the name, so a rename changes a field and a
+        # mirror elsewhere is another repository. Refs and commits hang off THIS node.
+        repository_github_id = repo_payload.get("id")
+        git_repo_uuid = None
+        if repository_github_id is not None:
+            git_repo_uuid = git_repository_id(
+                repo_dims["github.platform"], str(repository_github_id)
+            )
+            default_branch = repo_payload.get("default_branch", "") or ""
+            nodes.append(
+                node_envelope(
+                    entity_id=git_repo_uuid,
+                    entity_type="git_core__git_repository",
+                    name=full_name,
+                    dimensions={"git.object": "repository"},
+                    fields={
+                        "forge": repo_dims["github.platform"],
+                        "stable_id": str(repository_github_id),
+                        "name": full_name,
+                        "default_ref": (
+                            f"refs/heads/{default_branch}" if default_branch else ""
+                        ),
+                        "hash_algorithm": "sha1",
+                        "configuration": {},
+                        "tags": {},
+                    },
+                )
+            )
+            edges.append(
+                self._edge(
+                    "HOSTS_REPOSITORY__github_core", repo_uuid, git_repo_uuid, repo_dims
+                )
+            )
+        else:
+            self.record_warn(
+                _SITE_NO_STABLE_REPO_ID,
+                "NO_STABLE_REPOSITORY_ID",
+                f"{full_name}: the repository payload carried no `id`, so no neutral git_core repository, "
+                "refs or commits were minted for it. Absence of refs here is NOT evidence there are none.",
+                message_data={"repo": full_name},
+            )
 
         # The Actions OIDC issuer (synthesized once as a platform singleton) is
         # enabled for every repo's workflows to mint identity tokens — mirror the
-        # github_app ENABLED_ON pattern so it connects into the repo it serves.
-        edges.append(self._edge("ENABLED_ON__github_core", oidc_issuer_id(_OIDC_ISSUER_URL), repo_uuid, repo_dims))
+        # github_app ENABLED_ON_REPOSITORY pattern so it connects into the repo it serves.
+        edges.append(
+            self._edge(
+                "ENABLED_ON_REPOSITORY__github_core",
+                oidc_issuer_id(_OIDC_ISSUER_URL),
+                repo_uuid,
+                repo_dims,
+            )
+        )
 
         # --- configuration layer: refs, rulesets, environments.
         # All three arrive in the GraphQL config layer already in hand, so this costs no request.
         # They are emitted BEFORE the workflow walk because the declared jobs point at
         # environments, and the ruleset->ref resolution needs the refs.
-        ref_uuid_by_ref = self._emit_refs(full_name, repo_uuid, repo_dims, nodes, edges)
-        self._emit_rulesets(client, full_name, repo_uuid, repo_dims, ref_uuid_by_ref, nodes, edges)
-        env_uuid_by_name = self._emit_environments(full_name, repo_uuid, repo_dims, nodes, edges)
+        ref_uuid_by_ref = self._emit_refs(
+            full_name,
+            repo_uuid,
+            git_repo_uuid,
+            repository_github_id,
+            repo_dims,
+            nodes,
+            edges,
+        )
+        self._emit_rulesets(
+            client, full_name, repo_uuid, repo_dims, ref_uuid_by_ref, nodes, edges
+        )
+        env_uuid_by_name = self._emit_environments(
+            full_name, repo_uuid, repo_dims, nodes, edges
+        )
 
         # workflows + workflow YAML
-        workflows = client.get_paginated(f"/repos/{full_name}/actions/workflows", item_path="workflows")
+        workflows = client.get_paginated(
+            f"/repos/{full_name}/actions/workflows", item_path="workflows"
+        )
         for wf in workflows:
             path = wf.get("path", "")
             # Synthetic platform-app entries (e.g. Dependabot) come back here but
-            # are not repo CI workflows; reclassify them as github_app + ENABLED_ON
+            # are not repo CI workflows; reclassify them as github_app + ENABLED_ON_REPOSITORY
             # and skip the YAML fetch (no real file exists at the dynamic/ path).
             app_meta = next(
-                (meta for prefix, meta in _SYNTHETIC_APP_BY_PATH_PREFIX.items() if path.startswith(prefix)),
+                (
+                    meta
+                    for prefix, meta in _SYNTHETIC_APP_BY_PATH_PREFIX.items()
+                    if path.startswith(prefix)
+                ),
                 None,
             )
             if app_meta is not None:
-                self._emit_github_app(app_meta, full_name, repo_uuid, repo_dims, nodes, edges)
+                self._emit_github_app(
+                    app_meta, full_name, repo_uuid, repo_dims, nodes, edges
+                )
                 continue
 
             wf_uuid = workflow_id(full_name, wf["id"])
-            raw_yaml, parsed_config = self._workflow_config(client, full_name, wf.get("path", ""))
+            raw_yaml, parsed_config = self._workflow_config(
+                client, full_name, wf.get("path", "")
+            )
             wf_display_name = wf.get("name") or wf.get("path") or str(wf["id"])
             wf_envelope = node_envelope(
                 entity_id=wf_uuid,
@@ -1229,13 +1430,30 @@ class GithubCollector(CollectorBase):
                 },
             )
             nodes.append(wf_envelope)
-            edges.append(self._edge("DEFINES_WORKFLOW__github_core", repo_uuid, wf_uuid, actions_dims))
+            edges.append(
+                self._edge(
+                    "DEFINES_WORKFLOW__github_core", repo_uuid, wf_uuid, actions_dims
+                )
+            )
             self._register_workflow(
-                full_name, wf.get("path", ""), wf_display_name, wf_uuid, wf_envelope, parsed_config, actions_dims
+                full_name,
+                wf.get("path", ""),
+                wf_display_name,
+                wf_uuid,
+                wf_envelope,
+                parsed_config,
+                actions_dims,
             )
             # The DECLARED jobs inside this file — the level every privilege decision is made at.
             self._emit_declared_jobs(
-                full_name, wf_uuid, wf["id"], wf.get("path", ""), parsed_config, env_uuid_by_name, nodes, edges,
+                full_name,
+                wf_uuid,
+                wf["id"],
+                wf.get("path", ""),
+                parsed_config,
+                env_uuid_by_name,
+                nodes,
+                edges,
                 client=client,
             )
             # Local-action surfacing per req-github-core-workflow-parse-3.
@@ -1263,16 +1481,20 @@ class GithubCollector(CollectorBase):
             client, full_name, already_fetched_run_ids={r["id"] for r in run_payloads}
         )
         run_payloads.extend(refreshed)
-        # Held for the EXECUTED_ON pass below rather than re-fetched: the runner match needs
+        # Held for the EXECUTED_ON_RUNNER pass below rather than re-fetched: the runner match needs
         # the same job payloads, and at account scope a second walk is one extra API call per
         # RUN — the single largest cost in the whole collection.
         jobs_by_run: dict[int, list[dict[str, Any]]] = {}
         for r in run_payloads:
-            jobs_by_run[r["id"]] = self._emit_run_with_jobs(client, full_name, r, observation_dims, nodes, edges)
+            jobs_by_run[r["id"]] = self._emit_run_with_jobs(
+                client, full_name, r, observation_dims, nodes, edges
+            )
 
         # runners (graceful-degrade on 403 per req-github-core-collector-5)
         try:
-            runners = client.get_paginated(f"/repos/{full_name}/actions/runners", item_path="runners")
+            runners = client.get_paginated(
+                f"/repos/{full_name}/actions/runners", item_path="runners"
+            )
         except GithubAPIError as exc:
             if exc.status == 403:
                 self.record_warn(
@@ -1301,7 +1523,10 @@ class GithubCollector(CollectorBase):
                         "os": rn.get("os", ""),
                         "status": rn.get("status", ""),
                         "busy": bool(rn.get("busy", False)),
-                        "labels": [lab.get("name") if isinstance(lab, dict) else lab for lab in rn.get("labels", [])],
+                        "labels": [
+                            lab.get("name") if isinstance(lab, dict) else lab
+                            for lab in rn.get("labels", [])
+                        ],
                         "configuration": {},
                         "tags": {},
                     },
@@ -1328,22 +1553,49 @@ class GithubCollector(CollectorBase):
         # because a view that reads only the output nodes cannot tell "none" from "could not look".
         outputs: dict[str, Any] = {"notes": {}}
         outputs["releases"] = self._collect_releases(
-            full_name, repo_uuid, {**repo_dims, "github.surface": "releases", "github.observation": "execution"},
-            ref_uuid_by_ref, run_index, nodes, edges, outputs["notes"],
+            full_name,
+            repo_uuid,
+            {
+                **repo_dims,
+                "github.surface": "releases",
+                "github.observation": "execution",
+            },
+            ref_uuid_by_ref,
+            run_index,
+            nodes,
+            edges,
+            outputs["notes"],
         )
         outputs["artifacts"] = self._collect_artifacts(
-            client, full_name, repo_uuid, observation_dims, run_index, nodes, edges, outputs["notes"]
+            client,
+            full_name,
+            repo_uuid,
+            observation_dims,
+            run_index,
+            nodes,
+            edges,
+            outputs["notes"],
         )
         repo_envelope["node"]["outputs_observability"] = outputs
 
         # stored cache entries (REST; graceful-degrade like runners). Observation dimensions:
         # a cache entry is something that HAPPENED, not something declared.
-        self._collect_caches(client, full_name, repo_uuid, observation_dims, ref_uuid_by_ref, nodes, edges)
+        self._collect_caches(
+            client,
+            full_name,
+            repo_uuid,
+            observation_dims,
+            ref_uuid_by_ref,
+            nodes,
+            edges,
+        )
         # Bypass EVENTS. Deliberately after refs: EVALUATED_ON resolves against ref_uuid_by_ref,
         # and a suite naming a ref we did not collect simply carries no edge.
-        self._collect_rule_suites(client, full_name, observation_dims, ref_uuid_by_ref, nodes, edges)
+        self._collect_rule_suites(
+            client, full_name, observation_dims, ref_uuid_by_ref, nodes, edges
+        )
 
-        # EXECUTED_ON edges (only when an observed job runner_id matches a durable runner node).
+        # EXECUTED_ON_RUNNER edges (only when an observed job runner_id matches a durable runner node).
         # Reuses the job payloads collected above — the runner nodes simply were not known yet
         # when the jobs were first walked, which is an ordering constraint, not a reason to fetch
         # them again.
@@ -1352,7 +1604,14 @@ class GithubCollector(CollectorBase):
                 if j.get("runner_id") and j["runner_id"] in runner_uuid_by_id:
                     j_uuid = job_id(full_name, j["id"])
                     rn_uuid = runner_uuid_by_id[j["runner_id"]]
-                    edges.append(self._edge("EXECUTED_ON__github_core", j_uuid, rn_uuid, observation_dims))
+                    edges.append(
+                        self._edge(
+                            "EXECUTED_ON_RUNNER__github_core",
+                            j_uuid,
+                            rn_uuid,
+                            observation_dims,
+                        )
+                    )
 
     # ---------- helpers ----------
 
@@ -1373,7 +1632,7 @@ class GithubCollector(CollectorBase):
         req-github-core-collector-8) because the run's end time is derived from
         them — see `_run_completed_at` (github-core#46). Returns the job payloads
         (empty when the endpoint degraded) so the caller can hold them for the
-        EXECUTED_ON pass without a second walk.
+        EXECUTED_ON_RUNNER pass without a second walk.
 
         Args:
             client: The REST client for this collection.
@@ -1387,7 +1646,9 @@ class GithubCollector(CollectorBase):
             The run's job payloads; `[]` when they were not observable.
         """
         run_uuid = run_id(full_name, r["id"])
-        wf_ref_uuid = workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
+        wf_ref_uuid = (
+            workflow_id(full_name, r["workflow_id"]) if r.get("workflow_id") else None
+        )
         jobs = self._fetch_run_jobs(client, full_name, r["id"])
         completed_at, completed_at_source = self._run_completed_at(r, jobs)
         nodes.append(
@@ -1424,7 +1685,14 @@ class GithubCollector(CollectorBase):
             )
         )
         if wf_ref_uuid is not None:
-            edges.append(self._edge("EXECUTES_WORKFLOW__github_core", run_uuid, wf_ref_uuid, observation_dims))
+            edges.append(
+                self._edge(
+                    "EXECUTES_WORKFLOW__github_core",
+                    run_uuid,
+                    wf_ref_uuid,
+                    observation_dims,
+                )
+            )
 
         for j in jobs or []:
             j_uuid = job_id(full_name, j["id"])
@@ -1456,11 +1724,15 @@ class GithubCollector(CollectorBase):
                     },
                 )
             )
-            edges.append(self._edge("HAS_ACTIONS_JOB__github_core", run_uuid, j_uuid, observation_dims))
+            edges.append(
+                self._edge("RUNS_JOB__github_core", run_uuid, j_uuid, observation_dims)
+            )
         return jobs or []
 
     @staticmethod
-    def _run_completed_at(r: dict[str, Any], jobs: list[dict[str, Any]] | None) -> tuple[str | None, str]:
+    def _run_completed_at(
+        r: dict[str, Any], jobs: list[dict[str, Any]] | None
+    ) -> tuple[str | None, str]:
         """Establish a run's end time honestly (github-core#46).
 
         GitHub's run payload carries no `completed_at`. Its `updated_at` moves on
@@ -1509,11 +1781,18 @@ class GithubCollector(CollectorBase):
         self,
         full_name: str,
         repo_uuid: Any,
+        git_repo_uuid: Any,
+        repository_github_id: int | str | None,
         repo_dims: dict[str, str],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Emit every branch and tag as a `git_ref`, returning ``{ref_path: uuid}``.
+        """Emit every branch and tag as a neutral `git_core__git_ref`, returning ``{ref_path: uuid}``.
+
+        The ref belongs to the neutral repository (`DECLARES_REF__git_core` from `git_repo_uuid`,
+        identity = repository id + full path via git_core's helper), never to the hosting record;
+        `repo_uuid` (the hosting record) is what the commit OBSERVATION is scoped to. Without a
+        neutral repository (no stable id) nothing is emitted, and the run said so.
 
         The returned map is what makes ruleset resolution and cache scoping possible without a
         second lookup — both need to know whether a ref named elsewhere is one we actually saw.
@@ -1523,47 +1802,76 @@ class GithubCollector(CollectorBase):
         records the move. Detection is a query over history, not a diff the collector keeps.
         """
         gql = self._config.get(full_name)
-        if not gql:
-            # A repos-only scope runs no GraphQL enumeration. Refs are config-layer data and are
+        if not gql or git_repo_uuid is None or repository_github_id is None:
+            # A repos-only scope runs no GraphQL enumeration, and a record without a stable id
+            # has no neutral repository to hang refs off. Refs are config-layer data and are
             # simply not collected in that form — stated rather than silently empty.
             return {}
         git_dims = {**repo_dims, "github.surface": "git"}
         refs, truncated = GithubGraphQLClient.refs(gql)
         uuid_by_ref: dict[str, Any] = {}
         for ref in refs:
-            ref_uuid = git_ref_id(full_name, ref["ref"])
+            ref_uuid = git_ref_id(git_repo_uuid, ref["ref"])
             uuid_by_ref[ref["ref"]] = ref_uuid
             if ref["is_default"]:
                 self._default_refs.add(f"{full_name}#{ref['ref']}")
+            # git_core requires the target's kind whenever a target is named. GitHub's
+            # `__typename` supplies it when the query asked; when it did not, the peel says which:
+            # a target that differs from the resolved commit is a tag object, otherwise the commit.
+            target_type = ref["target_type"]
+            if ref["target_sha"] and not target_type:
+                target_type = (
+                    "tag" if ref["target_sha"] != ref["head_sha"] else "commit"
+                )
             nodes.append(
                 node_envelope(
                     entity_id=ref_uuid,
-                    entity_type="github_core__git_ref",
+                    entity_type="git_core__git_ref",
                     name=ref["name"],
-                    dimensions={**git_dims, "github.ref_type": ref["ref_type"]},
+                    dimensions=_GIT_REF_DIMENSIONS,
                     fields={
-                        "full_name": full_name,
                         "ref": ref["ref"],
                         "ref_type": ref["ref_type"],
                         "name": ref["name"],
                         "head_sha": ref["head_sha"],
                         "target_sha": ref["target_sha"],
-                        "target_type": ref["target_type"],
+                        "target_type": target_type,
                         "is_default": ref["is_default"],
                         "configuration": {},
                         "tags": {},
                     },
                 )
             )
-            edges.append(self._edge("HAS_REF__github_core", repo_uuid, ref_uuid, git_dims))
-            self._emit_commit(full_name, ref.get("commit"), ref_uuid, git_dims, nodes, edges)
+            edges.append(
+                self._edge(
+                    "DECLARES_REF__git_core",
+                    git_repo_uuid,
+                    ref_uuid,
+                    _GIT_RELATION_DIMENSIONS,
+                )
+            )
+            self._emit_commit(
+                full_name,
+                ref.get("commit"),
+                ref_uuid,
+                git_repo_uuid,
+                repo_uuid,
+                repository_github_id,
+                git_dims,
+                nodes,
+                edges,
+            )
         for ref_type, missing in sorted(truncated.items()):
             self.record_warn(
                 _SITE_REFS_TRUNCATED,
                 "REFS_TRUNCATED",
                 f"{full_name}: {missing} {ref_type}(s) beyond the page cap were not collected. "
                 f"Absence of a {ref_type} in this batch is NOT evidence it does not exist.",
-                message_data={"repo": full_name, "ref_type": ref_type, "missing": missing},
+                message_data={
+                    "repo": full_name,
+                    "ref_type": ref_type,
+                    "missing": missing,
+                },
             )
         return uuid_by_ref
 
@@ -1572,32 +1880,114 @@ class GithubCollector(CollectorBase):
         full_name: str,
         commit: dict[str, Any] | None,
         ref_uuid: Any,
+        git_repo_uuid: Any,
+        repo_uuid: Any,
+        repository_github_id: int | str,
         git_dims: dict[str, str],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
-        """One `git_commit` per (repository, head SHA), shared across that repository's refs,
-        plus `POINTS_AT`.
+        """The commit at a ref's head, split into its two halves (github-core#76, rulings 0.1/0.2).
 
-        Repository-scoped, because GitHub's signature verification record is persisted per
-        repository network and a SHA-only node could merge two networks' verdicts. Nothing is
-        emitted when the ref carried no commit slice: a config layer whose commit fields were
-        degraded, or a repos-only scope, yields refs without commits — and a node full of empty
-        strings would read as an unsigned commit by someone nobody could name.
+        The neutral `git_core__git_commit` carries what Git records — object id, dates, author
+        and committer name and email — under the global identity `(hash_algorithm, oid)`, so the
+        same commit observed from any host is ONE node; `STORES_COMMIT__git_core` from the neutral
+        repository records that this repository holds it, `RESOLVES_COMMIT__git_core` from the ref
+        records the peel. What GITHUB observed — the logins it resolved, its signature verdict —
+        is the `github_core__commit_observation`, keyed on host + the repository's stable id +
+        the commit identity, because the verification record is persisted per repository network
+        and one network's verdict must never overwrite another's; `OBSERVES_COMMIT` links it to
+        the commit, `OBSERVED_IN_REPOSITORY` to the hosting record.
+
+        Nothing is emitted when the ref carried no commit slice: a config layer whose commit
+        fields were degraded yields refs without commits — a node full of empty strings would read
+        as an unsigned commit by someone nobody could name.
         """
         if not commit:
             return
-        commit_uuid = git_commit_id(full_name, str(commit["sha"]))
+        oid = str(commit["sha"]).lower()
+        hash_algorithm = next(
+            (algo for algo, n in OID_LENGTH.items() if n == len(oid)), "sha1"
+        )
+        commit_uuid = git_commit_id(hash_algorithm, oid)
         nodes.append(
             node_envelope(
                 entity_id=commit_uuid,
-                entity_type="github_core__git_commit",
-                name=str(commit["sha"])[:12],
-                dimensions=git_dims,
-                fields={**commit, "full_name": full_name, "configuration": {}, "tags": {}},
+                entity_type="git_core__git_commit",
+                name=oid[:12],
+                dimensions=_GIT_COMMIT_DIMENSIONS,
+                fields={
+                    "hash_algorithm": hash_algorithm,
+                    "oid": oid,
+                    "authored_date": commit.get("authored_date"),
+                    "committed_date": commit.get("committed_date"),
+                    "author_name": commit.get("author_name", ""),
+                    "author_email": commit.get("author_email", ""),
+                    "committer_name": commit.get("committer_name", ""),
+                    "committer_email": commit.get("committer_email", ""),
+                },
             )
         )
-        edges.append(self._edge("POINTS_AT__github_core", ref_uuid, commit_uuid, git_dims))
+        edges.append(
+            self._edge(
+                "STORES_COMMIT__git_core",
+                git_repo_uuid,
+                commit_uuid,
+                _GIT_RELATION_DIMENSIONS,
+            )
+        )
+        edges.append(
+            self._edge(
+                "RESOLVES_COMMIT__git_core",
+                ref_uuid,
+                commit_uuid,
+                _GIT_RELATION_DIMENSIONS,
+            )
+        )
+
+        observation_uuid = commit_observation_id(
+            git_dims["github.platform"], repository_github_id, hash_algorithm, oid
+        )
+        nodes.append(
+            node_envelope(
+                entity_id=observation_uuid,
+                entity_type="github_core__commit_observation",
+                name=f"{full_name}@{oid[:12]}",
+                dimensions=git_dims,
+                fields={
+                    "full_name": full_name,
+                    "repository_github_id": (
+                        int(repository_github_id)
+                        if repository_github_id is not None
+                        else None
+                    ),
+                    "hash_algorithm": hash_algorithm,
+                    "sha": oid,
+                    "author_login": commit.get("author_login", ""),
+                    "committer_login": commit.get("committer_login", ""),
+                    "signature_kind": commit.get("signature_kind", ""),
+                    "signature_state": commit.get("signature_state", ""),
+                    "signature_valid": commit.get("signature_valid"),
+                    "signer_login": commit.get("signer_login", ""),
+                    "signed_by_github": bool(commit.get("signed_by_github", False)),
+                    "configuration": {},
+                    "tags": {},
+                },
+            )
+        )
+        edges.append(
+            self._edge(
+                "OBSERVES_COMMIT__github_core", observation_uuid, commit_uuid, git_dims
+            )
+        )
+        edges.append(
+            self._edge(
+                "OBSERVED_IN_REPOSITORY__github_core",
+                observation_uuid,
+                repo_uuid,
+                git_dims,
+            )
+        )
 
     def _emit_rulesets(
         self,
@@ -1642,7 +2032,9 @@ class GithubCollector(CollectorBase):
             # withheld the list" are three different situations with three different fixes, and
             # collapsing them into one blank is how a gap stops being actionable.
             absent_note = (
-                self._bypass_absent_note() if observability["state"] == "unobservable" else ""
+                self._bypass_absent_note()
+                if observability["state"] == "unobservable"
+                else ""
             )
             nodes.append(
                 node_envelope(
@@ -1666,9 +2058,16 @@ class GithubCollector(CollectorBase):
                         "rules": list((detail or {}).get("rules") or ruleset["rules"]),
                         "bypass_observability": observability["state"],
                         "bypass_actor_count": observability["count"],
-                        "html_url": str(((detail or {}).get("_links") or {}).get("html", {}).get("href") or ""),
+                        "html_url": str(
+                            ((detail or {}).get("_links") or {})
+                            .get("html", {})
+                            .get("href")
+                            or ""
+                        ),
                         "configuration": {
-                            "current_user_can_bypass": (detail or {}).get("current_user_can_bypass"),
+                            "current_user_can_bypass": (detail or {}).get(
+                                "current_user_can_bypass"
+                            ),
                             "bypass_source": observability["source"],
                             "bypass_actors_unmodelled": observability["unmodelled"],
                             "bypass_absent_note": absent_note,
@@ -1679,18 +2078,28 @@ class GithubCollector(CollectorBase):
             )
             edges.append(
                 edge_envelope(
-                    entity_id=edge_id("PROTECTS__github_core", rs_uuid, repo_uuid),
-                    edge_type="PROTECTS__github_core",
+                    entity_id=edge_id(
+                        "PROTECTS_REPOSITORY__github_core", rs_uuid, repo_uuid
+                    ),
+                    edge_type="PROTECTS_REPOSITORY__github_core",
                     source_id=rs_uuid,
                     target_id=repo_uuid,
                     dimensions=rules_dims,
-                    properties={"match_kind": "declared"},
+                    properties={},
                 )
             )
-            self._emit_protected_refs(ruleset, rs_uuid, full_name, ref_uuid_by_ref, rules_dims, edges)
-            self._emit_bypass_edges(ruleset, rs_uuid, observability, rules_dims, nodes, edges)
+            self._emit_protected_refs(
+                ruleset, rs_uuid, full_name, ref_uuid_by_ref, rules_dims, edges
+            )
+            self._emit_bypass_edges(
+                ruleset, rs_uuid, observability, rules_dims, nodes, edges
+            )
             self._register_required_checks(
-                owner, rs_uuid, ruleset["name"], list((detail or {}).get("rules") or ruleset["rules"]), ruleset_dims
+                owner,
+                rs_uuid,
+                ruleset["name"],
+                list((detail or {}).get("rules") or ruleset["rules"]),
+                ruleset_dims,
             )
             if observability["state"] == "unobservable":
                 self.record_warn(
@@ -1730,7 +2139,9 @@ class GithubCollector(CollectorBase):
         include = list(conditions.get("include") or [])
         exclude = list(conditions.get("exclude") or [])
         for ref_path, ref_uuid in sorted(ref_uuid_by_ref.items()):
-            if not ref_path.startswith("refs/heads/" if ref_type == "branch" else "refs/tags/"):
+            if not ref_path.startswith(
+                "refs/heads/" if ref_type == "branch" else "refs/tags/"
+            ):
                 continue
             is_default = self._is_default_ref(full_name, ref_path)
             pattern = self._matching_pattern(ref_path, include, is_default)
@@ -1738,12 +2149,12 @@ class GithubCollector(CollectorBase):
                 continue
             edges.append(
                 edge_envelope(
-                    entity_id=edge_id("PROTECTS__github_core", rs_uuid, ref_uuid),
-                    edge_type="PROTECTS__github_core",
+                    entity_id=edge_id("PROTECTS_REF__github_core", rs_uuid, ref_uuid),
+                    edge_type="PROTECTS_REF__github_core",
                     source_id=rs_uuid,
                     target_id=ref_uuid,
                     dimensions=dims,
-                    properties={"match_kind": "resolved", "ref_pattern": pattern},
+                    properties={"ref_pattern": pattern},
                 )
             )
 
@@ -1752,7 +2163,9 @@ class GithubCollector(CollectorBase):
         return f"{full_name}#{ref_path}" in self._default_refs
 
     @staticmethod
-    def _matching_pattern(ref_path: str, patterns: list[str], is_default: bool) -> str | None:
+    def _matching_pattern(
+        ref_path: str, patterns: list[str], is_default: bool
+    ) -> str | None:
         """The first pattern that selects ``ref_path``, or None.
 
         GitHub's condition tokens are matched as tokens, not as text: `~DEFAULT_BRANCH` names
@@ -1785,7 +2198,9 @@ class GithubCollector(CollectorBase):
         )
 
     @staticmethod
-    def _bypass_observability(ruleset: dict[str, Any], detail: dict[str, Any] | None) -> dict[str, Any]:
+    def _bypass_observability(
+        ruleset: dict[str, Any], detail: dict[str, Any] | None
+    ) -> dict[str, Any]:
         """Decide whether the bypass list was actually READ, and by which transport.
 
             observable = REST carried the key  OR  GraphQL returned a non-empty list
@@ -1816,10 +2231,18 @@ class GithubCollector(CollectorBase):
                 "actors": modelled,
                 "unmodelled": unmodelled,
             }
-        return {"state": "unobservable", "count": None, "source": "", "actors": [], "unmodelled": []}
+        return {
+            "state": "unobservable",
+            "count": None,
+            "source": "",
+            "actors": [],
+            "unmodelled": [],
+        }
 
     @staticmethod
-    def _split_bypass_actors(actors: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _split_bypass_actors(
+        actors: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Split bypass actors into the ones this vocabulary has a node for, and the rest.
 
         Apps have a node (`github_app`, keyed by slug). Teams and organization-admin roles do not
@@ -1843,8 +2266,20 @@ class GithubCollector(CollectorBase):
                 continue
             unmodelled.append(
                 {
-                    "actor_type": str(body.get("__typename") or ("OrganizationAdmin" if actor.get("organizationAdmin") else "")),
-                    "name": str(body.get("slug") or body.get("name") or actor.get("repositoryRoleName") or ""),
+                    "actor_type": str(
+                        body.get("__typename")
+                        or (
+                            "OrganizationAdmin"
+                            if actor.get("organizationAdmin")
+                            else ""
+                        )
+                    ),
+                    "name": str(
+                        body.get("slug")
+                        or body.get("name")
+                        or actor.get("repositoryRoleName")
+                        or ""
+                    ),
                     "bypass_mode": str(actor.get("bypassMode") or "").lower(),
                 }
             )
@@ -1907,10 +2342,15 @@ class GithubCollector(CollectorBase):
                 f"Ruleset {ruleset['name']!r}: {len(observability['unmodelled'])} bypass actor(s) "
                 f"have no node type yet (teams, org-admin roles) — counted on the ruleset, not "
                 f"dropped.",
-                message_data={"ruleset": ruleset["name"], "actors": observability["unmodelled"]},
+                message_data={
+                    "ruleset": ruleset["name"],
+                    "actors": observability["unmodelled"],
+                },
             )
 
-    def _ruleset_detail(self, client: GithubClient, full_name: str, rid: int) -> dict[str, Any] | None:
+    def _ruleset_detail(
+        self, client: GithubClient, full_name: str, rid: int
+    ) -> dict[str, Any] | None:
         """REST ruleset detail, fetched once per ruleset per run and cached.
 
         One organization ruleset applies to every repository it matches, so without the cache this
@@ -1934,7 +2374,11 @@ class GithubCollector(CollectorBase):
                 f"RULESET_DETAIL_{exc.status}",
                 f"{full_name}: ruleset {rid} detail unreadable ({exc.status}); rule parameters "
                 f"(including required check names) are missing for it.",
-                message_data={"repo": full_name, "ruleset_id": rid, "status": exc.status},
+                message_data={
+                    "repo": full_name,
+                    "ruleset_id": rid,
+                    "status": exc.status,
+                },
             )
             detail = None
         else:
@@ -1985,7 +2429,14 @@ class GithubCollector(CollectorBase):
                     },
                 )
             )
-            edges.append(self._edge("HAS_ENVIRONMENT__github_core", repo_uuid, env_uuid, deploy_dims))
+            edges.append(
+                self._edge(
+                    "DECLARES_ENVIRONMENT__github_core",
+                    repo_uuid,
+                    env_uuid,
+                    deploy_dims,
+                )
+            )
         return uuid_by_name
 
     def _emit_declared_jobs(
@@ -1998,7 +2449,7 @@ class GithubCollector(CollectorBase):
         env_uuid_by_name: dict[str, Any],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
-            client: GithubClient | None = None,
+        client: GithubClient | None = None,
     ) -> None:
         """Emit one `workflow_job` per job declared in the file, plus its `needs:` graph.
 
@@ -2032,42 +2483,42 @@ class GithubCollector(CollectorBase):
                 }
             )
             job_envelope = node_envelope(
-                    entity_id=job_uuid,
-                    entity_type="github_core__workflow_job",
-                    name=str(job.get("name") or job_key),
-                    dimensions=declared_dims,
-                    fields={
-                        "full_name": full_name,
-                        "workflow_id": workflow_id_int,
-                        "workflow_path": workflow_path,
-                        "job_key": job_key,
-                        "name": str(job.get("name") or job_key),
-                        "runs_on": job.get("runs_on"),
-                        # null when the job declares no block (it inherits the workflow's), {} when
-                        # it declares an empty one (the token gets nothing). Not the same fact.
-                        "permissions": job.get("permissions"),
-                        "if_condition": str(job.get("if") or ""),
-                        "environment": str(job.get("environment") or ""),
-                        "uses": str(job.get("uses") or ""),
-                        "needs": list(job.get("needs") or []),
-                        "checkout_ref": str(job.get("checkout_ref") or ""),
-                        "configuration": {
-                            "steps": job.get("steps") or [],
-                            "cache_steps": job.get("cache_steps") or [],
-                            "action_refs": job.get("action_refs") or [],
-                            # The file's own triggers and permissions, carried onto the job so a
-                            # reader can adjudicate one node without walking up to the workflow:
-                            # "pull_request_target + checks out the PR head" is the question, and
-                            # it spans both levels.
-                            "workflow_triggers": parsed_config.get("triggers") or [],
-                            "workflow_permissions": parsed_config.get("permissions"),
-                            # Which secrets cross into a reusable workflow this job calls — every
-                            # one (`inherit`) or the named few. Names only, never material.
-                            "secrets_inherit": bool(job.get("secrets_inherit")),
-                            "secrets_passed": list(job.get("secrets_passed") or []),
-                        },
-                        "tags": {},
+                entity_id=job_uuid,
+                entity_type="github_core__workflow_job",
+                name=str(job.get("name") or job_key),
+                dimensions=declared_dims,
+                fields={
+                    "full_name": full_name,
+                    "workflow_id": workflow_id_int,
+                    "workflow_path": workflow_path,
+                    "job_key": job_key,
+                    "name": str(job.get("name") or job_key),
+                    "runs_on": job.get("runs_on"),
+                    # null when the job declares no block (it inherits the workflow's), {} when
+                    # it declares an empty one (the token gets nothing). Not the same fact.
+                    "permissions": job.get("permissions"),
+                    "if_condition": str(job.get("if") or ""),
+                    "environment": str(job.get("environment") or ""),
+                    "uses": str(job.get("uses") or ""),
+                    "needs": list(job.get("needs") or []),
+                    "checkout_ref": str(job.get("checkout_ref") or ""),
+                    "configuration": {
+                        "steps": job.get("steps") or [],
+                        "cache_steps": job.get("cache_steps") or [],
+                        "action_refs": job.get("action_refs") or [],
+                        # The file's own triggers and permissions, carried onto the job so a
+                        # reader can adjudicate one node without walking up to the workflow:
+                        # "pull_request_target + checks out the PR head" is the question, and
+                        # it spans both levels.
+                        "workflow_triggers": parsed_config.get("triggers") or [],
+                        "workflow_permissions": parsed_config.get("permissions"),
+                        # Which secrets cross into a reusable workflow this job calls — every
+                        # one (`inherit`) or the named few. Names only, never material.
+                        "secrets_inherit": bool(job.get("secrets_inherit")),
+                        "secrets_passed": list(job.get("secrets_passed") or []),
                     },
+                    "tags": {},
+                },
             )
             nodes.append(job_envelope)
             if job.get("workflow_call"):
@@ -2104,7 +2555,13 @@ class GithubCollector(CollectorBase):
                 )
             # The third-party code this job hands its token to, and how each call is pinned.
             self._emit_used_actions(
-                full_name, job_uuid, job.get("action_refs") or [], declared_dims, nodes, edges, client=client
+                full_name,
+                job_uuid,
+                job.get("action_refs") or [],
+                declared_dims,
+                nodes,
+                edges,
+                client=client,
             )
         # `needs:` — emitted after every job in the file has an id, because a job may need one
         # declared below it.
@@ -2120,7 +2577,9 @@ class GithubCollector(CollectorBase):
                     continue
                 edges.append(
                     edge_envelope(
-                        entity_id=edge_id("DEPENDS_ON_JOB__github_core", source_uuid, target_uuid),
+                        entity_id=edge_id(
+                            "DEPENDS_ON_JOB__github_core", source_uuid, target_uuid
+                        ),
                         edge_type="DEPENDS_ON_JOB__github_core",
                         source_id=source_uuid,
                         target_id=target_uuid,
@@ -2137,7 +2596,7 @@ class GithubCollector(CollectorBase):
         usage_dims: dict[str, str],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
-            client: GithubClient | None = None,
+        client: GithubClient | None = None,
     ) -> None:
         """One `github_action` per distinct path, one `USES_ACTION` per (job, action, ref).
 
@@ -2147,11 +2606,17 @@ class GithubCollector(CollectorBase):
         that repository's fact. The pin lives on the edge — it is a fact about this job's call,
         and the same action is pinned differently by different jobs.
         """
-        action_dims = {k: v for k, v in usage_dims.items() if k not in _REPO_SCOPED_DIMENSION_KEYS}
-        for (action_path, declared_ref), call in sorted(_group_action_calls(action_refs).items()):
+        action_dims = {
+            k: v for k, v in usage_dims.items() if k not in _REPO_SCOPED_DIMENSION_KEYS
+        }
+        for (action_path, declared_ref), call in sorted(
+            _group_action_calls(action_refs).items()
+        ):
             action_uuid = github_action_id(action_path)
             nodes.append(self._action_node(action_uuid, action_path, call, action_dims))
-            properties = self._uses_action_properties(full_name, call, declared_ref, client=client)
+            properties = self._uses_action_properties(
+                full_name, call, declared_ref, client=client
+            )
             edges.append(
                 edge_envelope(
                     entity_id=uses_action_edge_id(job_uuid, action_uuid, declared_ref),
@@ -2165,7 +2630,9 @@ class GithubCollector(CollectorBase):
             self._tally_usage(action_path, properties)
 
     @staticmethod
-    def _action_node(action_uuid: Any, action_path: str, call: dict[str, Any], dims: dict[str, str]) -> dict[str, Any]:
+    def _action_node(
+        action_uuid: Any, action_path: str, call: dict[str, Any], dims: dict[str, str]
+    ) -> dict[str, Any]:
         return node_envelope(
             entity_id=action_uuid,
             entity_type="github_core__github_action",
@@ -2184,7 +2651,11 @@ class GithubCollector(CollectorBase):
         )
 
     def _uses_action_properties(
-        self, full_name: str, call: dict[str, Any], declared_ref: str, client: GithubClient | None = None
+        self,
+        full_name: str,
+        call: dict[str, Any],
+        declared_ref: str,
+        client: GithubClient | None = None,
     ) -> dict[str, Any]:
         """The pin, in three states — see `_resolve_action_pin`."""
         pin_kind, resolved_sha, resolution = self._resolve_action_pin(
@@ -2212,7 +2683,12 @@ class GithubCollector(CollectorBase):
         usage["edges"] += 1
         if not properties["is_pinned"]:
             usage["unpinned"] += 1
-        if properties["resolution"] in ("unobservable", "rest", "unresolved", "not_attempted"):
+        if properties["resolution"] in (
+            "unobservable",
+            "rest",
+            "unresolved",
+            "not_attempted",
+        ):
             usage[properties["resolution"]] += 1
 
     def _resolve_action_pin(
@@ -2243,7 +2719,9 @@ class GithubCollector(CollectorBase):
             # (a caller driving the walk directly) nothing was fetched: `unobservable`.
             if client is None:
                 return PIN_UNRESOLVED, "", "unobservable"
-            return self._resolve_action_ref_via_rest(client, repository_full_name, declared_ref)
+            return self._resolve_action_ref_via_rest(
+                client, repository_full_name, declared_ref
+            )
         tag_sha = refs.get(f"refs/tags/{declared_ref}")
         if tag_sha is not None:
             return PIN_TAG, tag_sha, "in_scope"
@@ -2256,7 +2734,11 @@ class GithubCollector(CollectorBase):
             f"{full_name} uses {repository_full_name}@{declared_ref}, whose repository is in scope "
             f"but carries no tag or branch by that name among the refs collected — a deleted ref, "
             f"or one beyond the ref page cap. Left unresolved rather than guessed.",
-            message_data={"repo": full_name, "action_repo": repository_full_name, "ref": declared_ref},
+            message_data={
+                "repo": full_name,
+                "action_repo": repository_full_name,
+                "ref": declared_ref,
+            },
         )
         return PIN_UNRESOLVED, "", "in_scope"
 
@@ -2308,7 +2790,13 @@ class GithubCollector(CollectorBase):
         workflow_run = parsed_config.get("workflow_run")
         if workflow_run:
             state["pending_triggers"].append(
-                {"envelope": wf_envelope, "wf_uuid": wf_uuid, "repo": full_name, "workflow_run": workflow_run, "dims": dims}
+                {
+                    "envelope": wf_envelope,
+                    "wf_uuid": wf_uuid,
+                    "repo": full_name,
+                    "workflow_run": workflow_run,
+                    "dims": dims,
+                }
             )
 
     def _emit_workflow_calls(self, edges: list[dict[str, Any]]) -> None:
@@ -2322,12 +2810,19 @@ class GithubCollector(CollectorBase):
         callee's repository was not walked; nothing is known and no node is invented).
         """
         state = self._walk_state()
-        counts = {"resolved": 0, "unresolved_in_scope": 0, "out_of_scope": 0, "secrets_inherit": 0}
+        counts = {
+            "resolved": 0,
+            "unresolved_in_scope": 0,
+            "out_of_scope": 0,
+            "secrets_inherit": 0,
+        }
         for pending in state["pending_calls"]:
             verdict = self._resolve_workflow_call(pending, state, edges)
             pending["envelope"]["node"]["configuration"]["call_resolution"] = verdict
             counts[verdict] += 1
-            counts["secrets_inherit"] += int(verdict == "resolved" and bool(pending["secrets_inherit"]))
+            counts["secrets_inherit"] += int(
+                verdict == "resolved" and bool(pending["secrets_inherit"])
+            )
         if state["pending_calls"]:
             self.record_info(
                 _SITE_WORKFLOW_CALLS,
@@ -2339,10 +2834,19 @@ class GithubCollector(CollectorBase):
                 message_data=counts,
             )
 
-    def _resolve_workflow_call(self, pending: dict[str, Any], state: dict[str, Any], edges: list[dict[str, Any]]) -> str:
+    def _resolve_workflow_call(
+        self,
+        pending: dict[str, Any],
+        state: dict[str, Any],
+        edges: list[dict[str, Any]],
+    ) -> str:
         """One pending call → its verdict, emitting the edge when the callee is on the grid."""
         call = pending["call"]
-        callee_repo = pending["caller"] if call["same_repository"] else str(call["repository_full_name"])
+        callee_repo = (
+            pending["caller"]
+            if call["same_repository"]
+            else str(call["repository_full_name"])
+        )
         target = state["by_path"].get((callee_repo, str(call["path"])))
         if target is None:
             if callee_repo not in state["collected_repos"]:
@@ -2352,7 +2856,11 @@ class GithubCollector(CollectorBase):
                 "WORKFLOW_CALL_UNRESOLVED",
                 f"{pending['caller']} calls {callee_repo}/{call['path']}, whose repository is in scope but "
                 f"lists no workflow at that path. No edge; the call stays on the job as text.",
-                message_data={"caller": pending["caller"], "callee_repo": callee_repo, "path": call["path"]},
+                message_data={
+                    "caller": pending["caller"],
+                    "callee_repo": callee_repo,
+                    "path": call["path"],
+                },
             )
             return "unresolved_in_scope"
         edges.append(
@@ -2366,14 +2874,20 @@ class GithubCollector(CollectorBase):
         )
         return "resolved"
 
-    def _calls_workflow_properties(self, pending: dict[str, Any], callee_repo: str) -> dict[str, Any]:
+    def _calls_workflow_properties(
+        self, pending: dict[str, Any], callee_repo: str
+    ) -> dict[str, Any]:
         """The pin (USES_ACTION's grammar; a `./` call is `local`) plus the secrets posture."""
         call = pending["call"]
         if call["pin_kind"] == PIN_LOCAL:
             pin_kind, resolved_sha, resolution = PIN_LOCAL, "", "literal"
         else:
             pin_kind, resolved_sha, resolution = self._resolve_action_pin(
-                pending["caller"], "repository", callee_repo, str(call["ref"]), str(call["pin_kind"])
+                pending["caller"],
+                "repository",
+                callee_repo,
+                str(call["ref"]),
+                str(call["pin_kind"]),
             )
         properties: dict[str, Any] = {
             "declared_ref": str(call["ref"]),
@@ -2402,7 +2916,8 @@ class GithubCollector(CollectorBase):
             emitted += matched
             unresolved_total += len(unresolved)
             pending["envelope"]["node"]["configuration"]["trigger_resolution"] = {
-                "resolved": len(pending["workflow_run"].get("workflows") or []) - len(unresolved),
+                "resolved": len(pending["workflow_run"].get("workflows") or [])
+                - len(unresolved),
                 "unresolved": unresolved,
             }
         if state["pending_triggers"]:
@@ -2411,11 +2926,18 @@ class GithubCollector(CollectorBase):
                 "WORKFLOW_TRIGGERS",
                 f"{len(state['pending_triggers'])} workflow(s) declare `workflow_run`; {emitted} trigger edge(s) "
                 f"emitted, {unresolved_total} declared name(s) matched nothing.",
-                message_data={"declaring": len(state["pending_triggers"]), "edges": emitted, "unresolved": unresolved_total},
+                message_data={
+                    "declaring": len(state["pending_triggers"]),
+                    "edges": emitted,
+                    "unresolved": unresolved_total,
+                },
             )
 
     def _resolve_workflow_trigger(
-        self, pending: dict[str, Any], state: dict[str, Any], edges: list[dict[str, Any]]
+        self,
+        pending: dict[str, Any],
+        state: dict[str, Any],
+        edges: list[dict[str, Any]],
     ) -> tuple[int, list[str]]:
         """One declaring workflow → ``(edges emitted, names that matched nothing)``."""
         block = pending["workflow_run"]
@@ -2453,7 +2975,12 @@ class GithubCollector(CollectorBase):
         return emitted, unresolved
 
     def _register_required_checks(
-        self, owner: str, rs_uuid: Any, ruleset_name: str, rules: list[dict[str, Any]], dims: dict[str, str]
+        self,
+        owner: str,
+        rs_uuid: Any,
+        ruleset_name: str,
+        rules: list[dict[str, Any]],
+        dims: dict[str, str],
     ) -> None:
         """Record every context a ruleset's `required_status_checks` rule names — or that it
         names some and the credential could not read which.
@@ -2464,11 +2991,16 @@ class GithubCollector(CollectorBase):
         """
         state = self._walk_state()
         for rule in rules:
-            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+            if (
+                not isinstance(rule, dict)
+                or rule.get("type") != "required_status_checks"
+            ):
                 continue
             params = rule.get("parameters")
             if not isinstance(params, dict):
-                state["checks_unobservable"].append({"ruleset": ruleset_name, "owner": owner})
+                state["checks_unobservable"].append(
+                    {"ruleset": ruleset_name, "owner": owner}
+                )
                 continue
             for check in params.get("required_status_checks") or []:
                 context = str((check or {}).get("context") or "")
@@ -2480,11 +3012,17 @@ class GithubCollector(CollectorBase):
                 entry["requirements"][str(rs_uuid)] = {
                     "rs_uuid": rs_uuid,
                     "integration_id": (check or {}).get("integration_id"),
-                    "strict": bool(params.get("strict_required_status_checks_policy", False)),
-                    "do_not_enforce_on_create": bool(params.get("do_not_enforce_on_create", False)),
+                    "strict": bool(
+                        params.get("strict_required_status_checks_policy", False)
+                    ),
+                    "do_not_enforce_on_create": bool(
+                        params.get("do_not_enforce_on_create", False)
+                    ),
                 }
 
-    def _emit_status_checks(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    def _emit_status_checks(
+        self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+    ) -> None:
         """One `status_check` per required (owner, context); `REQUIRES_CHECK` from each ruleset
         naming it; `PRODUCES_CHECK` from each workflow in the owner's scope declaring a job whose
         display name is the context (`exact`) or its matrix template — only when the
@@ -2505,7 +3043,13 @@ class GithubCollector(CollectorBase):
                     entity_type="github_core__status_check",
                     name=context,
                     dimensions=node_dims,
-                    fields={"owner_login": owner, "context": context, "name": context, "configuration": {}, "tags": {}},
+                    fields={
+                        "owner_login": owner,
+                        "context": context,
+                        "name": context,
+                        "configuration": {},
+                        "tags": {},
+                    },
                 )
             )
             # A producer edge says "a workflow job produces a check run with this name" — via GitHub
@@ -2517,7 +3061,9 @@ class GithubCollector(CollectorBase):
             actions_may_produce = False
             for requirement in entry["requirements"].values():
                 integration = requirement["integration_id"]
-                actions_may_produce |= integration is None or integration == _GITHUB_ACTIONS_INTEGRATION_ID
+                actions_may_produce |= (
+                    integration is None or integration == _GITHUB_ACTIONS_INTEGRATION_ID
+                )
                 edges.append(
                     self._edge(
                         "REQUIRES_CHECK__github_core",
@@ -2527,7 +3073,9 @@ class GithubCollector(CollectorBase):
                         {
                             "integration_id": integration,
                             "strict": requirement["strict"],
-                            "do_not_enforce_on_create": requirement["do_not_enforce_on_create"],
+                            "do_not_enforce_on_create": requirement[
+                                "do_not_enforce_on_create"
+                            ],
                         },
                     )
                 )
@@ -2562,7 +3110,9 @@ class GithubCollector(CollectorBase):
                 },
             )
 
-    def _check_producers(self, owner: str, context: str, check_uuid: Any, edges: list[dict[str, Any]]) -> int:
+    def _check_producers(
+        self, owner: str, context: str, check_uuid: Any, edges: list[dict[str, Any]]
+    ) -> int:
         """`PRODUCES_CHECK` from every workflow (in the owner's scope) with a job named for the context."""
         emitted = 0
         seen: set[tuple[str, str]] = set()
@@ -2579,7 +3129,11 @@ class GithubCollector(CollectorBase):
                     job["wf_uuid"],
                     check_uuid,
                     job["dims"],
-                    {"job_key": job["job_key"], "job_name": job["job_name"], "confidence": confidence},
+                    {
+                        "job_key": job["job_key"],
+                        "job_name": job["job_name"],
+                        "confidence": confidence,
+                    },
                 )
             )
             emitted += 1
@@ -2608,7 +3162,8 @@ class GithubCollector(CollectorBase):
 
     def _action_ref_state(self) -> dict[str, Any]:
         """The run's REST-resolution cache and counters, created on first touch (same reason as
-        `_usage_tally`: the walk is driven directly by tests that never call `run()`)."""
+        `_usage_tally`: the walk is driven directly by tests that never call `run()`).
+        """
         state = getattr(self, "_action_ref_resolution", None)
         if state is None:
             state = {"cache": {}, "lookups": 0, "skipped": 0}
@@ -2640,7 +3195,9 @@ class GithubCollector(CollectorBase):
             result: tuple[str, str, str] = (PIN_UNRESOLVED, "", "not_attempted")
             state["cache"][key] = result
             return result
-        if not _SAFE_REPOSITORY_RE.match(repository_full_name) or not _SAFE_REF_RE.match(declared_ref):
+        if not _SAFE_REPOSITORY_RE.match(
+            repository_full_name
+        ) or not _SAFE_REF_RE.match(declared_ref):
             # Not a shape GitHub itself would accept in `uses:`; it does not exist as written, and it
             # never becomes a request path.
             self.record_warn(
@@ -2657,7 +3214,9 @@ class GithubCollector(CollectorBase):
         result = (PIN_UNRESOLVED, "", "unresolved")
         for pin_kind, prefix in ((PIN_TAG, "tags"), (PIN_BRANCH, "heads")):
             try:
-                payload = client.get(f"/repos/{repository_full_name}/git/ref/{prefix}/{encoded}")
+                payload = client.get(
+                    f"/repos/{repository_full_name}/git/ref/{prefix}/{encoded}"
+                )
             except GithubAPIError as exc:
                 if exc.status == 404:
                     continue
@@ -2667,7 +3226,11 @@ class GithubCollector(CollectorBase):
                     f"{repository_full_name}@{declared_ref}: ref lookup refused or failed ({exc.status}); the pin "
                     f"kind and resolved commit are NOT observable for this action, which is not evidence it is "
                     f"unpinned.",
-                    message_data={"action_repo": repository_full_name, "ref": declared_ref, "status": exc.status},
+                    message_data={
+                        "action_repo": repository_full_name,
+                        "ref": declared_ref,
+                        "status": exc.status,
+                    },
                 )
                 result = (PIN_UNRESOLVED, "", "unobservable")
                 break
@@ -2684,7 +3247,10 @@ class GithubCollector(CollectorBase):
                         f"{repository_full_name}@{declared_ref}: the tag is annotated and its commit could not be "
                         f"read (refused, failed, or nested deeper than {_TAG_PEEL_MAX_DEPTH} tag objects); "
                         f"pin kind is `tag`, resolved commit NOT observable.",
-                        message_data={"action_repo": repository_full_name, "ref": declared_ref},
+                        message_data={
+                            "action_repo": repository_full_name,
+                            "ref": declared_ref,
+                        },
                     )
                     result = (PIN_TAG, "", "unobservable")
                     break
@@ -2694,7 +3260,9 @@ class GithubCollector(CollectorBase):
         state["cache"][key] = result
         return result
 
-    def _peel_annotated_tag(self, client: GithubClient, repository_full_name: str, tag_sha: str) -> str | None:
+    def _peel_annotated_tag(
+        self, client: GithubClient, repository_full_name: str, tag_sha: str
+    ) -> str | None:
         """The COMMIT behind an annotated tag object, or None when it cannot be established.
 
         A tag object may point at another tag object; peel until `object.type == "commit"`, at most
@@ -2834,7 +3402,10 @@ class GithubCollector(CollectorBase):
                     self._edge(
                         # Account -> suite: the push is what happened, and the account is
                         # what initiated it. The passive form had the initiator as target.
-                        "TRIGGERED_EVALUATION__github_core", actor_uuid, suite_uuid, dims,
+                        "TRIGGERED_EVALUATION__github_core",
+                        actor_uuid,
+                        suite_uuid,
+                        dims,
                         properties={"actor_id": suite.get("actor_id")},
                     )
                 )
@@ -2842,7 +3413,10 @@ class GithubCollector(CollectorBase):
             if ref_uuid is not None:
                 edges.append(
                     self._edge(
-                        "EVALUATED_ON_REF__github_core", suite_uuid, ref_uuid, dims,
+                        "EVALUATED_ON_REF__github_core",
+                        suite_uuid,
+                        ref_uuid,
+                        dims,
                         properties={
                             "before_sha": str(suite.get("before_sha") or ""),
                             "after_sha": str(suite.get("after_sha") or ""),
@@ -2870,7 +3444,11 @@ class GithubCollector(CollectorBase):
                 _SITE_RULE_SUITE_FOUND,
                 "RULE_SUITES_BYPASS",
                 f"{len(suites)} bypass event(s) on {full_name} in the last {_RULE_SUITE_WINDOW}.",
-                message_data={"repo": full_name, "count": len(suites), "window": _RULE_SUITE_WINDOW},
+                message_data={
+                    "repo": full_name,
+                    "count": len(suites),
+                    "window": _RULE_SUITE_WINDOW,
+                },
             )
 
     def _bypassed_rules(
@@ -2882,7 +3460,9 @@ class GithubCollector(CollectorBase):
         around, which is what turns the event from a log line into a finding.
         """
         try:
-            detail = client.get(f"/repos/{full_name}/rulesets/rule-suites/{suite['id']}")
+            detail = client.get(
+                f"/repos/{full_name}/rulesets/rule-suites/{suite['id']}"
+            )
         except GithubAPIError:
             return []
         out: list[dict[str, Any]] = []
@@ -2895,7 +3475,9 @@ class GithubCollector(CollectorBase):
                     "rule_type": evaluation.get("rule_type"),
                     "enforcement": evaluation.get("enforcement"),
                     "result": evaluation.get("result"),
-                    "ruleset_id": source.get("id") if source.get("type") == "ruleset" else None,
+                    "ruleset_id": (
+                        source.get("id") if source.get("type") == "ruleset" else None
+                    ),
                     "ruleset_name": source.get("name"),
                     "details": evaluation.get("details"),
                 }
@@ -2914,14 +3496,15 @@ class GithubCollector(CollectorBase):
     ) -> None:
         """Collect stored cache entries and scope each to the ref that produced it.
 
-        The `SCOPED_TO` edge is emitted only when the entry's ref is one we observed. Its absence
+        The `SCOPED_TO_REF` edge is emitted only when the entry's ref is one we observed. Its absence
         is usually the interesting case rather than a gap: an entry scoped to `refs/pull/42/merge`
         came from a pull request, and a cache written outside a branch and restored inside it is
         the shape five incidents share.
         """
         try:
             payload = client.get(
-                f"/repos/{full_name}/actions/caches", params={"per_page": str(_CACHE_LIMIT_PER_REPO)}
+                f"/repos/{full_name}/actions/caches",
+                params={"per_page": str(_CACHE_LIMIT_PER_REPO)},
             )
         except GithubAPIError as exc:
             if exc.status in (403, 404):
@@ -2958,19 +3541,26 @@ class GithubCollector(CollectorBase):
                     },
                 )
             )
-            edges.append(self._edge("HAS_CACHE__github_core", repo_uuid, cache_uuid, dims))
+            edges.append(
+                self._edge("STORES_CACHE__github_core", repo_uuid, cache_uuid, dims)
+            )
             ref_uuid = ref_uuid_by_ref.get(ref)
             if ref_uuid is not None:
-                edges.append(self._edge("SCOPED_TO__github_core", cache_uuid, ref_uuid, dims))
+                edges.append(
+                    self._edge("SCOPED_TO_REF__github_core", cache_uuid, ref_uuid, dims)
+                )
         if total > len(entries):
             self.record_warn(
                 _SITE_CACHES_TRUNCATED,
                 "CACHES_TRUNCATED",
                 f"{full_name}: collected {len(entries)} of {total} cache entries (most recently "
                 f"accessed first). Absence of an entry in this batch is not evidence it is gone.",
-                message_data={"repo": full_name, "collected": len(entries), "total": total},
+                message_data={
+                    "repo": full_name,
+                    "collected": len(entries),
+                    "total": total,
+                },
             )
-
 
     # ---------- outputs (github-core#31): releases, artifacts, packages ----------
 
@@ -3047,11 +3637,21 @@ class GithubCollector(CollectorBase):
                     },
                 )
             )
-            edges.append(self._edge("PUBLISHES_RELEASE__github_core", repo_uuid, rel_uuid, dims))
-            ref_uuid = ref_uuid_by_ref.get(f"refs/tags/{tag_name}") if tag_name else None
+            edges.append(
+                self._edge("PUBLISHES_RELEASE__github_core", repo_uuid, rel_uuid, dims)
+            )
+            ref_uuid = (
+                ref_uuid_by_ref.get(f"refs/tags/{tag_name}") if tag_name else None
+            )
             if ref_uuid is not None:
                 edges.append(
-                    self._edge("TARGETS_REF__github_core", rel_uuid, ref_uuid, dims, properties={"tag_name": tag_name})
+                    self._edge(
+                        "TARGETS_REF__github_core",
+                        rel_uuid,
+                        ref_uuid,
+                        dims,
+                        properties={"tag_name": tag_name},
+                    )
                 )
             target_sha = str(rel.get("target_sha") or "")
             for run in run_index:
@@ -3060,8 +3660,14 @@ class GithubCollector(CollectorBase):
                     continue
                 edges.append(
                     self._edge(
-                        "BUILDS_RELEASE__github_core", run["uuid"], rel_uuid, dims,
-                        properties={"match_kind": match_kind, "head_sha": run["head_sha"]},
+                        "BUILDS_RELEASE__github_core",
+                        run["uuid"],
+                        rel_uuid,
+                        dims,
+                        properties={
+                            "match_kind": match_kind,
+                            "head_sha": run["head_sha"],
+                        },
                     )
                 )
         if missing > 0:
@@ -3070,12 +3676,18 @@ class GithubCollector(CollectorBase):
                 "RELEASES_TRUNCATED",
                 f"{full_name}: collected {len(releases)} of {len(releases) + missing} releases (newest "
                 f"first). Absence of a release in this batch is not evidence it was deleted.",
-                message_data={"repo": full_name, "collected": len(releases), "missing": missing},
+                message_data={
+                    "repo": full_name,
+                    "collected": len(releases),
+                    "missing": missing,
+                },
             )
         return _OBSERVED
 
     @staticmethod
-    def _release_match_kind(run: dict[str, Any], tag_name: str, target_sha: str) -> str | None:
+    def _release_match_kind(
+        run: dict[str, Any], tag_name: str, target_sha: str
+    ) -> str | None:
         """How a run relates to a release as its producer, or ``None`` when it does not.
 
         `tag_ref` — the run's `head_branch` IS the tag: a tag-push build, the strongest signal
@@ -3122,7 +3734,8 @@ class GithubCollector(CollectorBase):
         """
         try:
             payload = client.get(
-                f"/repos/{full_name}/actions/artifacts", params={"per_page": str(_ARTIFACT_LIMIT_PER_REPO)}
+                f"/repos/{full_name}/actions/artifacts",
+                params={"per_page": str(_ARTIFACT_LIMIT_PER_REPO)},
             )
         except GithubAPIError as exc:
             if exc.status in (403, 404):
@@ -3147,10 +3760,19 @@ class GithubCollector(CollectorBase):
             expired += int(bool(entry.get("expired", False)))
             nodes.append(self._artifact_node(full_name, entry, in_batch, dims))
             art_uuid = actions_artifact_id(full_name, entry["id"])
-            edges.append(self._edge("STORES_ARTIFACT__github_core", repo_uuid, art_uuid, dims))
+            edges.append(
+                self._edge("STORES_ARTIFACT__github_core", repo_uuid, art_uuid, dims)
+            )
             if in_batch:
                 linked += 1
-                edges.append(self._edge("UPLOADS_ARTIFACT__github_core", run_uuid_by_id[run_id_int], art_uuid, dims))
+                edges.append(
+                    self._edge(
+                        "UPLOADS_ARTIFACT__github_core",
+                        run_uuid_by_id[run_id_int],
+                        art_uuid,
+                        dims,
+                    )
+                )
         if entries:
             self.record_info(
                 _SITE_ARTIFACTS_COLLECTED,
@@ -3171,7 +3793,11 @@ class GithubCollector(CollectorBase):
                 "ARTIFACTS_TRUNCATED",
                 f"{full_name}: collected {len(entries)} of {total} artifacts (newest first). Absence of an "
                 f"artifact in this batch is not evidence it is gone or expired.",
-                message_data={"repo": full_name, "collected": len(entries), "total": total},
+                message_data={
+                    "repo": full_name,
+                    "collected": len(entries),
+                    "total": total,
+                },
             )
         return _OBSERVED
 
@@ -3201,48 +3827,83 @@ class GithubCollector(CollectorBase):
         when placed, is routed here for exactly that reason.
         """
         if owner is None:
-            return _UNOBSERVABLE, "packages are an account surface; a repos-only scope names no account"
+            return (
+                _UNOBSERVABLE,
+                "packages are an account surface; a repos-only scope names no account",
+            )
         pat_client = self._pat_client
         listing_client = pat_client or client
         account_uuid = account_id(owner)
-        dims = {"github.platform": "github.com", "github.owner": owner, "github.surface": "packages",
-                "github.observation": "execution"}
+        dims = {
+            "github.platform": "github.com",
+            "github.owner": owner,
+            "github.surface": "packages",
+            "github.observation": "execution",
+        }
         unobservable: dict[str, str] = {}
         collected = 0
         filtered_out = 0
         for package_type in _PACKAGE_TYPES:
-            packages, outcome, scope = self._list_packages(listing_client, owner, package_type)
+            packages, outcome, scope = self._list_packages(
+                listing_client, owner, package_type
+            )
             if outcome:
                 unobservable[package_type] = outcome
             elif not packages and pat_client is None:
                 # 200 [] from a credential the description says cannot use the endpoint.
-                unobservable[package_type] = "empty answer under an App credential, which GitHub does not enable for this endpoint"
+                unobservable[package_type] = (
+                    "empty answer under an App credential, which GitHub does not enable for this endpoint"
+                )
             for pkg in packages:
                 linked = str((pkg.get("repository") or {}).get("full_name") or "")
                 if repo_filtered and linked not in self._repo_envelopes:
                     filtered_out += 1
                     continue
                 collected += 1
-                self._emit_package(listing_client, owner, scope, account_uuid, package_type, pkg, dims, nodes, edges)
+                self._emit_package(
+                    listing_client,
+                    owner,
+                    scope,
+                    account_uuid,
+                    package_type,
+                    pkg,
+                    dims,
+                    nodes,
+                    edges,
+                )
         if collected:
             self.record_info(
-                _SITE_PACKAGES_COLLECTED, "PACKAGES_COLLECTED",
+                _SITE_PACKAGES_COLLECTED,
+                "PACKAGES_COLLECTED",
                 f"{collected} package(s) under {owner}.",
-                message_data={"owner": owner, "count": collected, "unobservable_types": sorted(unobservable)},
+                message_data={
+                    "owner": owner,
+                    "count": collected,
+                    "unobservable_types": sorted(unobservable),
+                },
             )
-        note = self._packages_note(unobservable, filtered_out, app_only=pat_client is None)
+        note = self._packages_note(
+            unobservable, filtered_out, app_only=pat_client is None
+        )
         if not unobservable:
             return _OBSERVED, note
         self.record_warn(
-            _SITE_PACKAGES_UNOBSERVABLE, "PACKAGES_UNOBSERVABLE",
+            _SITE_PACKAGES_UNOBSERVABLE,
+            "PACKAGES_UNOBSERVABLE",
             f"Packages NOT observed for {owner} on {len(unobservable)} of {len(_PACKAGE_TYPES)} package "
             f"type(s) — which is not the same as none published. {note}",
-            message_data={"owner": owner, "unobservable": unobservable, "collected": collected},
+            message_data={
+                "owner": owner,
+                "unobservable": unobservable,
+                "collected": collected,
+            },
         )
         return _UNOBSERVABLE, note
 
     @staticmethod
-    def _packages_note(unobservable: dict[str, str], filtered_out: int, *, app_only: bool) -> str:
+    def _packages_note(
+        unobservable: dict[str, str], filtered_out: int, *, app_only: bool
+    ) -> str:
         """The operator-facing qualifier for the packages state: what was not seen, and why."""
         parts = [f"{t}: {why}" for t, why in unobservable.items()]
         if filtered_out:
@@ -3267,22 +3928,40 @@ class GithubCollector(CollectorBase):
         refusal alongside 403/404 because it is what the endpoint returns an App installation
         token for `container` — measured, not assumed.
         """
-        params = {"package_type": package_type, "per_page": str(_PACKAGE_LIMIT_PER_TYPE)}
+        params = {
+            "package_type": package_type,
+            "per_page": str(_PACKAGE_LIMIT_PER_TYPE),
+        }
         for scope in ("orgs", "users"):
             try:
-                return client.get_paginated(f"/{scope}/{owner}/packages", params=params, max_pages=1), "", scope
+                return (
+                    client.get_paginated(
+                        f"/{scope}/{owner}/packages", params=params, max_pages=1
+                    ),
+                    "",
+                    scope,
+                )
             except GithubAPIError as exc:
                 if exc.status == 404 and scope == "orgs":
                     continue  # a user account: fall through to the user path
                 if exc.status in (400, 403, 404):
                     self.record_warn(
-                        _SITE_PACKAGES_UNREADABLE, f"PACKAGES_UNREADABLE_{exc.status}",
+                        _SITE_PACKAGES_UNREADABLE,
+                        f"PACKAGES_UNREADABLE_{exc.status}",
                         f"Package listing ({package_type}) refused for {owner}: {exc.status} {exc.body[:120]}",
-                        message_data={"owner": owner, "package_type": package_type, "status": exc.status},
+                        message_data={
+                            "owner": owner,
+                            "package_type": package_type,
+                            "status": exc.status,
+                        },
                     )
                     return [], f"listing answered {exc.status}", scope
                 raise
-        return [], "listing answered 404 on both the organization and user paths", "users"
+        return (
+            [],
+            "listing answered 404 on both the organization and user paths",
+            "users",
+        )
 
     def _emit_package(
         self,
@@ -3327,12 +4006,21 @@ class GithubCollector(CollectorBase):
             )
         )
         edges.append(
-            self._edge("PUBLISHES_PACKAGE__github_core", account_uuid, pkg_uuid, dims, properties={"link_kind": "owner"})
+            self._edge(
+                "PUBLISHES_PACKAGE__github_core",
+                account_uuid,
+                pkg_uuid,
+                dims,
+                properties={"link_kind": "owner"},
+            )
         )
         if linked_repo in self._repo_envelopes:
             edges.append(
                 self._edge(
-                    "PUBLISHES_PACKAGE__github_core", repository_id(linked_repo), pkg_uuid, dims,
+                    "PUBLISHES_PACKAGE__github_core",
+                    repository_id(linked_repo),
+                    pkg_uuid,
+                    dims,
                     properties={"link_kind": "repository"},
                 )
             )
@@ -3351,20 +4039,42 @@ class GithubCollector(CollectorBase):
         except GithubAPIError as exc:
             if exc.status in (400, 403, 404):
                 self.record_warn(
-                    _SITE_PACKAGE_VERSIONS_DEGRADED, f"PACKAGE_VERSIONS_UNREADABLE_{exc.status}",
+                    _SITE_PACKAGE_VERSIONS_DEGRADED,
+                    f"PACKAGE_VERSIONS_UNREADABLE_{exc.status}",
                     f"Versions of {owner}/{name} ({package_type}) refused: {exc.status} {exc.body[:120]}",
-                    message_data={"owner": owner, "package": name, "package_type": package_type, "status": exc.status},
+                    message_data={
+                        "owner": owner,
+                        "package": name,
+                        "package_type": package_type,
+                        "status": exc.status,
+                    },
                 )
                 return
             raise
         for version in versions:
-            self._emit_package_version(owner, package_type, name, pkg_uuid, version, candidate_runs, dims, nodes, edges)
+            self._emit_package_version(
+                owner,
+                package_type,
+                name,
+                pkg_uuid,
+                version,
+                candidate_runs,
+                dims,
+                nodes,
+                edges,
+            )
         if version_count is not None and int(version_count) > len(versions):
             self.record_warn(
-                _SITE_PACKAGE_VERSIONS_TRUNCATED, "PACKAGE_VERSIONS_TRUNCATED",
+                _SITE_PACKAGE_VERSIONS_TRUNCATED,
+                "PACKAGE_VERSIONS_TRUNCATED",
                 f"{owner}/{name}: collected {len(versions)} of {version_count} versions (newest first). "
                 f"Absence of a version in this batch is not evidence it was deleted.",
-                message_data={"owner": owner, "package": name, "collected": len(versions), "total": version_count},
+                message_data={
+                    "owner": owner,
+                    "package": name,
+                    "collected": len(versions),
+                    "total": version_count,
+                },
             )
 
     def _emit_package_version(
@@ -3382,7 +4092,9 @@ class GithubCollector(CollectorBase):
         """One version node, its containment edge, and — when a tag says so — the run that built it."""
         version_name = str(version.get("name") or "")
         ver_uuid = package_version_id(owner, package_type, name, version["id"])
-        container_tags = list(((version.get("metadata") or {}).get("container") or {}).get("tags") or [])
+        container_tags = list(
+            ((version.get("metadata") or {}).get("container") or {}).get("tags") or []
+        )
         nodes.append(
             node_envelope(
                 entity_id=ver_uuid,
@@ -3405,7 +4117,11 @@ class GithubCollector(CollectorBase):
                 },
             )
         )
-        edges.append(self._edge("PUBLISHES_PACKAGE_VERSION__github_core", pkg_uuid, ver_uuid, dims))
+        edges.append(
+            self._edge(
+                "PUBLISHES_PACKAGE_VERSION__github_core", pkg_uuid, ver_uuid, dims
+            )
+        )
         # BUILDS_PACKAGE_VERSION, derived from the `sha-<short>` tag convention. Its ABSENCE is the
         # corpus's finding — but only once `match_kind` has been read, because a version tagged any
         # other way carries no edge for a reason that is a limit of this derivation, not evidence.
@@ -3413,11 +4129,16 @@ class GithubCollector(CollectorBase):
         # to the registry can tag a digest `sha-<anything>`. The edge says `match_kind: tag_sha`
         # and `attested: null` so a reader knows that; an attestation surface is what upgrades it.
         shas = {
-            tag[len(_CONTAINER_TAG_SHA_PREFIX):].lower()
+            tag[len(_CONTAINER_TAG_SHA_PREFIX) :].lower()
             for tag in container_tags
             if tag.startswith(_CONTAINER_TAG_SHA_PREFIX)
-            and _CONTAINER_TAG_SHA_MIN_HEX <= len(tag) - len(_CONTAINER_TAG_SHA_PREFIX) <= 40
-            and all(c in "0123456789abcdef" for c in tag[len(_CONTAINER_TAG_SHA_PREFIX):].lower())
+            and _CONTAINER_TAG_SHA_MIN_HEX
+            <= len(tag) - len(_CONTAINER_TAG_SHA_PREFIX)
+            <= 40
+            and all(
+                c in "0123456789abcdef"
+                for c in tag[len(_CONTAINER_TAG_SHA_PREFIX) :].lower()
+            )
         }
         if not shas:
             return
@@ -3426,12 +4147,18 @@ class GithubCollector(CollectorBase):
             if head_sha and any(head_sha.startswith(short) for short in shas):
                 edges.append(
                     self._edge(
-                        "BUILDS_PACKAGE_VERSION__github_core", run["uuid"], ver_uuid, dims,
+                        "BUILDS_PACKAGE_VERSION__github_core",
+                        run["uuid"],
+                        ver_uuid,
+                        dims,
                         properties={"match_kind": "tag_sha", "attested": None},
                     )
                 )
+
     @staticmethod
-    def _artifact_node(full_name: str, entry: dict[str, Any], in_batch: bool, dims: dict[str, str]) -> dict[str, Any]:
+    def _artifact_node(
+        full_name: str, entry: dict[str, Any], in_batch: bool, dims: dict[str, str]
+    ) -> dict[str, Any]:
         """One artifact envelope from a listing item. `run_in_batch` says whether the
         UPLOADS_ARTIFACT edge exists or the join is by `run_id` against the grid."""
         run = entry.get("workflow_run") or {}
@@ -3484,7 +4211,8 @@ class GithubCollector(CollectorBase):
                 "No App credential in the envelope: the installed-App inventory is an App-only "
                 "surface and was not collected. This is not an observation that no Apps are "
                 "installed — "
-                + (self._auth.absent_note(PREFER_APP) or "add an App to see it") + ".",
+                + (self._auth.absent_note(PREFER_APP) or "add an App to see it")
+                + ".",
                 message_data={"held": self._auth.held},
             )
             return
@@ -3508,7 +4236,9 @@ class GithubCollector(CollectorBase):
         if not installations:
             try:
                 installations = self._auth.installations()
-                scope = "account" if scope == "account" and owner is None else "self_only"
+                scope = (
+                    "account" if scope == "account" and owner is None else "self_only"
+                )
             except GithubAppAuthError as exc:
                 self.record_warn(
                     _SITE_INSTALLATIONS_UNREACHABLE,
@@ -3532,7 +4262,11 @@ class GithubCollector(CollectorBase):
                 node_envelope(
                     entity_id=inst_uuid,
                     entity_type="github_core__app_installation",
-                    name=f"{slug} @ {account_login}" if slug and account_login else str(inst_id),
+                    name=(
+                        f"{slug} @ {account_login}"
+                        if slug and account_login
+                        else str(inst_id)
+                    ),
                     dimensions=apps_dims,
                     fields={
                         "installation_id": inst_id,
@@ -3540,7 +4274,9 @@ class GithubCollector(CollectorBase):
                         "app_slug": slug,
                         "account_login": account_login,
                         "target_type": str(installation.get("target_type") or ""),
-                        "repository_selection": str(installation.get("repository_selection") or ""),
+                        "repository_selection": str(
+                            installation.get("repository_selection") or ""
+                        ),
                         "permissions": dict(installation.get("permissions") or {}),
                         "events": list(installation.get("events") or []),
                         "suspended": installation.get("suspended_at") is not None,
@@ -3573,10 +4309,22 @@ class GithubCollector(CollectorBase):
                             },
                         )
                     )
-                edges.append(self._edge("HAS_INSTALLATION__github_core", app_uuid, inst_uuid, apps_dims))
+                edges.append(
+                    self._edge(
+                        "REGISTERS_INSTALLATION__github_core",
+                        app_uuid,
+                        inst_uuid,
+                        apps_dims,
+                    )
+                )
             if account_login:
                 edges.append(
-                    self._edge("INSTALLED_ON__github_core", inst_uuid, account_id(account_login), apps_dims)
+                    self._edge(
+                        "INSTALLED_ON_ACCOUNT__github_core",
+                        inst_uuid,
+                        account_id(account_login),
+                        apps_dims,
+                    )
                 )
         self.record_info(
             _SITE_INSTALLATIONS_COLLECTED,
@@ -3767,7 +4515,7 @@ class GithubCollector(CollectorBase):
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
-        """Emit a github_app node (deduped, singleton by slug) + ENABLED_ON edge
+        """Emit a github_app node (deduped, singleton by slug) + ENABLED_ON_REPOSITORY edge
         for a platform app detected enabled on ``full_name``."""
         apps_dims = {**repo_dims, "github.surface": "apps"}
         app_uuid = github_app_id(app_meta["slug"])
@@ -3794,7 +4542,11 @@ class GithubCollector(CollectorBase):
                     },
                 )
             )
-        edges.append(self._edge("ENABLED_ON__github_core", app_uuid, repo_uuid, apps_dims))
+        edges.append(
+            self._edge(
+                "ENABLED_ON_REPOSITORY__github_core", app_uuid, repo_uuid, apps_dims
+            )
+        )
         self.record_info(
             _SITE_DEPENDABOT_APP,
             "GITHUB_APP_ENABLED",
@@ -3830,7 +4582,9 @@ class GithubCollector(CollectorBase):
                 return client.get(f"/orgs/{owner}")
             raise
 
-    def _fetch_run_window(self, client: GithubClient, full_name: str, run_limit: int) -> list[dict[str, Any]]:
+    def _fetch_run_window(
+        self, client: GithubClient, full_name: str, run_limit: int
+    ) -> list[dict[str, Any]]:
         """Run-list fetch per req-github-core-collector-3.
 
         First population (no on-grid runs): the latest `run_limit` runs.
@@ -3842,9 +4596,9 @@ class GithubCollector(CollectorBase):
         from django.db.models import Max
         from tap_plugin.github_core.models import GithubActionsRun
 
-        max_ts = GithubActionsRun.objects.filter(full_name=full_name).aggregate(Max("run_started_at"))[
-            "run_started_at__max"
-        ]
+        max_ts = GithubActionsRun.objects.filter(full_name=full_name).aggregate(
+            Max("run_started_at")
+        )["run_started_at__max"]
         if max_ts is None:
             # First population — cap at run_limit, one page is enough.
             return client.get_paginated(
@@ -3918,7 +4672,9 @@ class GithubCollector(CollectorBase):
             refreshed.append(payload)
         return refreshed
 
-    def _fetch_run_jobs(self, client: GithubClient, full_name: str, run_id_int: int) -> list[dict[str, Any]] | None:
+    def _fetch_run_jobs(
+        self, client: GithubClient, full_name: str, run_id_int: int
+    ) -> list[dict[str, Any]] | None:
         """Fetch the jobs list for a specific run, or `None` when it was not observable.
 
         Per GitHub docs the endpoint documents only `200 - OK`; no 404
@@ -3934,7 +4690,9 @@ class GithubCollector(CollectorBase):
         has to be able to tell them apart.
         """
         try:
-            return client.get_paginated(f"/repos/{full_name}/actions/runs/{run_id_int}/jobs", item_path="jobs")
+            return client.get_paginated(
+                f"/repos/{full_name}/actions/runs/{run_id_int}/jobs", item_path="jobs"
+            )
         except GithubAPIError as exc:
             if exc.status == 404:
                 self.record_warn(
@@ -3947,7 +4705,9 @@ class GithubCollector(CollectorBase):
                 return None
             raise
 
-    def _fetch_workflow_config(self, client: GithubClient, full_name: str, path: str) -> tuple[str, dict[str, Any]]:
+    def _fetch_workflow_config(
+        self, client: GithubClient, full_name: str, path: str
+    ) -> tuple[str, dict[str, Any]]:
         """Fetch workflow YAML via Contents API; return (raw, parsed configuration)."""
         if not path:
             return "", parse_workflow_yaml("")
@@ -3985,7 +4745,10 @@ class GithubCollector(CollectorBase):
                 "LINK_RULE_SKIPPED",
                 f"Link rule {rule.rule_name!r} skipped: type {rule.missing_entity_type!r} is not "
                 f"installed in this composition (req-github-core-grid-links-8).",
-                message_data={"rule": rule.rule_name, "missing_entity_type": rule.missing_entity_type},
+                message_data={
+                    "rule": rule.rule_name,
+                    "missing_entity_type": rule.missing_entity_type,
+                },
             )
         # Multi-candidate failures are warnings per req-github-core-grid-links-3.
         for res in enrichment.resolutions:

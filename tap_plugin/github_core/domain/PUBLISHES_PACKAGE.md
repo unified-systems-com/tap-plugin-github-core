@@ -47,5 +47,5 @@ From the package listing (`organization:packages:read`), which is `unobservable`
 
 - **Source:** `github_core__github_account` (always, `link_kind: owner`) or `github_core__github_repository` (when GitHub links one, `link_kind: repository`).
 - **Target:** `github_core__github_package` — the package.
-- **Dimensions:** `github.platform`, `github.surface: packages`, `github.observation: declaration` — containment sourced on a declared object, following `HAS_CACHE`.
+- **Dimensions:** `github.platform`, `github.surface: packages`, `github.observation: declaration` — containment sourced on a declared object, following `STORES_CACHE`.
 - **Properties:** `link_kind` (`owner` | `repository` — which of the two claims this edge is).

@@ -19,7 +19,7 @@ The two will be joined by an edge (`INSTANCE_OF_JOB`, carrying `run_attempt`), n
 ## Goals
 
 - Record what actually executed, so declared risk can be checked against behaviour.
-- Carry the observed runner, which is what makes [`EXECUTED_ON`](EXECUTED_ON.md) possible and is not derivable from the declaration.
+- Carry the observed runner, which is what makes [`EXECUTED_ON_RUNNER`](EXECUTED_ON_RUNNER.md) possible and is not derivable from the declaration.
 - Hold the execution end of the future declaration↔execution bridge.
 
 ## Identity
@@ -38,7 +38,7 @@ Deliberately **not** covered:
 - **Steps.** Rejected as a node by the corpus on the node test — nothing points at a step, it is an ordinal position within a job. Step-level facts that *are* needed (`step_index` on `REFERENCES_SECRET`, `WRITES_CACHE`, `RESTORES_CACHE`) are corpus edge properties, not endpoints.
 - **Logs.** Reachable at `actions:read` and genuinely useful — runner names in logs are the basis for non-ephemeral-runner heuristics — but a log is evidence, not an entity.
 - **The effective token the job held.** Not returned by any endpoint.
-- **Ephemeral runners.** A job that ran on a runner that no longer exists produces no [`EXECUTED_ON`](EXECUTED_ON.md) edge by design (`req-github-core-runner`); the observed runner name stays on this node.
+- **Ephemeral runners.** A job that ran on a runner that no longer exists produces no [`EXECUTED_ON_RUNNER`](EXECUTED_ON_RUNNER.md) edge by design (`req-github-core-runner`); the observed runner name stays on this node.
 
 ## Neutrality
 
@@ -48,7 +48,7 @@ Deliberately **not** covered:
 
 Populated from `GET /repos/{o}/{r}/actions/runs/{run_id}/jobs` at **`repository:actions:read`**, one call per run — which makes jobs the most call-expensive thing this plugin collects, and is why the collector degrades per-run rather than failing the batch when a `/jobs` call fails (`req-github-core-collector`).
 
-The response carries the **observed runner** (`runner_id`, `runner_name`, `runner_group_name`), which is the only place execution reveals where it ran. That is retained on this node and matched against collected [`github_runner`](github_runner.md) nodes; a match emits [`EXECUTED_ON`](EXECUTED_ON.md), a non-match does not (`req-github-core-runner`).
+The response carries the **observed runner** (`runner_id`, `runner_name`, `runner_group_name`), which is the only place execution reveals where it ran. That is retained on this node and matched against collected [`github_runner`](github_runner.md) nodes; a match emits [`EXECUTED_ON_RUNNER`](EXECUTED_ON_RUNNER.md), a non-match does not (`req-github-core-runner`).
 
 **REST only — GitHub's GraphQL API exposes no Actions jobs at all.** Verified by execution. There is no batched alternative to the per-run call.
 
@@ -78,5 +78,5 @@ The response carries the **observed runner** (`runner_id`, `runner_name`, `runne
 - `started_at` — when the job began executing.
 - `completed_at` — when it finished; null while running. With `started_at`, the duration that makes an anomalously long job visible.
 - `html_url` — the browser URL for the job.
-- `configuration` — the remainder of the job payload, and the home of the **observed runner** (`runner_id`, `runner_name`, `runner_group_name`) plus step results. The runner fields are the load-bearing part: they are the only execution-side evidence of where a job ran, and the input to [`EXECUTED_ON`](EXECUTED_ON.md) matching.
+- `configuration` — the remainder of the job payload, and the home of the **observed runner** (`runner_id`, `runner_name`, `runner_group_name`) plus step results. The runner fields are the load-bearing part: they are the only execution-side evidence of where a job ran, and the input to [`EXECUTED_ON_RUNNER`](EXECUTED_ON_RUNNER.md) matching.
 - `tags` — TAP's tag map.

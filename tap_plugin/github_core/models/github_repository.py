@@ -55,14 +55,23 @@ class GithubRepository(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "owner_login": {"validation": "jsonschema", "schema": {"type": "string"}},
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "github_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "github_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "default_branch": {"validation": "jsonschema", "schema": {"type": "string"}},
         "visibility": {"validation": "jsonschema", "schema": {"type": "string"}},
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "outputs_observability": {"validation": "jsonschema", "schema": {"type": "object"}},
+        "outputs_observability": {
+            "validation": "jsonschema",
+            "schema": {"type": "object"},
+        },
         # Keys are property names exactly as GitHub reports them; a value is a string, an array
         # (multi_select) or null. A null value is OBSERVED-UNSET: the definition exists and the
         # repository carries no value. A key that is absent was never read against a definition.
@@ -80,7 +89,9 @@ class GithubRepository(BaseModel):
     CREATE_REQUIRED: ClassVar[list[str]] = ["full_name"]
 
     full_name = models.CharField(max_length=255, blank=True, default="", db_index=True)
-    owner_login = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    owner_login = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     name = models.CharField(max_length=255, blank=True, default="")
     github_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     default_branch = models.CharField(max_length=255, blank=True, default="")

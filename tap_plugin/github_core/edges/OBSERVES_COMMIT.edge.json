@@ -1,0 +1,16 @@
+{
+  "slug": "OBSERVES_COMMIT__github_core",
+  "name": "Observes Commit",
+  "description": "GitHub's observation of a commit (resolved logins, signature verdict) links to the neutral git_core commit it is an observation OF. Many hosts may observe one commit; each brings its own record, and none can overwrite another's verdict (github-core#76, ruling 0.2).",
+  "sources": [
+    "github_core__commit_observation"
+  ],
+  "targets": [
+    "git_core__git_commit"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "git",
+    "github.observation": "declaration"
+  }
+}

@@ -1,4 +1,4 @@
-"""Tests for the github_app type, ENABLED_ON edge, and Dependabot detection.
+"""Tests for the github_app type, ENABLED_ON_REPOSITORY edge, and Dependabot detection.
 
 Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-app)
 """
@@ -44,8 +44,8 @@ class TestEnabledOnEdge:
     def test_app_enabled_on_repository(self):
         app = _create("github_core__github_app", {"slug": "dependabot", "name": "Dependabot"})
         repo = _create("github_core__github_repository", {"full_name": "notgeorge/samsite"})
-        edge = create_edge(app.entity, repo.entity, "ENABLED_ON__github_core")
-        assert edge.edge_type == "ENABLED_ON__github_core"
+        edge = create_edge(app.entity, repo.entity, "ENABLED_ON_REPOSITORY__github_core")
+        assert edge.edge_type == "ENABLED_ON_REPOSITORY__github_core"
 
 
 class TestGithubAppIdentity:

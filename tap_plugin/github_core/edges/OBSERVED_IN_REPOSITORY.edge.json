@@ -1,0 +1,16 @@
+{
+  "slug": "OBSERVED_IN_REPOSITORY__github_core",
+  "name": "Observed In Repository",
+  "description": "The repository (hosting record) GitHub made this commit observation in — the network the signature verification record is persisted for. The observation's key already carries the repository's stable id; the edge makes the scope traversable.",
+  "sources": [
+    "github_core__commit_observation"
+  ],
+  "targets": [
+    "github_core__github_repository"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "git",
+    "github.observation": "declaration"
+  }
+}

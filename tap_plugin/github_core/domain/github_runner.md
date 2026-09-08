@@ -14,7 +14,7 @@ This node exists so that "which repositories have self-hosted runners, and are a
 
 - Inventory durable runners so their scope and labels are queryable.
 - Carry `labels`, which is what a workflow's `runs-on:` matches against — the join between declaration and machine.
-- Anchor [`EXECUTED_ON`](EXECUTED_ON.md), so an execution can be attributed to a machine.
+- Anchor [`EXECUTED_ON_RUNNER`](EXECUTED_ON_RUNNER.md), so an execution can be attributed to a machine.
 
 ## Identity
 
@@ -28,7 +28,7 @@ The repository prefix encodes a v0 scope decision: only repository-level runners
 
 Deliberately **not** covered:
 
-- **Ephemeral runners as nodes.** Explicitly excluded (`req-github-core-runner`). An ephemeral runner exists for one job and is gone; minting a node per job would fill the grid with entities nothing can point at afterwards. The runner a job *observed* stays on the [`github_actions_job`](github_actions_job.md) node instead, and an [`EXECUTED_ON`](EXECUTED_ON.md) edge is emitted only when that observation matches a durable runner node.
+- **Ephemeral runners as nodes.** Explicitly excluded (`req-github-core-runner`). An ephemeral runner exists for one job and is gone; minting a node per job would fill the grid with entities nothing can point at afterwards. The runner a job *observed* stays on the [`github_actions_job`](github_actions_job.md) node instead, and an [`EXECUTED_ON_RUNNER`](EXECUTED_ON_RUNNER.md) edge is emitted only when that observation matches a durable runner node.
 - **Organization runners and runner groups.** Corpus concepts at *friends*; the platform survey notes the published GitHub graph is ahead of us here.
 - **The machine behind the runner.** A host, its network position, its other workloads — none of it is visible from GitHub, and none of it is modelled. The runner node is a *registration*, not a server.
 - **Runner version currency.** The API returns a version; nothing consumes it yet.

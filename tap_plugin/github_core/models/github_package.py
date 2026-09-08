@@ -42,7 +42,14 @@ class GithubPackage(BaseModel):
     }
 
     #: GitHub's closed set of package types, as the REST `package_type` parameter spells them.
-    PACKAGE_TYPES: ClassVar[tuple[str, ...]] = ("container", "npm", "maven", "rubygems", "docker", "nuget")
+    PACKAGE_TYPES: ClassVar[tuple[str, ...]] = (
+        "container",
+        "npm",
+        "maven",
+        "rubygems",
+        "docker",
+        "nuget",
+    )
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
         "package_id": {"type": ["integer", "null"]},
@@ -61,26 +68,54 @@ class GithubPackage(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "package_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
-        "owner_login": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "package_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
+        "owner_login": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         # "" permitted so a partially-read package lands — the grid's unobserved convention.
-        "package_type": {"validation": "jsonschema", "schema": {"type": "string", "enum": [*PACKAGE_TYPES, ""]}},
-        "name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "package_type": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "enum": [*PACKAGE_TYPES, ""]},
+        },
+        "name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "purl": {"validation": "jsonschema", "schema": {"type": "string"}},
         "visibility": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "version_count": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
-        "repository_full_name": {"validation": "jsonschema", "schema": {"type": "string"}},
+        "version_count": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
+        "repository_full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string"},
+        },
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "created_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
-        "updated_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
+        "created_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
+        "updated_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
     CREATE_REQUIRED: ClassVar[list[str]] = ["owner_login", "package_type", "name"]
 
     package_id = models.BigIntegerField(null=True, blank=True, db_index=True)
-    owner_login = models.CharField(max_length=255, blank=True, default="", db_index=True)
-    package_type = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    owner_login = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
+    package_type = models.CharField(
+        max_length=32, blank=True, default="", db_index=True
+    )
     name = models.CharField(max_length=512, blank=True, default="", db_index=True)
     #: Package-URL WITHOUT a version (`pkg:docker/ghcr.io/owner/name`) — the identity the
     #: supply-chain substrate keys on. Derived once, in `identity.package_purl`.
@@ -89,7 +124,9 @@ class GithubPackage(BaseModel):
     #: GitHub's own count — the number that says how much a capped version walk left behind.
     version_count = models.IntegerField(null=True, blank=True)
     #: `owner/repo` GitHub links the package to, when it does; "" when it is unlinked.
-    repository_full_name = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    repository_full_name = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     html_url = models.URLField(max_length=512, blank=True, default="")
     created_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(null=True, blank=True)

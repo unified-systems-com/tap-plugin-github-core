@@ -1,8 +1,18 @@
 {
   "version": 1,
-  "description": "github_core CI/nightly boot-and-test profile (req-plugin-extdev-repo-ci; consumed by tap's plugin-ci.yml boot-and-test job). Installs github_core EDITABLE from the CI checkout at _external/github_core so the suite runs against THIS repo's HEAD rather than a released tag, plus identity_core, which github_core declares in depends_on and imports at collection time for the oidc_issuer convergence node. Population is seed-only: CI runs with an empty secrets root and never fires collectors, so there is no fire-collector step and correspondingly no required_secrets (coherence rule req-boot-required-secrets-4). NO profile_kind: it is an allowlist token that only ever WIDENS \u2014 `dev_local` is what permits `enroll_admin --import-dev-passkey` to bind an admin credential (req-tap-auth-passkey-dev-bootstrap-4). Nothing here invokes it, but a CI profile has no use for the affordance and omitting the key leaves the guard fail-closed. Sources are pinned by COMMIT, not tag: a tag can be moved or recreated, and this profile is what makes that code execute inside a job that holds TAP_CORE_RO_PAT.",
+  "description": "github_core CI/nightly boot-and-test profile (req-plugin-extdev-repo-ci; consumed by tap's plugin-ci.yml boot-and-test job). Installs github_core EDITABLE from the CI checkout at _external/github_core so the suite runs against THIS repo's HEAD rather than a released tag, plus identity_core, which github_core declares in depends_on and imports at collection time for the oidc_issuer convergence node. Population is seed-only: CI runs with an empty secrets root and never fires collectors, so there is no fire-collector step and correspondingly no required_secrets (coherence rule req-boot-required-secrets-4). NO profile_kind: it is an allowlist token that only ever WIDENS — `dev_local` is what permits `enroll_admin --import-dev-passkey` to bind an admin credential (req-tap-auth-passkey-dev-bootstrap-4). Nothing here invokes it, but a CI profile has no use for the affordance and omitting the key leaves the guard fail-closed. Sources are pinned by COMMIT, not tag: a tag can be moved or recreated, and this profile is what makes that code execute inside a job that holds TAP_CORE_RO_PAT.",
   "install": {
     "plugins": [
+      {
+        "slug": "git_core",
+        "enabled": true,
+        "source": {
+          "type": "git",
+          "url": "https://github.com/unified-systems-com/git-core-tap",
+          "rev": "v0.1.0"
+        },
+        "note": "Package-mode (tap_plugin.git_core). The neutral Git vocabulary github_core emits (github-core#76). Pinned at the immutable tag v0.1.0 (released 2026-09-08).1.0 (a moving branch is not a pin — PR# 80 review); then the tag. Listed first: github_core declares depends_on git_core and the pre-boot gate checks order."
+      },
       {
         "slug": "identity_core",
         "enabled": true,
@@ -11,7 +21,7 @@
           "url": "https://github.com/unified-systems-com/tap-plugin-identity-core",
           "rev": "a1e35aa7b43292314b3ecf4a75db40f72225fa4a"
         },
-        "note": "Package-mode (tap_plugin.identity_core). Install-only substrate: the oidc_issuer convergence node github_core mints, and the source type ENABLED_ON points at. Declared in github_core's depends_on. No GRIFT seed. Pinned to the commit v0.1.1 pointed at on 2026-08-28 rather than to the tag itself \u2014 install hooks run in CI, and a moved tag would change what executes without this file changing."
+        "note": "Package-mode (tap_plugin.identity_core). Install-only substrate: the oidc_issuer convergence node github_core mints, and the source type ENABLED_ON points at. Declared in github_core's depends_on. No GRIFT seed. Pinned to the commit v0.1.1 pointed at on 2026-08-28 rather than to the tag itself — install hooks run in CI, and a moved tag would change what executes without this file changing."
       },
       {
         "slug": "github_core",
