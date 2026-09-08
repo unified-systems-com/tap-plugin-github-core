@@ -10,6 +10,7 @@ from tap_plugin.github_core.models.github_action import GithubAction
 from tap_plugin.github_core.models.github_actions_job import GithubActionsJob
 from tap_plugin.github_core.models.github_actions_run import GithubActionsRun
 from tap_plugin.github_core.models.github_app import GithubApp
+from tap_plugin.github_core.models.github_custom_property import GithubCustomProperty
 from tap_plugin.github_core.models.github_environment import GithubEnvironment
 from tap_plugin.github_core.models.github_package import GithubPackage
 from tap_plugin.github_core.models.github_package_version import GithubPackageVersion
@@ -34,6 +35,7 @@ __all__ = [
     "GithubActionsJob",
     "GithubActionsRun",
     "GithubApp",
+    "GithubCustomProperty",
     "GithubEnvironment",
     "GithubPackage",
     "GithubPackageVersion",

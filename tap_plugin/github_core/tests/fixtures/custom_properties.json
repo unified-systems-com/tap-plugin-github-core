@@ -1,0 +1,731 @@
+{
+  "_captured": "2026-09-08 via gh api (read:org classic PAT, account notgeorge) against unified-systems-com, the afternoon the five properties were declared (Issue# 2 - git-serious-double-tap)",
+  "schema": [
+    {
+      "property_name": "criticality",
+      "url": "https://api.github.com/orgs/unified-systems-com/properties/schema/criticality",
+      "source_type": "organization",
+      "value_type": "single_select",
+      "required": false,
+      "description": "Consequence of this repository failing or being compromised, for the organization as a whole. Not a statement of current attention or priority.",
+      "allowed_values": [
+        "critical",
+        "high",
+        "medium",
+        "low"
+      ],
+      "values_editable_by": "org_actors",
+      "require_explicit_values": false
+    },
+    {
+      "property_name": "lifecycle",
+      "url": "https://api.github.com/orgs/unified-systems-com/properties/schema/lifecycle",
+      "source_type": "organization",
+      "value_type": "single_select",
+      "required": false,
+      "description": "experimental = may be discarded; stand-up = being built toward first use; active = in use, maintained; maintenance = changes only when needed; deprecated = replacement chosen; draw-down = being wound down; retired = archived.",
+      "allowed_values": [
+        "experimental",
+        "stand-up",
+        "active",
+        "maintenance",
+        "deprecated",
+        "draw-down",
+        "retired"
+      ],
+      "values_editable_by": "org_actors",
+      "require_explicit_values": false
+    },
+    {
+      "property_name": "ownership-name",
+      "url": "https://api.github.com/orgs/unified-systems-com/properties/schema/ownership-name",
+      "source_type": "organization",
+      "value_type": "string",
+      "required": false,
+      "description": "The accountable owner's identifier: a GitHub username when ownership-type is individual, a team slug when it is team.",
+      "values_editable_by": "org_actors",
+      "require_explicit_values": false
+    },
+    {
+      "property_name": "ownership-type",
+      "url": "https://api.github.com/orgs/unified-systems-com/properties/schema/ownership-type",
+      "source_type": "organization",
+      "value_type": "single_select",
+      "required": false,
+      "description": "Kind of accountable owner: an individual account or a team. Accountability, not access - permissions are configured separately.",
+      "allowed_values": [
+        "individual",
+        "team"
+      ],
+      "values_editable_by": "org_actors",
+      "require_explicit_values": false
+    },
+    {
+      "property_name": "repository-role",
+      "url": "https://api.github.com/orgs/unified-systems-com/properties/schema/repository-role",
+      "source_type": "organization",
+      "value_type": "single_select",
+      "required": false,
+      "description": "One primary purpose per repo. platform = TAP itself; plugin = a TAP plugin; product = a TAP product or product instance; support = tooling, policy, build or review machinery; fixtures = known-answer test material that never runs.",
+      "allowed_values": [
+        "platform",
+        "plugin",
+        "product",
+        "support",
+        "fixtures"
+      ],
+      "values_editable_by": "org_actors",
+      "require_explicit_values": false
+    }
+  ],
+  "values": [
+    {
+      "repository_id": 1361949051,
+      "repository_name": "git-core-tap",
+      "repository_full_name": "unified-systems-com/git-core-tap",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": null
+        },
+        {
+          "property_name": "lifecycle",
+          "value": null
+        },
+        {
+          "property_name": "ownership-name",
+          "value": null
+        },
+        {
+          "property_name": "ownership-type",
+          "value": null
+        },
+        {
+          "property_name": "repository-role",
+          "value": null
+        }
+      ]
+    },
+    {
+      "repository_id": 1288688633,
+      "repository_name": "tap-plugin-github-core",
+      "repository_full_name": "unified-systems-com/tap-plugin-github-core",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "high"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1150092195,
+      "repository_name": "tap",
+      "repository_full_name": "unified-systems-com/tap",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "critical"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "platform"
+        }
+      ]
+    },
+    {
+      "repository_id": 1346655567,
+      "repository_name": "git-serious-tap",
+      "repository_full_name": "unified-systems-com/git-serious-tap",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "high"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "stand-up"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "product"
+        }
+      ]
+    },
+    {
+      "repository_id": 1361746064,
+      "repository_name": "git-serious-double-tap",
+      "repository_full_name": "unified-systems-com/git-serious-double-tap",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "high"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "stand-up"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "notgeorge"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "individual"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "product"
+        }
+      ]
+    },
+    {
+      "repository_id": 1288688619,
+      "repository_name": "tap-plugin-sigstore-core",
+      "repository_full_name": "unified-systems-com/tap-plugin-sigstore-core",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1288688607,
+      "repository_name": "tap-plugin-roscale",
+      "repository_full_name": "unified-systems-com/tap-plugin-roscale",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "maintenance"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "notgeorge"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "individual"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1295524557,
+      "repository_name": "tap-plugin-identity-core",
+      "repository_full_name": "unified-systems-com/tap-plugin-identity-core",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1207367981,
+      "repository_name": "tap-plugin-computing-core",
+      "repository_full_name": "unified-systems-com/tap-plugin-computing-core",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1295527709,
+      "repository_name": "tap-plugin-compliance-core",
+      "repository_full_name": "unified-systems-com/tap-plugin-compliance-core",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1236984573,
+      "repository_name": "tap-plugin-administrivia",
+      "repository_full_name": "unified-systems-com/tap-plugin-administrivia",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "medium"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "support"
+        }
+      ]
+    },
+    {
+      "repository_id": 1289330382,
+      "repository_name": "tap-plugin-gryphon-playground",
+      "repository_full_name": "unified-systems-com/tap-plugin-gryphon-playground",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "fixtures"
+        }
+      ]
+    },
+    {
+      "repository_id": 1218311497,
+      "repository_name": "tap-plugin-fedramp-20x-ksi",
+      "repository_full_name": "unified-systems-com/tap-plugin-fedramp-20x-ksi",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "maintenance"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "notgeorge"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "individual"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1307797270,
+      "repository_name": "tap-plugin-samsite",
+      "repository_full_name": "unified-systems-com/tap-plugin-samsite",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "maintenance"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "notgeorge"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "individual"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1288688654,
+      "repository_name": "tap-plugin-aws-core",
+      "repository_full_name": "unified-systems-com/tap-plugin-aws-core",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "medium"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1355213506,
+      "repository_name": "zizmor-tap",
+      "repository_full_name": "unified-systems-com/zizmor-tap",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "stand-up"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "notgeorge"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "individual"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    },
+    {
+      "repository_id": 1341161424,
+      "repository_name": "unified-ai-review",
+      "repository_full_name": "unified-systems-com/unified-ai-review",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "critical"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "support"
+        }
+      ]
+    },
+    {
+      "repository_id": 1356158892,
+      "repository_name": "git-serious-fixtures",
+      "repository_full_name": "unified-systems-com/git-serious-fixtures",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "fixtures"
+        }
+      ]
+    },
+    {
+      "repository_id": 1328924142,
+      "repository_name": "tap-build-dependencies",
+      "repository_full_name": "unified-systems-com/tap-build-dependencies",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "critical"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "support"
+        }
+      ]
+    },
+    {
+      "repository_id": 1341161555,
+      "repository_name": "unified-ai-review-prompts",
+      "repository_full_name": "unified-systems-com/unified-ai-review-prompts",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "critical"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "support"
+        }
+      ]
+    },
+    {
+      "repository_id": 1350006490,
+      "repository_name": "tap-dev-hooks",
+      "repository_full_name": "unified-systems-com/tap-dev-hooks",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "critical"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "support"
+        }
+      ]
+    },
+    {
+      "repository_id": 1330032436,
+      "repository_name": ".github",
+      "repository_full_name": "unified-systems-com/.github",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "high"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "support"
+        }
+      ]
+    },
+    {
+      "repository_id": 1289329227,
+      "repository_name": "tap-plugin-grid-fixtures",
+      "repository_full_name": "unified-systems-com/tap-plugin-grid-fixtures",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "active"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "fixtures"
+        }
+      ]
+    },
+    {
+      "repository_id": 1295528395,
+      "repository_name": "tap-plugin-aws-secrets-source",
+      "repository_full_name": "unified-systems-com/tap-plugin-aws-secrets-source",
+      "properties": [
+        {
+          "property_name": "criticality",
+          "value": "low"
+        },
+        {
+          "property_name": "lifecycle",
+          "value": "retired"
+        },
+        {
+          "property_name": "ownership-name",
+          "value": "maintainers"
+        },
+        {
+          "property_name": "ownership-type",
+          "value": "team"
+        },
+        {
+          "property_name": "repository-role",
+          "value": "plugin"
+        }
+      ]
+    }
+  ]
+}

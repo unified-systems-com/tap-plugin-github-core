@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. A property tag: the label shape with its eyelet, and two value lines —
+     a declaration an organization pins onto a repository. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>GitHub Custom Property</title>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linejoin="round" d="M3.5 4.5h8.2l8.8 8.8-7.2 7.2-8.8-8.8V4.5Z"/>
+  <circle cx="7.4" cy="8.4" r="1.4" fill="#1f2328"/>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linecap="round" d="M10.2 12.2l3.2 3.2M12.4 10l3.2 3.2"/>
+</svg>

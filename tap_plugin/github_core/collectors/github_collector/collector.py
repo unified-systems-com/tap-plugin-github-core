@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, ClassVar
 from urllib.parse import quote
 
+from tap_plugin.github_core.models.github_custom_property import GithubCustomProperty
 from tap_plugin.github_core.models.status_check import StatusCheck
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
 
@@ -47,6 +48,7 @@ from .identity import (
     actions_artifact_id,
     actions_cache_id,
     app_installation_id,
+    custom_property_id,
     edge_id,
     environment_id,
     git_commit_id,
@@ -147,6 +149,10 @@ _SITE_STATUS_CHECKS = "9409"
 _SITE_ACTION_REF_UNOBSERVABLE = "a288"
 _SITE_ACTION_REF_BUDGET = "c9a3"
 _SITE_ACTION_REF_MALFORMED = "45b3"
+_SITE_CUSTOM_PROPERTIES_UNOBSERVABLE = "a404"
+_SITE_CUSTOM_PROPERTIES_VALUES_UNOBSERVABLE = "fd72"
+_SITE_CUSTOM_PROPERTIES_COLLECTED = "3cba"
+_SITE_CUSTOM_PROPERTIES_SKIPPED = "906a"
 
 #: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
 #: three calls against a repository that is NOT in scope; past the cap an edge lands as
@@ -791,6 +797,11 @@ class GithubCollector(CollectorBase):
             if packages_note:
                 observability.setdefault("notes", {})["packages"] = packages_note
 
+        # --- custom properties: the organization's own metadata over its repositories, an
+        # ACCOUNT surface read once after the walk so every repository envelope is in hand to be
+        # stamped (req-github-core-custom-properties).
+        self._collect_custom_properties(client, owner, nodes)
+
         if failed and len(failed) == len(repos):
             # Everything failed: that is not a transient blip, it is a broken credential or a
             # dead API. Fail loudly rather than submitting an empty batch that looks like an
@@ -1156,6 +1167,11 @@ class GithubCollector(CollectorBase):
                 # Filled in below, once the output surfaces have been attempted. `{}` here would
                 # read as "never looked", which is the honest value until then.
                 "outputs_observability": {},
+                # Stamped after the walk by `_collect_custom_properties`, an account surface. Until
+                # then `""` is "never looked" — the honest value, never an empty map that reads as
+                # "none set" (req-github-core-custom-properties).
+                "custom_properties": {},
+                "custom_properties_observability": "",
                 "configuration": {},
                 "tags": {},
             },
@@ -3572,6 +3588,162 @@ class GithubCollector(CollectorBase):
             ),
             message_data={"installations": len(installations), "scope": scope},
         )
+
+    def _collect_custom_properties(
+        self,
+        client: GithubClient,
+        owner: str | None,
+        nodes: list[dict[str, Any]],
+    ) -> str:
+        """Emit the organization's custom-property definitions and stamp every repository's values.
+
+        Returns the surface's observability state, which is also written onto every collected
+        repository envelope as `custom_properties_observability` beside its `custom_properties` map.
+
+        Two endpoints, both organization-scoped and both at `organization:custom_properties:read`.
+        The schema (`/orgs/{owner}/properties/schema`) is the DEFINITIONS — one node each — and it
+        is what makes a repository's unset value a fact: the values map is built over the
+        declared names first, so a property the organization declares and a repository never set
+        lands as `null` (observed-unset), not as an absent key. The values listing
+        (`/orgs/{owner}/properties/values`) then overlays what each repository carries.
+
+        Custom properties exist only on organizations. A user account has no schema endpoint at
+        all, so for one the surface is SKIPPED and every repository keeps `""` — never looked —
+        rather than `unobservable`, which would say a credential was refused when there was
+        nothing to ask. A refusal on an organization IS `unobservable`: an empty map after a 403
+        is the most reassuring possible reading of a permission failure, and the state on the
+        node is what stops a view rendering it as "nothing set" (the ruling of
+        `github_ruleset.bypass_observability`, applied here).
+        """
+        if owner is None:
+            self.record_info(
+                _SITE_CUSTOM_PROPERTIES_SKIPPED,
+                "CUSTOM_PROPERTIES_SKIPPED",
+                "Custom properties are an account surface; a repos-only scope names no account, so "
+                "they were not collected.",
+            )
+            return ""
+        if self._account_type and self._account_type != "Organization":
+            self.record_info(
+                _SITE_CUSTOM_PROPERTIES_SKIPPED,
+                "CUSTOM_PROPERTIES_SKIPPED",
+                f"{owner} is a {self._account_type} account; custom properties exist only on "
+                f"organizations, so the surface was not asked.",
+                message_data={"owner": owner, "account_type": self._account_type},
+            )
+            return ""
+        try:
+            definitions = client.get_paginated(f"/orgs/{owner}/properties/schema")
+        except GithubAPIError as exc:
+            state = _UNOBSERVABLE
+            self.record_warn(
+                _SITE_CUSTOM_PROPERTIES_UNOBSERVABLE,
+                f"CUSTOM_PROPERTIES_UNOBSERVABLE_{exc.status}",
+                f"Custom-property definitions for {owner} unreadable ({exc.status}) — every "
+                f"repository's properties are NOT observed, which is not the same as none being set. "
+                f"The credential needs organization custom-properties read.",
+                message_data={"owner": owner, "status": exc.status},
+            )
+            self._stamp_custom_properties(state, {})
+            return state
+        try:
+            rows = client.get_paginated(f"/orgs/{owner}/properties/values", params={"per_page": "100"})
+        except GithubAPIError as exc:
+            state = _UNOBSERVABLE
+            self.record_warn(
+                _SITE_CUSTOM_PROPERTIES_VALUES_UNOBSERVABLE,
+                f"CUSTOM_PROPERTIES_VALUES_UNOBSERVABLE_{exc.status}",
+                f"Custom-property VALUES for {owner} unreadable ({exc.status}) while the "
+                f"definitions were; the definitions land, no repository's values do.",
+                message_data={"owner": owner, "status": exc.status},
+            )
+            rows = []
+        else:
+            state = _OBSERVED
+        dims = {**GithubCustomProperty.DEFAULT_DIMENSIONS, "github.owner": owner}
+        names: list[str] = []
+        for definition in definitions:
+            name = str(definition.get("property_name") or "")
+            if not name:
+                continue
+            names.append(name)
+            nodes.append(
+                node_envelope(
+                    entity_id=custom_property_id(owner, name),
+                    entity_type=GithubCustomProperty.ENTITY_TYPE,
+                    name=name,
+                    dimensions=dims,
+                    fields={
+                        "owner_login": owner,
+                        "property_name": name,
+                        "value_type": str(definition.get("value_type") or ""),
+                        "required": bool(definition.get("required", False)),
+                        "default_value": definition.get("default_value"),
+                        "description": str(definition.get("description") or ""),
+                        "allowed_values": list(definition.get("allowed_values") or []),
+                        "values_editable_by": str(definition.get("values_editable_by") or ""),
+                        "source_type": str(definition.get("source_type") or ""),
+                        "url": str(definition.get("url") or ""),
+                        "configuration": {
+                            # Whether GitHub refuses a value outside `allowed_values` at write time.
+                            "require_explicit_values": definition.get("require_explicit_values"),
+                        },
+                        "tags": {},
+                    },
+                )
+            )
+        # Built over the declared names FIRST: a declared property a repository never set is
+        # observed-unset (null), which an overlay from the values listing alone could not say.
+        values_by_repo: dict[str, dict[str, Any]] = {}
+        if state == _OBSERVED:
+            for row in rows:
+                full_name = str(row.get("repository_full_name") or "")
+                if not full_name:
+                    continue
+                values: dict[str, Any] = dict.fromkeys(names)
+                for entry in row.get("properties") or []:
+                    prop = str(entry.get("property_name") or "")
+                    if prop:
+                        values[prop] = entry.get("value")
+                values_by_repo[full_name] = values
+        self._stamp_custom_properties(state, values_by_repo, names)
+        stamped = [name for name in self._repo_envelopes if name in values_by_repo]
+        unset = sum(1 for name in stamped for value in values_by_repo[name].values() if value is None)
+        self.record_info(
+            _SITE_CUSTOM_PROPERTIES_COLLECTED,
+            "CUSTOM_PROPERTIES_COLLECTED",
+            f"{len(names)} custom property definition(s) under {owner}; values observed on "
+            f"{len(stamped)} of {len(self._repo_envelopes)} collected repositories, {unset} "
+            f"declared-but-unset value(s)." + ("" if state == _OBSERVED else " Values were NOT observed."),
+            message_data={
+                "owner": owner,
+                "definitions": names,
+                "repositories_with_values": len(stamped),
+                "unset_values": unset,
+                "state": state,
+            },
+        )
+        return state
+
+    def _stamp_custom_properties(
+        self,
+        state: str,
+        values_by_repo: dict[str, dict[str, Any]],
+        names: list[str] | None = None,
+    ) -> None:
+        """Write the surface state and each repository's values map onto its envelope.
+
+        A collected repository the values listing did not mention (it can happen when a
+        repository was created between the walk and this call) still gets the declared names as
+        null — unset against the definitions we did read — rather than an empty map.
+        """
+        for full_name, envelope in self._repo_envelopes.items():
+            node = envelope["node"]
+            node["custom_properties_observability"] = state
+            if state != _OBSERVED:
+                node["custom_properties"] = {}
+                continue
+            node["custom_properties"] = values_by_repo.get(full_name) or dict.fromkeys(names or [])
 
     def _emit_github_app(
         self,
