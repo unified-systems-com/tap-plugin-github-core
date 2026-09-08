@@ -59,7 +59,10 @@ class GithubApp(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "slug": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "slug": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "app_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "client_id": {"validation": "jsonschema", "schema": {"type": "string"}},

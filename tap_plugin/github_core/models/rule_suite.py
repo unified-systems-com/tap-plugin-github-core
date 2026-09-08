@@ -65,7 +65,10 @@ class RuleSuite(BaseModel):
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
         "suite_id": {"type": ["integer", "null"]},
         "full_name": {"type": "string"},
-        "result": {"type": "string", "enum": [RESULT_BYPASS, RESULT_FAIL, RESULT_PASS, ""]},
+        "result": {
+            "type": "string",
+            "enum": [RESULT_BYPASS, RESULT_FAIL, RESULT_PASS, ""],
+        },
         "ref": {"type": "string"},
         "actor_login": {"type": "string"},
         "actor_id": {"type": ["integer", "null"]},
@@ -78,21 +81,33 @@ class RuleSuite(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "suite_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "suite_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "full_name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "result": {
             "validation": "jsonschema",
             # "" is permitted so a partially-read suite lands rather than being dropped —
             # the grid's unobserved convention, matching every other enum in this plugin.
-            "schema": {"type": "string", "enum": [RESULT_BYPASS, RESULT_FAIL, RESULT_PASS, ""]},
+            "schema": {
+                "type": "string",
+                "enum": [RESULT_BYPASS, RESULT_FAIL, RESULT_PASS, ""],
+            },
         },
         "ref": {"validation": "jsonschema", "schema": {"type": "string"}},
         "actor_login": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "actor_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "actor_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "before_sha": {"validation": "jsonschema", "schema": {"type": "string"}},
         "after_sha": {"validation": "jsonschema", "schema": {"type": "string"}},
         # null is "we did not observe a timestamp", never "now".
-        "pushed_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
+        "pushed_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
         "bypassed_rules": {"validation": "jsonschema", "schema": {"type": "array"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
@@ -108,7 +123,9 @@ class RuleSuite(BaseModel):
     #: The full ref path as GitHub returns it (`refs/heads/main`), matching `git_ref`.
     ref = models.CharField(max_length=512, blank=True, default="")
     #: The account login that pushed. Person, bot or machine account — the API does not say.
-    actor_login = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    actor_login = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     #: Numeric account id, so a login rename is detectable (see `github_account`).
     actor_id = models.BigIntegerField(null=True, blank=True)
     before_sha = models.CharField(max_length=64, blank=True, default="")

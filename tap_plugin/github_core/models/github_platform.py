@@ -21,7 +21,9 @@ class GithubPlatform(BaseModel):
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_platform"
     ENTITY_NAME: ClassVar[str] = "GitHub Platform"
-    ENTITY_DESCRIPTION: ClassVar[str] = "A GitHub platform instance (github.com or a GHES host)."
+    ENTITY_DESCRIPTION: ClassVar[str] = (
+        "A GitHub platform instance (github.com or a GHES host)."
+    )
     ENTITY_ICON: ClassVar[str] = "github-platform"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.platform": "github.com",
@@ -47,7 +49,10 @@ class GithubPlatform(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "host": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "host": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},

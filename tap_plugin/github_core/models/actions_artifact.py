@@ -70,15 +70,33 @@ class ActionsArtifact(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
-        "artifact_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
+        "artifact_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "size_in_bytes": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "size_in_bytes": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "digest": {"validation": "jsonschema", "schema": {"type": "string"}},
         "expired": {"validation": "jsonschema", "schema": {"type": "boolean"}},
-        "expires_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
-        "created_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
-        "updated_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
+        "expires_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
+        "created_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
+        "updated_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
         "run_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
         "head_sha": {"validation": "jsonschema", "schema": {"type": "string"}},
         "head_branch": {"validation": "jsonschema", "schema": {"type": "string"}},
@@ -112,7 +130,9 @@ class ActionsArtifact(BaseModel):
         db_table = "github_core__actions_artifact"
 
     def get_name(self) -> str:
-        return self.name or (str(self.artifact_id) if self.artifact_id is not None else "")
+        return self.name or (
+            str(self.artifact_id) if self.artifact_id is not None else ""
+        )
 
     def __str__(self) -> str:
         return self.get_name()

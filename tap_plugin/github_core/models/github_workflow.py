@@ -47,8 +47,14 @@ class GithubWorkflow(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
-        "workflow_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
+        "workflow_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "path": {"validation": "jsonschema", "schema": {"type": "string"}},
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "state": {"validation": "jsonschema", "schema": {"type": "string"}},

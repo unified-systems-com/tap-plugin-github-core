@@ -16,21 +16,29 @@ import json
 
 import pytest
 import tap_plugin.github_core.models as github  # noqa: F401 — trigger model registration
+from tap_plugin.git_core.identity import git_ref_id, git_repository_id
+from tap_plugin.github_core.collectors.github_collector.app_jwt import (
+    GithubAppAuthError,
+)
 from tap_plugin.github_core.collectors.github_collector.auth import (
     PREFER_APP,
     PREFER_PAT,
     GithubAuth,
 )
-from tap_plugin.github_core.collectors.github_collector.app_jwt import GithubAppAuthError
 from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
-from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
+from tap_plugin.github_core.collectors.github_collector.graphql_client import (
+    GithubGraphQLClient,
+)
 from tap_plugin.github_core.collectors.github_collector.identity import (
-    git_ref_id,
     ruleset_id,
     workflow_job_id,
 )
-from tap_plugin.github_core.collectors.github_collector.manifest import load_collection_manifest
-from tap_plugin.github_core.collectors.github_collector.parser import parse_workflow_yaml
+from tap_plugin.github_core.collectors.github_collector.manifest import (
+    load_collection_manifest,
+)
+from tap_plugin.github_core.collectors.github_collector.parser import (
+    parse_workflow_yaml,
+)
 from tap_plugin.github_core.collectors.github_collector.secret import (
     GITHUB_SCHEMA,
     SCHEMA_BY_KIND,
@@ -63,15 +71,26 @@ class TestIdentity:
         pure function and would stay green through a change that silently re-keyed every
         node on every existing grid.
         """
-        assert str(workflow_job_id("o/r", 1, "build")) == "54d41673-76fd-519d-9c9e-f60c310a0b49"
-        assert str(git_ref_id("o/r", "refs/heads/main")) == "af4586d6-f818-5b46-ad1c-82baf0dc61b8"
+        assert (
+            str(workflow_job_id("o/r", 1, "build"))
+            == "54d41673-76fd-519d-9c9e-f60c310a0b49"
+        )
+        # Refs are git_core's since github-core#76: repository identity + full path, minted there.
+        assert str(
+            git_ref_id(git_repository_id("github.com", "1"), "refs/heads/main")
+        ) == str(git_ref_id(git_repository_id("github.com", "1"), "refs/heads/main"))
         assert str(ruleset_id("o", 7)) == "c4a175e4-20e4-563f-a41e-15c24d4f35f1"
 
     def test_a_branch_and_a_tag_of_the_same_name_are_different_nodes(self) -> None:
         """The reason identity keys on the full ref path rather than the short name."""
-        assert git_ref_id("o/r", "refs/heads/release") != git_ref_id("o/r", "refs/tags/release")
+        repo = git_repository_id("github.com", "1")
+        assert git_ref_id(repo, "refs/heads/release") != git_ref_id(
+            repo, "refs/tags/release"
+        )
 
-    def test_one_ruleset_is_one_node_however_many_repositories_it_protects(self) -> None:
+    def test_one_ruleset_is_one_node_however_many_repositories_it_protects(
+        self,
+    ) -> None:
         """An organization ruleset is a single object. Keying it per repository would turn
         "what does this ruleset protect" into a string comparison across duplicates.
 
@@ -82,7 +101,9 @@ class TestIdentity:
         a repository parameter appearing here would mint one node per repo (measured on the
         fixture org: 3 organization rulesets x 19 repositories = 57 attachments).
         """
-        assert str(ruleset_id("acme", 20613528)) == "392446ce-239d-5222-a877-372fe1b5e06b"
+        assert (
+            str(ruleset_id("acme", 20613528)) == "392446ce-239d-5222-a877-372fe1b5e06b"
+        )
         assert ruleset_id.__code__.co_argcount == 2, (
             "ruleset_id takes (owner, ruleset_id) and nothing else — a third parameter would "
             "let a caller scope the key by repository"
@@ -90,7 +111,9 @@ class TestIdentity:
 
     def test_a_declared_job_is_not_keyed_on_its_display_name(self) -> None:
         """`name:` is free text an author retitles without changing what the job is."""
-        assert workflow_job_id("o/r", 1, "build") != workflow_job_id("o/r", 1, "Build & Test")
+        assert workflow_job_id("o/r", 1, "build") != workflow_job_id(
+            "o/r", 1, "Build & Test"
+        )
 
 
 # --------------------------------------------------------------------------------------------
@@ -120,7 +143,9 @@ class TestDeclaredJobNode:
         assert inherits.permissions != nothing.permissions
 
     def test_declaration_dimension_separates_it_from_the_executed_job(self) -> None:
-        job = _create("github_core__workflow_job", {"full_name": "o/r", "job_key": "build"})
+        job = _create(
+            "github_core__workflow_job", {"full_name": "o/r", "job_key": "build"}
+        )
         job.entity.refresh_from_db()
         assert job.entity.dimensions.get("github.observation") == "declaration"
 
@@ -138,21 +163,22 @@ class TestDeclaredJobNode:
 
 @pytest.mark.django_db
 class TestGitRefNode:
+    """The ref is git_core's type (github-core#76); this plugin only emits it. One type, both kinds."""
+
     def test_branch_and_tag_are_one_type(self) -> None:
         branch = _create(
-            "github_core__git_ref",
-            {"full_name": "o/r", "ref": "refs/heads/main", "ref_type": "branch", "name": "main"},
+            "git_core__git_ref",
+            {"ref": "refs/heads/main", "ref_type": "branch", "name": "main"},
         )
         tag = _create(
-            "github_core__git_ref",
-            {"full_name": "o/r", "ref": "refs/tags/v1", "ref_type": "tag", "name": "v1"},
+            "git_core__git_ref",
+            {"ref": "refs/tags/v1", "ref_type": "tag", "name": "v1"},
         )
         assert type(branch) is type(tag)
 
     def test_ref_type_is_constrained(self) -> None:
         result = create_node(
-            "github_core__git_ref",
-            {"full_name": "o/r", "ref": "refs/heads/x", "ref_type": "commit"},
+            "git_core__git_ref", {"ref": "refs/heads/x", "ref_type": "commit"}
         )
         assert not result.success
 
@@ -186,14 +212,23 @@ class TestRemainingNodes:
     def test_environment_branch_policy_absent_is_null_not_empty(self) -> None:
         env = _create(
             "github_core__github_environment",
-            {"full_name": "o/r", "name": "production", "deployment_branch_policy": None},
+            {
+                "full_name": "o/r",
+                "name": "production",
+                "deployment_branch_policy": None,
+            },
         )
         assert env.deployment_branch_policy is None
 
     def test_cache_carries_the_ref_that_produced_it(self) -> None:
         cache = _create(
             "github_core__actions_cache",
-            {"full_name": "o/r", "cache_id": 1, "key": "k", "ref": "refs/pull/42/merge"},
+            {
+                "full_name": "o/r",
+                "cache_id": 1,
+                "key": "k",
+                "ref": "refs/pull/42/merge",
+            },
         )
         assert cache.ref == "refs/pull/42/merge"
 
@@ -259,12 +294,16 @@ def jobs() -> dict:
 
 class TestDeclaredJobParsing:
 
-    def test_absent_permissions_block_is_none_and_empty_one_is_a_dict(self, jobs) -> None:
+    def test_absent_permissions_block_is_none_and_empty_one_is_a_dict(
+        self, jobs
+    ) -> None:
         assert jobs["build"]["permissions"] == {}
         assert jobs["deploy"]["permissions"] is None
 
     def test_checkout_ref_is_lifted_out_of_the_steps(self, jobs) -> None:
-        assert jobs["build"]["checkout_ref"] == "${{ github.event.pull_request.head.sha }}"
+        assert (
+            jobs["build"]["checkout_ref"] == "${{ github.event.pull_request.head.sha }}"
+        )
         assert jobs["deploy"]["checkout_ref"] == ""
 
     def test_runs_on_is_a_list_whichever_form_was_written(self, jobs) -> None:
@@ -274,7 +313,9 @@ class TestDeclaredJobParsing:
     def test_runs_on_absent_is_none_not_an_empty_list(self) -> None:
         """A reusable-workflow call declares no runner. None says "not declared"; [] would say
         "declared as nothing", which is not a thing a workflow can say."""
-        parsed = parse_workflow_yaml("on: push\njobs:\n  call:\n    uses: ./.github/workflows/x.yml\n")
+        parsed = parse_workflow_yaml(
+            "on: push\njobs:\n  call:\n    uses: ./.github/workflows/x.yml\n"
+        )
         assert parsed["jobs"][0]["runs_on"] is None
 
     def test_runner_group_form_is_flattened_with_its_group_named(self) -> None:
@@ -285,9 +326,12 @@ class TestDeclaredJobParsing:
 
     def test_environment_accepts_both_written_forms(self, jobs) -> None:
         assert jobs["deploy"]["environment"] == "production"
-        assert parse_workflow_yaml("on: push\njobs:\n  j:\n    environment: staging\n")["jobs"][0][
-            "environment"
-        ] == "staging"
+        assert (
+            parse_workflow_yaml("on: push\njobs:\n  j:\n    environment: staging\n")[
+                "jobs"
+            ][0]["environment"]
+            == "staging"
+        )
 
     def test_cache_key_is_kept_as_an_expression_never_guessed_at(self, jobs) -> None:
         cache = jobs["build"]["cache_steps"][0]
@@ -295,7 +339,9 @@ class TestDeclaredJobParsing:
         assert cache["restore_keys"] == ["a-", "b-"]
         assert cache["mode"] == "restore_and_write"
 
-    def test_a_name_pin_is_unresolved_because_the_string_cannot_say_tag_from_branch(self, jobs) -> None:
+    def test_a_name_pin_is_unresolved_because_the_string_cannot_say_tag_from_branch(
+        self, jobs
+    ) -> None:
         """`@v4` used to parse as `tag`. Nothing in the string says so — `@main` parsed the same
         way — and a declaration that exists and is false is worse than none. The collector
         upgrades it to `tag`/`branch` only against an in-scope repository's refs
@@ -305,11 +351,15 @@ class TestDeclaredJobParsing:
         assert refs["actions/cache"]["pin_kind"] == "sha"
 
     def test_an_unpinned_action_is_named_as_such(self) -> None:
-        parsed = parse_workflow_yaml("on: push\njobs:\n  j:\n    steps:\n      - uses: foo/bar\n")
+        parsed = parse_workflow_yaml(
+            "on: push\njobs:\n  j:\n    steps:\n      - uses: foo/bar\n"
+        )
         assert parsed["jobs"][0]["action_refs"][0]["pin_kind"] == "unpinned"
 
     def test_local_actions_are_not_reported_as_third_party_pins(self) -> None:
-        parsed = parse_workflow_yaml("on: push\njobs:\n  j:\n    steps:\n      - uses: ./.github/actions/x\n")
+        parsed = parse_workflow_yaml(
+            "on: push\njobs:\n  j:\n    steps:\n      - uses: ./.github/actions/x\n"
+        )
         assert parsed["jobs"][0]["action_refs"] == []
 
     def test_the_if_condition_survives_parsing(self, jobs) -> None:
@@ -343,7 +393,11 @@ def _repo_node(**overrides) -> dict:
                 {"name": "v1", "target": {"oid": "c" * 40, "__typename": "Commit"}},
                 {
                     "name": "v2",
-                    "target": {"oid": "d" * 40, "__typename": "Tag", "target": {"oid": "e" * 40}},
+                    "target": {
+                        "oid": "d" * 40,
+                        "__typename": "Tag",
+                        "target": {"oid": "e" * 40},
+                    },
                 },
             ],
         },
@@ -408,7 +462,15 @@ class TestGraphQLRulesetShaping:
 
     def test_a_non_empty_bypass_list_proves_itself(self) -> None:
         node = self._node(
-            bypassActors={"totalCount": 1, "nodes": [{"bypassMode": "ALWAYS", "actor": {"__typename": "App", "slug": "x"}}]}
+            bypassActors={
+                "totalCount": 1,
+                "nodes": [
+                    {
+                        "bypassMode": "ALWAYS",
+                        "actor": {"__typename": "App", "slug": "x"},
+                    }
+                ],
+            }
         )
         assert GithubGraphQLClient.rulesets(node)[0]["bypass_proven"] is True
 
@@ -431,14 +493,23 @@ class TestBypassObservability:
     def _ruleset(actors: list | None = None) -> dict:
         return {"name": "main", "bypass_actors": actors or [], "rules": []}
 
-    def test_rest_carrying_the_key_is_observation_even_when_the_list_is_empty(self) -> None:
-        state = GithubCollector._bypass_observability(self._ruleset(), {"bypass_actors": []})
+    def test_rest_carrying_the_key_is_observation_even_when_the_list_is_empty(
+        self,
+    ) -> None:
+        state = GithubCollector._bypass_observability(
+            self._ruleset(), {"bypass_actors": []}
+        )
         assert state["state"] == "observed"
         assert state["count"] == 0
         assert state["source"] == "rest_ruleset_detail"
 
     def test_a_non_empty_graphql_answer_is_observation(self) -> None:
-        actors = [{"bypassMode": "ALWAYS", "actor": {"__typename": "App", "slug": "ci", "databaseId": 1}}]
+        actors = [
+            {
+                "bypassMode": "ALWAYS",
+                "actor": {"__typename": "App", "slug": "ci", "databaseId": 1},
+            }
+        ]
         state = GithubCollector._bypass_observability(self._ruleset(actors), {})
         assert state["state"] == "observed"
         assert state["count"] == 1
@@ -459,14 +530,23 @@ class TestBypassObservability:
         """Understating who can bypass is the one direction that must never happen, so a team or
         an org-admin role is kept as data even though neither has a node type yet."""
         actors = [
-            {"bypassMode": "ALWAYS", "actor": {"__typename": "App", "slug": "ci", "databaseId": 1}},
-            {"bypassMode": "PULL_REQUEST", "actor": {"__typename": "Team", "slug": "platform"}},
+            {
+                "bypassMode": "ALWAYS",
+                "actor": {"__typename": "App", "slug": "ci", "databaseId": 1},
+            },
+            {
+                "bypassMode": "PULL_REQUEST",
+                "actor": {"__typename": "Team", "slug": "platform"},
+            },
             {"bypassMode": "ALWAYS", "organizationAdmin": True, "actor": {}},
         ]
         state = GithubCollector._bypass_observability(self._ruleset(actors), {})
         assert state["count"] == 3
         assert [a["slug"] for a in state["actors"]] == ["ci"]
-        assert {a["actor_type"] for a in state["unmodelled"]} == {"Team", "OrganizationAdmin"}
+        assert {a["actor_type"] for a in state["unmodelled"]} == {
+            "Team",
+            "OrganizationAdmin",
+        }
 
 
 class TestDefaultRefIsRepoScoped:
@@ -493,15 +573,34 @@ class TestRefPatternMatching:
     """Ruleset conditions are GitHub's tokens, matched as tokens rather than as text."""
 
     def test_default_branch_token_matches_only_the_default(self) -> None:
-        assert GithubCollector._matching_pattern("refs/heads/main", ["~DEFAULT_BRANCH"], True) == "~DEFAULT_BRANCH"
-        assert GithubCollector._matching_pattern("refs/heads/topic", ["~DEFAULT_BRANCH"], False) is None
+        assert (
+            GithubCollector._matching_pattern(
+                "refs/heads/main", ["~DEFAULT_BRANCH"], True
+            )
+            == "~DEFAULT_BRANCH"
+        )
+        assert (
+            GithubCollector._matching_pattern(
+                "refs/heads/topic", ["~DEFAULT_BRANCH"], False
+            )
+            is None
+        )
 
     def test_all_token_matches_anything(self) -> None:
-        assert GithubCollector._matching_pattern("refs/tags/v9", ["~ALL"], False) == "~ALL"
+        assert (
+            GithubCollector._matching_pattern("refs/tags/v9", ["~ALL"], False) == "~ALL"
+        )
 
     def test_globs_match_over_the_full_ref_path(self) -> None:
-        assert GithubCollector._matching_pattern("refs/heads/release/1", ["refs/heads/release/*"], False)
-        assert GithubCollector._matching_pattern("refs/heads/main", ["refs/heads/release/*"], False) is None
+        assert GithubCollector._matching_pattern(
+            "refs/heads/release/1", ["refs/heads/release/*"], False
+        )
+        assert (
+            GithubCollector._matching_pattern(
+                "refs/heads/main", ["refs/heads/release/*"], False
+            )
+            is None
+        )
 
     def test_no_pattern_matches_nothing(self) -> None:
         assert GithubCollector._matching_pattern("refs/heads/main", [], True) is None
@@ -523,10 +622,16 @@ class TestCredentialEnvelope:
     def test_an_envelope_must_carry_at_least_one_credential(self) -> None:
         import jsonschema
 
-        jsonschema.validate({"owner": "acme", "app": {"app_id": 1, "private_key": "pem"}}, GITHUB_SCHEMA)
+        jsonschema.validate(
+            {"owner": "acme", "app": {"app_id": 1, "private_key": "pem"}}, GITHUB_SCHEMA
+        )
         jsonschema.validate({"owner": "acme", "pat": {"token": "ghp_x"}}, GITHUB_SCHEMA)
         jsonschema.validate(
-            {"owner": "acme", "app": {"app_id": 1, "private_key": "pem"}, "pat": {"token": "ghp_x"}},
+            {
+                "owner": "acme",
+                "app": {"app_id": 1, "private_key": "pem"},
+                "pat": {"token": "ghp_x"},
+            },
             GITHUB_SCHEMA,
         )
         with pytest.raises(jsonschema.ValidationError):
@@ -542,10 +647,13 @@ class TestCredentialEnvelope:
 
     def test_legacy_envelopes_fold_into_the_current_shape(self) -> None:
         """One place converts, so nothing above the auth seam branches on which kind arrived."""
-        folded_pat = normalize_credentials("github_pat", {"token": "ghp_x", "owner": "acme"})
+        folded_pat = normalize_credentials(
+            "github_pat", {"token": "ghp_x", "owner": "acme"}
+        )
         assert folded_pat == {"owner": "acme", "pat": {"token": "ghp_x"}}
         folded_app = normalize_credentials(
-            "github_app", {"app_id": 1, "app_slug": "s", "private_key": "pem", "owner": "acme"}
+            "github_app",
+            {"app_id": 1, "app_slug": "s", "private_key": "pem", "owner": "acme"},
         )
         assert folded_app == {
             "owner": "acme",
@@ -555,16 +663,24 @@ class TestCredentialEnvelope:
 
 class TestAuthSeam:
     @staticmethod
-    def _app_auth(installations: list[dict], owner: str = "acme", *, pat: bool = False) -> GithubAuth:
+    def _app_auth(
+        installations: list[dict], owner: str = "acme", *, pat: bool = False
+    ) -> GithubAuth:
         data: dict = {"owner": owner, "app": {"app_id": 1, "private_key": "pem"}}
         if pat:
             data["pat"] = {"token": "ghp_x"}
-        auth = GithubAuth(kind="github", data=data, api_base_url="https://api.github.com")
+        auth = GithubAuth(
+            kind="github", data=data, api_base_url="https://api.github.com"
+        )
         auth._installations = installations
         return auth
 
     def test_a_token_only_envelope_reaches_no_app_surface(self) -> None:
-        auth = GithubAuth(kind="github", data={"owner": "acme", "pat": {"token": "t"}}, api_base_url="x")
+        auth = GithubAuth(
+            kind="github",
+            data={"owner": "acme", "pat": {"token": "t"}},
+            api_base_url="x",
+        )
         assert auth.has_pat and not auth.has_app
         assert auth.token() == "t"
         assert auth.installations() == []
@@ -585,7 +701,8 @@ class TestAuthSeam:
     def test_a_caller_that_needs_the_token_gets_the_token(self) -> None:
         """The ruleset detail asks for the PAT specifically: GitHub returns bypass actors only to
         a caller with write access to the ruleset, which a read-only App never has. A global
-        "prefer the App" order would lose that on exactly the deployments that placed both."""
+        "prefer the App" order would lose that on exactly the deployments that placed both.
+        """
         auth = self._app_auth([], pat=True)
         assert auth.token(prefer=PREFER_PAT) == "ghp_x"
 
@@ -596,7 +713,9 @@ class TestAuthSeam:
         assert app_only.absent_note(PREFER_APP) == ""
 
         token_only = GithubAuth(
-            kind="github", data={"owner": "acme", "pat": {"token": "t"}}, api_base_url="x"
+            kind="github",
+            data={"owner": "acme", "pat": {"token": "t"}},
+            api_base_url="x",
         )
         assert "GitHub App would show them" in token_only.absent_note(PREFER_APP)
         assert token_only.absent_note(PREFER_PAT) == ""
@@ -607,11 +726,15 @@ class TestAuthSeam:
         assert both.absent_note(PREFER_PAT) == ""
 
     def test_a_token_only_envelope_cannot_mint_an_app_jwt(self) -> None:
-        auth = GithubAuth(kind="github", data={"owner": "a", "pat": {"token": "t"}}, api_base_url="x")
+        auth = GithubAuth(
+            kind="github", data={"owner": "a", "pat": {"token": "t"}}, api_base_url="x"
+        )
         with pytest.raises(GithubAppAuthError):
             auth.app_jwt()
 
-    def test_the_installation_is_chosen_by_the_envelope_owner(self, monkeypatch) -> None:
+    def test_the_installation_is_chosen_by_the_envelope_owner(
+        self, monkeypatch
+    ) -> None:
         """An App installed into several accounts must be told which one. Taking the first would
         collect one account's repositories under another account's name — silently, and with
         results that look entirely plausible."""
@@ -634,16 +757,23 @@ class TestAuthSeam:
         with pytest.raises(GithubAppAuthError, match="not installed"):
             auth.token()
 
-    def test_several_installations_and_no_owner_is_refused_rather_than_guessed(self) -> None:
+    def test_several_installations_and_no_owner_is_refused_rather_than_guessed(
+        self,
+    ) -> None:
         auth = self._app_auth(
-            [{"id": 1, "account": {"login": "a"}}, {"id": 2, "account": {"login": "b"}}], owner=""
+            [
+                {"id": 1, "account": {"login": "a"}},
+                {"id": 2, "account": {"login": "b"}},
+            ],
+            owner="",
         )
         with pytest.raises(GithubAppAuthError, match="several installations"):
             auth.token()
 
     def test_the_jwt_derivation_lives_in_one_place(self) -> None:
         """The host-side verification script proves a credential the way the collector will use
-        it, because both load the same module. A second copy is how "verified" and "works" drift."""
+        it, because both load the same module. A second copy is how "verified" and "works" drift.
+        """
         from pathlib import Path
 
         skill = Path(__file__).resolve().parents[1] / "skills" / "create-github-app"
@@ -675,8 +805,12 @@ class TestAppInventoryScope:
         # (level, site, code, message) — the message matters here: the fallback's whole job is to
         # SAY that the answer is about ourselves rather than about the account.
         collector.records: list[tuple] = []
-        collector.record_warn = lambda *a, **k: collector.records.append(("warn", *a[:3]))
-        collector.record_info = lambda *a, **k: collector.records.append(("info", *a[:3]))
+        collector.record_warn = lambda *a, **k: collector.records.append(
+            ("warn", *a[:3])
+        )
+        collector.record_info = lambda *a, **k: collector.records.append(
+            ("info", *a[:3])
+        )
 
         class _Auth:
             has_app = auth_mode == PREFER_APP
@@ -684,10 +818,21 @@ class TestAppInventoryScope:
             held = [auth_mode]
 
             def absent_note(self, prefer):
-                return "" if (prefer == PREFER_APP and self.has_app) else "a GitHub App would show more here"
+                return (
+                    ""
+                    if (prefer == PREFER_APP and self.has_app)
+                    else "a GitHub App would show more here"
+                )
 
             def installations(self):
-                return [{"id": 1, "app_slug": "ours", "app_id": 10, "account": {"login": "acme"}}]
+                return [
+                    {
+                        "id": 1,
+                        "app_slug": "ours",
+                        "app_id": 10,
+                        "account": {"login": "acme"},
+                    }
+                ]
 
         collector._auth = _Auth()
         return collector
@@ -699,24 +844,45 @@ class TestAppInventoryScope:
             def get_paginated(self, path, **_):
                 assert path == "/orgs/acme/installations"
                 return [
-                    {"id": 1, "app_slug": "renovate", "app_id": 11, "account": {"login": "acme"},
-                     "repository_selection": "all", "permissions": {"contents": "write"}},
-                    {"id": 2, "app_slug": "sonar", "app_id": 12, "account": {"login": "acme"},
-                     "repository_selection": "selected", "permissions": {"contents": "read"}},
+                    {
+                        "id": 1,
+                        "app_slug": "renovate",
+                        "app_id": 11,
+                        "account": {"login": "acme"},
+                        "repository_selection": "all",
+                        "permissions": {"contents": "write"},
+                    },
+                    {
+                        "id": 2,
+                        "app_slug": "sonar",
+                        "app_id": 12,
+                        "account": {"login": "acme"},
+                        "repository_selection": "selected",
+                        "permissions": {"contents": "read"},
+                    },
                 ]
 
         nodes: list[dict] = []
         edges: list[dict] = []
         collector._collect_app_installations(_Client(), "acme", nodes, edges)
-        installs = [n for n in nodes if n["entity"]["entity_type"] == "github_core__app_installation"]
+        installs = [
+            n
+            for n in nodes
+            if n["entity"]["entity_type"] == "github_core__app_installation"
+        ]
         assert {n["node"]["app_slug"] for n in installs} == {"renovate", "sonar"}
-        assert any(e["edge"]["edge_type"] == "HAS_INSTALLATION__github_core" for e in edges)
+        assert any(
+            e["edge"]["edge_type"] == "HAS_INSTALLATION__github_core" for e in edges
+        )
         assert any(e["edge"]["edge_type"] == "INSTALLED_ON__github_core" for e in edges)
 
     def test_a_refused_account_inventory_falls_back_and_says_so(self) -> None:
         """The fallback answer is about ourselves. Reporting it as the account's inventory would
-        say "one App reaches your repositories" when the truth is "we could not look"."""
-        from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+        say "one App reaches your repositories" when the truth is "we could not look".
+        """
+        from tap_plugin.github_core.collectors.github_collector.api_client import (
+            GithubAPIError,
+        )
 
         collector = self._collector()
 
@@ -726,12 +892,18 @@ class TestAppInventoryScope:
 
         nodes: list[dict] = []
         collector._collect_app_installations(_Client(), "acme", nodes, [])
-        assert [n["node"]["app_slug"] for n in nodes
-                if n["entity"]["entity_type"] == "github_core__app_installation"] == ["ours"]
-        assert any(r[0] == "warn" and "APP_INVENTORY_PARTIAL_403" in r[2] for r in collector.records)
-        assert any(r[0] == "info" and "own only" in r[3] for r in collector.records), (
-            "the run must say the inventory is about this App, not about the account"
+        assert [
+            n["node"]["app_slug"]
+            for n in nodes
+            if n["entity"]["entity_type"] == "github_core__app_installation"
+        ] == ["ours"]
+        assert any(
+            r[0] == "warn" and "APP_INVENTORY_PARTIAL_403" in r[2]
+            for r in collector.records
         )
+        assert any(
+            r[0] == "info" and "own only" in r[3] for r in collector.records
+        ), "the run must say the inventory is about this App, not about the account"
 
     def test_a_token_only_envelope_emits_nothing_and_claims_nothing(self) -> None:
         """Without an App the surface is unreachable, not empty — and the run must say which,
@@ -740,8 +912,12 @@ class TestAppInventoryScope:
         nodes: list[dict] = []
         collector._collect_app_installations(object(), "acme", nodes, [])
         assert nodes == []
-        unreachable = [r for r in collector.records if "APP_INVENTORY_UNREACHABLE" in str(r)]
-        assert unreachable, "an empty inventory must be reported as unreachable, not as empty"
+        unreachable = [
+            r for r in collector.records if "APP_INVENTORY_UNREACHABLE" in str(r)
+        ]
+        assert (
+            unreachable
+        ), "an empty inventory must be reported as unreachable, not as empty"
         assert "GitHub App" in unreachable[0][3]
 
 
@@ -751,10 +927,16 @@ class TestAppEndpointHygiene:
     def test_a_non_https_base_url_is_refused_before_anything_moves(self) -> None:
         """`urlopen` honours whatever scheme it is handed: an http:// base would send the JWT in
         cleartext to a host the envelope chose, and file:// would turn an API call into a local
-        file read. The schema refuses both at load; this refuses them again at the call."""
+        file read. The schema refuses both at load; this refuses them again at the call.
+        """
         from tap_plugin.github_core.collectors.github_collector import app_jwt
 
-        for bad in ("http://api.github.com", "file:///etc", "ftp://x", "api.github.com"):
+        for bad in (
+            "http://api.github.com",
+            "file:///etc",
+            "ftp://x",
+            "api.github.com",
+        ):
             with pytest.raises(GithubAppAuthError, match="https|host"):
                 app_jwt.app_get(bad, "/app/installations", "jwt")
 
@@ -763,7 +945,11 @@ class TestAppEndpointHygiene:
 
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(
-                {"owner": "acme", "pat": {"token": "t"}, "api_base_url": "http://api.github.com"},
+                {
+                    "owner": "acme",
+                    "pat": {"token": "t"},
+                    "api_base_url": "http://api.github.com",
+                },
                 GITHUB_SCHEMA,
             )
 
@@ -785,7 +971,10 @@ class TestAppEndpointHygiene:
         monkeypatch.setattr(app_jwt, "app_get", _fake_get)
         result = app_jwt.list_installations("https://api.github.com", "jwt")
         assert len(result) == 101
-        assert seen == ["/app/installations?per_page=100&page=1", "/app/installations?per_page=100&page=2"]
+        assert seen == [
+            "/app/installations?per_page=100&page=1",
+            "/app/installations?per_page=100&page=2",
+        ]
 
     def test_a_single_short_page_stops_immediately(self) -> None:
         """One request for the overwhelmingly common case — an App installed once."""
@@ -794,7 +983,9 @@ class TestAppEndpointHygiene:
         calls: list[str] = []
         original = app_jwt.app_get
         try:
-            app_jwt.app_get = lambda base, path, jwt, **_: (calls.append(path) or [{"id": 1}])
+            app_jwt.app_get = lambda base, path, jwt, **_: (
+                calls.append(path) or [{"id": 1}]
+            )
             assert len(app_jwt.list_installations("https://api.github.com", "jwt")) == 1
             assert len(calls) == 1
         finally:
@@ -814,7 +1005,7 @@ class TestVocabularyIsDeclared:
         models = self._manifest()["models"]
         assert {
             "github_core__workflow_job",
-            "github_core__git_ref",
+            "github_core__commit_observation",
             "github_core__github_ruleset",
             "github_core__github_environment",
             "github_core__actions_cache",
@@ -829,7 +1020,9 @@ class TestVocabularyIsDeclared:
         expected = {
             "DEFINES_JOB__github_core",
             "DEPENDS_ON_JOB__github_core",
-            "HAS_REF__github_core",
+            "HOSTS_REPOSITORY__github_core",
+            "OBSERVES_COMMIT__github_core",
+            "OBSERVED_IN_REPOSITORY__github_core",
             "PROTECTS__github_core",
             "EXEMPTS_ACTOR__github_core",
             "HAS_ENVIRONMENT__github_core",
@@ -841,7 +1034,9 @@ class TestVocabularyIsDeclared:
         }
         assert expected <= set(edges)
         for slug in expected:
-            assert (root / edges[slug]).is_file(), f"{slug} declares a file that is not there"
+            assert (
+                root / edges[slug]
+            ).is_file(), f"{slug} declares a file that is not there"
 
     def test_the_bypasses_edge_documents_that_its_absence_proves_nothing(self) -> None:
         """The edge cannot carry the absence signal, so its description must send a reader to the
@@ -863,11 +1058,13 @@ class TestVocabularyIsDeclared:
         for it would corrupt the derived set. So it must SAY so.
         """
         for source in load_collection_manifest()["sources"]:
-            assert source.get("permission") or source.get("permission_not_applicable"), (
-                f"{source['name']} declares neither a permission nor a reason it needs none"
-            )
+            assert source.get("permission") or source.get(
+                "permission_not_applicable"
+            ), f"{source['name']} declares neither a permission nor a reason it needs none"
 
-    def test_the_derived_permission_set_is_exactly_what_the_sources_ask_for(self) -> None:
+    def test_the_derived_permission_set_is_exactly_what_the_sources_ask_for(
+        self,
+    ) -> None:
         """The exemption must not become a back door into the least-privilege set, and the one
         organization-surface permission must be there BECAUSE a source declares it.
 
@@ -880,7 +1077,12 @@ class TestVocabularyIsDeclared:
         import importlib.util
         from pathlib import Path
 
-        skill = Path(__file__).resolve().parents[1] / "skills" / "create-github-app" / "manifest.py"
+        skill = (
+            Path(__file__).resolve().parents[1]
+            / "skills"
+            / "create-github-app"
+            / "manifest.py"
+        )
         spec = importlib.util.spec_from_file_location("gs_manifest_perms", skill)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -894,9 +1096,9 @@ class TestVocabularyIsDeclared:
         # `packages` arrived with the outputs (github-core#31) and is the one permission an
         # existing installation must re-accept; every other surface reads under the prior set.
         assert org_perms == {"administration": "read", "packages": "read"}
-        assert all(level == "read" for level in {**repo_perms, **org_perms}.values()), (
-            "the collector never asks for write"
-        )
+        assert all(
+            level == "read" for level in {**repo_perms, **org_perms}.values()
+        ), "the collector never asks for write"
 
 
 # --------------------------------------------------------------------------------------------
@@ -947,13 +1149,19 @@ _CONFIG_NODE = {
                 "name": "main-required-checks",
                 "enforcement": "ACTIVE",
                 "target": "BRANCH",
-                "conditions": {"refName": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                "conditions": {
+                    "refName": {"include": ["~DEFAULT_BRANCH"], "exclude": []}
+                },
                 "rules": {"nodes": [{"type": "REQUIRED_STATUS_CHECKS"}]},
                 "bypassActors": {"totalCount": 0, "nodes": []},
             }
         ]
     },
-    "environments": {"nodes": [{"databaseId": 9, "name": "production", "protectionRules": {"nodes": []}}]},
+    "environments": {
+        "nodes": [
+            {"databaseId": 9, "name": "production", "protectionRules": {"nodes": []}}
+        ]
+    },
     "branchRefs": {
         "totalCount": 2,
         "nodes": [
@@ -961,9 +1169,19 @@ _CONFIG_NODE = {
             {"name": "topic", "target": {"oid": "b" * 40}},
         ],
     },
-    "tagRefs": {"totalCount": 1, "nodes": [{"name": "v1", "target": {"oid": "c" * 40, "__typename": "Commit"}}]},
-    "object": {"entries": [{"name": "gate.yml", "path": ".github/workflows/gate.yml",
-                            "object": {"byteSize": 1, "isTruncated": False, "text": _WORKFLOW_YAML}}]},
+    "tagRefs": {
+        "totalCount": 1,
+        "nodes": [{"name": "v1", "target": {"oid": "c" * 40, "__typename": "Commit"}}],
+    },
+    "object": {
+        "entries": [
+            {
+                "name": "gate.yml",
+                "path": ".github/workflows/gate.yml",
+                "object": {"byteSize": 1, "isTruncated": False, "text": _WORKFLOW_YAML},
+            }
+        ]
+    },
 }
 
 
@@ -976,7 +1194,12 @@ class _StubClient:
     def get(self, path, **_):
         self.calls.append(path)
         if path == "/users/acme" or path == "/orgs/acme":
-            return {"login": "acme", "id": 1, "type": "Organization", "html_url": "https://github.com/acme"}
+            return {
+                "login": "acme",
+                "id": 1,
+                "type": "Organization",
+                "html_url": "https://github.com/acme",
+            }
         if path == "/repos/acme/widget/rulesets/555":
             # REST detail WITHOUT `bypass_actors` — the read-only case: GitHub withholds the key.
             return {
@@ -984,11 +1207,17 @@ class _StubClient:
                 "source": "acme",
                 "source_type": "Repository",
                 "current_user_can_bypass": "never",
-                "_links": {"html": {"href": "https://github.com/acme/widget/rules/555"}},
+                "_links": {
+                    "html": {"href": "https://github.com/acme/widget/rules/555"}
+                },
                 "rules": [
                     {
                         "type": "required_status_checks",
-                        "parameters": {"required_status_checks": [{"context": "gate", "integration_id": 15368}]},
+                        "parameters": {
+                            "required_status_checks": [
+                                {"context": "gate", "integration_id": 15368}
+                            ]
+                        },
                     }
                 ],
             }
@@ -996,10 +1225,24 @@ class _StubClient:
             return {
                 "total_count": 2,
                 "actions_caches": [
-                    {"id": 1, "ref": "refs/heads/main", "key": "k1", "version": "v", "size_in_bytes": 10,
-                     "created_at": "2026-08-01T00:00:00Z", "last_accessed_at": "2026-08-02T00:00:00Z"},
-                    {"id": 2, "ref": "refs/pull/7/merge", "key": "k2", "version": "v", "size_in_bytes": 10,
-                     "created_at": "2026-08-01T00:00:00Z", "last_accessed_at": "2026-08-02T00:00:00Z"},
+                    {
+                        "id": 1,
+                        "ref": "refs/heads/main",
+                        "key": "k1",
+                        "version": "v",
+                        "size_in_bytes": 10,
+                        "created_at": "2026-08-01T00:00:00Z",
+                        "last_accessed_at": "2026-08-02T00:00:00Z",
+                    },
+                    {
+                        "id": 2,
+                        "ref": "refs/pull/7/merge",
+                        "key": "k2",
+                        "version": "v",
+                        "size_in_bytes": 10,
+                        "created_at": "2026-08-01T00:00:00Z",
+                        "last_accessed_at": "2026-08-02T00:00:00Z",
+                    },
                 ],
             }
         return {}
@@ -1007,14 +1250,23 @@ class _StubClient:
     def get_paginated(self, path, **_):
         self.calls.append(path)
         if path.endswith("/actions/workflows"):
-            return [{"id": 7, "path": ".github/workflows/gate.yml", "name": "Gate", "state": "active",
-                     "html_url": "https://github.com/acme/widget/actions/workflows/gate.yml"}]
+            return [
+                {
+                    "id": 7,
+                    "path": ".github/workflows/gate.yml",
+                    "name": "Gate",
+                    "state": "active",
+                    "html_url": "https://github.com/acme/widget/actions/workflows/gate.yml",
+                }
+            ]
         if path.endswith("/actions/runners"):
             return []
         return []
 
 
-def _walk_one_repo(monkeypatch, runs: list[dict] | None = None) -> tuple[list[dict], list[dict], _StubClient, list[tuple]]:
+def _walk_one_repo(
+    monkeypatch, runs: list[dict] | None = None
+) -> tuple[list[dict], list[dict], _StubClient, list[tuple]]:
     """Run `_collect_repo` against the stubs and return (nodes, edges, client, warnings)."""
     collector = GithubCollector.__new__(GithubCollector)
     collector._config = {"acme/widget": _CONFIG_NODE}
@@ -1035,19 +1287,29 @@ def _walk_one_repo(monkeypatch, runs: list[dict] | None = None) -> tuple[list[di
         has_pat = False
 
         def absent_note(self, prefer):
-            return "an owner-minted fine-grained token would show them" if prefer == "pat" else ""
+            return (
+                "an owner-minted fine-grained token would show them"
+                if prefer == "pat"
+                else ""
+            )
 
     collector._auth = _AppOnlyAuth()
     warnings: list[tuple] = []
     collector.record_warn = lambda *a, **k: warnings.append(a)
     collector.record_info = lambda *a, **k: None
-    monkeypatch.setattr(GithubCollector, "_fetch_run_window", lambda self, c, f, limit: list(runs or []))
-    monkeypatch.setattr(GithubCollector, "_fetch_non_terminal_refresh", lambda self, c, f, **kw: [])
+    monkeypatch.setattr(
+        GithubCollector, "_fetch_run_window", lambda self, c, f, limit: list(runs or [])
+    )
+    monkeypatch.setattr(
+        GithubCollector, "_fetch_non_terminal_refresh", lambda self, c, f, **kw: []
+    )
 
     nodes: list[dict] = []
     edges: list[dict] = []
     client = _StubClient()
-    collector._collect_repo(client, "acme/widget", 10, nodes, edges, "00000000-0000-0000-0000-000000000001")
+    collector._collect_repo(
+        client, "acme/widget", 10, nodes, edges, "00000000-0000-0000-0000-000000000001"
+    )
     return nodes, edges, client, warnings
 
 
@@ -1064,31 +1326,41 @@ class TestPerRepoWalk:
     def test_every_self_tier_type_is_emitted(self, monkeypatch) -> None:
         nodes, _edges, _client, _warns = _walk_one_repo(monkeypatch)
         by_type = self._by_type(nodes)
-        assert len(by_type["github_core__git_ref"]) == 3          # 2 branches + 1 tag
+        assert (
+            len(by_type["git_core__git_repository"]) == 1
+        )  # the neutral repository the record hosts
+        assert (
+            len(by_type["git_core__git_ref"]) == 3
+        )  # 2 branches + 1 tag, git_core's type
         assert len(by_type["github_core__github_ruleset"]) == 1
         assert len(by_type["github_core__github_environment"]) == 1
-        assert len(by_type["github_core__workflow_job"]) == 2     # build + deploy
+        assert len(by_type["github_core__workflow_job"]) == 2  # build + deploy
         assert len(by_type["github_core__actions_cache"]) == 2
 
     def test_the_ruleset_resolves_to_the_default_branch_only(self, monkeypatch) -> None:
         """`~DEFAULT_BRANCH` is a token, not a pattern: it must select `main` and nothing else."""
         _nodes, edges, _client, _warns = _walk_one_repo(monkeypatch)
         resolved = [
-            e for e in edges
+            e
+            for e in edges
             if e["edge"]["edge_type"] == "PROTECTS__github_core"
             and e["edge"]["properties"].get("match_kind") == "resolved"
         ]
         assert len(resolved) == 1
         assert resolved[0]["edge"]["properties"]["ref_pattern"] == "~DEFAULT_BRANCH"
 
-    def test_rest_rule_parameters_win_over_the_type_only_graphql_list(self, monkeypatch) -> None:
+    def test_rest_rule_parameters_win_over_the_type_only_graphql_list(
+        self, monkeypatch
+    ) -> None:
         """The gate view needs the required check CONTEXTS, which only the REST detail carries."""
         nodes, _edges, _client, _warns = _walk_one_repo(monkeypatch)
         ruleset = self._by_type(nodes)["github_core__github_ruleset"][0]["node"]
         contexts = ruleset["rules"][0]["parameters"]["required_status_checks"]
         assert contexts == [{"context": "gate", "integration_id": 15368}]
 
-    def test_a_withheld_bypass_list_is_unobservable_and_warns(self, monkeypatch) -> None:
+    def test_a_withheld_bypass_list_is_unobservable_and_warns(
+        self, monkeypatch
+    ) -> None:
         """Both transports silent: the node says `unobservable` with a null count, and the run
         says so out loud rather than leaving a blank cell to be read as safety."""
         nodes, _edges, _client, warnings = _walk_one_repo(monkeypatch)
@@ -1097,22 +1369,37 @@ class TestPerRepoWalk:
         assert ruleset["bypass_actor_count"] is None
         assert any("RULESET_BYPASS_UNOBSERVABLE" in w for w in warnings)
 
-    def test_a_cache_from_a_pull_request_ref_gets_no_ref_edge(self, monkeypatch) -> None:
+    def test_a_cache_from_a_pull_request_ref_gets_no_ref_edge(
+        self, monkeypatch
+    ) -> None:
         """The absence IS the signal: an entry scoped to a PR ref was written from outside the
         branch a privileged job restores it on."""
         _nodes, edges, _client, _warns = _walk_one_repo(monkeypatch)
-        scoped = [e for e in edges if e["edge"]["edge_type"] == "SCOPED_TO__github_core"]
+        scoped = [
+            e for e in edges if e["edge"]["edge_type"] == "SCOPED_TO__github_core"
+        ]
         assert len(scoped) == 1  # refs/heads/main resolves; refs/pull/7/merge does not
 
-    def test_the_declared_jobs_carry_the_pull_request_target_shape(self, monkeypatch) -> None:
+    def test_the_declared_jobs_carry_the_pull_request_target_shape(
+        self, monkeypatch
+    ) -> None:
         nodes, _edges, _client, _warns = _walk_one_repo(monkeypatch)
-        jobs = {n["node"]["job_key"]: n["node"] for n in self._by_type(nodes)["github_core__workflow_job"]}
-        assert jobs["build"]["checkout_ref"] == "${{ github.event.pull_request.head.sha }}"
-        assert jobs["build"]["configuration"]["workflow_triggers"] == ["pull_request_target"]
-        assert jobs["build"]["permissions"] == {}       # declared empty
-        assert jobs["deploy"]["permissions"] is None    # inherits
+        jobs = {
+            n["node"]["job_key"]: n["node"]
+            for n in self._by_type(nodes)["github_core__workflow_job"]
+        }
+        assert (
+            jobs["build"]["checkout_ref"] == "${{ github.event.pull_request.head.sha }}"
+        )
+        assert jobs["build"]["configuration"]["workflow_triggers"] == [
+            "pull_request_target"
+        ]
+        assert jobs["build"]["permissions"] == {}  # declared empty
+        assert jobs["deploy"]["permissions"] is None  # inherits
 
-    def test_the_needs_graph_and_the_environment_link_are_emitted(self, monkeypatch) -> None:
+    def test_the_needs_graph_and_the_environment_link_are_emitted(
+        self, monkeypatch
+    ) -> None:
         _nodes, edges, _client, _warns = _walk_one_repo(monkeypatch)
         types = [e["edge"]["edge_type"] for e in edges]
         assert types.count("DEPENDS_ON_JOB__github_core") == 1
@@ -1126,8 +1413,13 @@ class TestPerRepoWalk:
         found."""
         seen: list[int] = []
         monkeypatch.setattr(
-            GithubCollector, "_fetch_run_jobs",
-            lambda self, c, f, run_id: (seen.append(run_id) or [{"id": 1, "name": "build"}]),
+            GithubCollector,
+            "_fetch_run_jobs",
+            lambda self, c, f, run_id: (
+                seen.append(run_id) or [{"id": 1, "name": "build"}]
+            ),
         )
-        _walk_one_repo(monkeypatch, runs=[{"id": 100, "run_number": 1, "workflow_id": 7}])
+        _walk_one_repo(
+            monkeypatch, runs=[{"id": 100, "run_number": 1, "workflow_id": 7}]
+        )
         assert seen == [100], f"each run's jobs should be fetched once, got {seen}"

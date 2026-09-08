@@ -62,20 +62,44 @@ class GithubRelease(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "release_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "release_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "tag_name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         # null is "not observed", never "false": a degraded read must not claim a release is final.
-        "is_draft": {"validation": "jsonschema", "schema": {"type": ["boolean", "null"]}},
-        "is_prerelease": {"validation": "jsonschema", "schema": {"type": ["boolean", "null"]}},
-        "is_latest": {"validation": "jsonschema", "schema": {"type": ["boolean", "null"]}},
+        "is_draft": {
+            "validation": "jsonschema",
+            "schema": {"type": ["boolean", "null"]},
+        },
+        "is_prerelease": {
+            "validation": "jsonschema",
+            "schema": {"type": ["boolean", "null"]},
+        },
+        "is_latest": {
+            "validation": "jsonschema",
+            "schema": {"type": ["boolean", "null"]},
+        },
         "author_login": {"validation": "jsonschema", "schema": {"type": "string"}},
         "target_sha": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "created_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
-        "published_at": {"validation": "jsonschema", "schema": {"type": ["string", "null"]}},
+        "created_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
+        "published_at": {
+            "validation": "jsonschema",
+            "schema": {"type": ["string", "null"]},
+        },
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "asset_count": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "asset_count": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "assets": {"validation": "jsonschema", "schema": {"type": "array"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
@@ -110,7 +134,11 @@ class GithubRelease(BaseModel):
         db_table = "github_core__github_release"
 
     def get_name(self) -> str:
-        return self.name or self.tag_name or (str(self.release_id) if self.release_id else "")
+        return (
+            self.name
+            or self.tag_name
+            or (str(self.release_id) if self.release_id else "")
+        )
 
     def __str__(self) -> str:
         return self.get_name()

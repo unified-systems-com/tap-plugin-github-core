@@ -80,7 +80,8 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-actions-used | [Actions Used](#actions-used) | In Development | 2026-09-02 (github-core#45, ranked first by `build-github-corpus`): `github_action` node keyed on the action path, shared across the scope, plus `USES_ACTION` carrying the pin. The parser no longer labels every non-SHA ref `tag`; a mutable name is resolved only against an in-scope repository's refs and is otherwise `unresolved` / `unobservable`. |
 | req-github-core-workflow-chains | [Workflow Chains](#workflow-chains) | In Development | 2026-09-02 (github-core#29, #52): `CALLS_WORKFLOW` (job → reusable workflow, the `USES_ACTION` pin grammar + `secrets_inherit`) and `TRIGGERS_WORKFLOW` (completing → triggered, from `on.workflow_run`), both resolved in a post-pass over the whole scope; an unresolved callee or name is recorded on the node, never fabricated. |
 | req-github-core-artifacts | [Artifacts](#artifacts) | In Development | 2026-09-02 (github-core#55): `actions_artifact` from the repository listing (newest first, capped, total reported) joined by `UPLOADS_ARTIFACT` from the producing run when it is in the batch; `expired` observed, never inferred (shape C). Declared upload/download steps on the job; no download edge — GitHub keeps no record of downloads. |
-| req-github-core-commits | [Commits](#commits) | In Development | 2026-09-02 (github-core#57): `git_commit` keyed on repository + SHA (the verification record is network-scoped), sliced to identity-as-observed and signature state from a `CommitSlice` fragment on the config-layer refs query (no extra request, no extra permission — measured); `POINTS_AT` from each ref, property-free. `signature: null` is `unsigned`; a degraded field is pruned and lands as `unobservable`. |
+| req-github-core-commits | [Commits](#commits) | Implemented | 2026-09-08 (github-core#76/#78): the commit's INTRINSIC half is the neutral `git_core__git_commit` (identity `sha1:oid`, one node however many hosts store it; `STORES_COMMIT` from the neutral repository, `RESOLVES_COMMIT` from the ref); GitHub's OBSERVED half — resolved logins, signature verdict in three states — is `commit_observation`, keyed per host + repository stable id + commit (`OBSERVES_COMMIT`, `OBSERVED_IN_REPOSITORY`). Sliced from a `CommitSlice` fragment on the config-layer refs query at no extra request. |
+| req-github-core-refs | [Refs](#refs) | Implemented | Branches and tags, one type. Since github-core#76/#78 the ref is the neutral `git_core__git_ref` (identity = neutral repository id + full path; `DECLARES_REF__git_core` from the neutral repository this record `HOSTS_REPOSITORY`); this plugin emits it and targets it from `PROTECTS` / `SCOPED_TO` / `EVALUATED_ON_REF` / `TARGETS_REF`. Row added per github-core#69. |
 | req-github-core-status-checks | [Status Checks](#status-checks) | In Development | 2026-09-02 (github-core#61): `status_check` keyed `<owner>#<context>` from the ruleset detail's `required_status_checks` parameters; `REQUIRES_CHECK` with the rule's qualifiers; `PRODUCES_CHECK` derived from job display names with stated confidence, only toward required contexts an Actions job may produce. A refused detail is counted as not observable, never as no requirement. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
@@ -640,45 +641,46 @@ nothing — the same three-state field the releases and packages surfaces stamp.
 ### Commits
 ----
 RID: `req-github-core-commits`
-Status: `In Development`
 
-The commit at every collected ref's head, sliced to what a signature question and an identity
-question need and nothing else — no message, tree or parents (github-core#57). It exists because
-a ruleset's `required_signatures` rule asks a question only this node can answer, and because the
-corpus's ranking names "a commit joins refs to signatures" as the convergence case; that is why it
-moved from the friends tier to self.
+Status: `Implemented`
 
-**Keyed on the repository plus the SHA.** A commit is content-addressed, but GitHub persists the
-signature *verification record* per repository network, so the same SHA in two unrelated networks
-can carry two verdicts and a SHA-only node would merge them (PR #60 review; GitHub docs retrieved
-2026-09-02). The cross-fork join is a follow-on keyed on the network root once `Repository.parent`
-is collected. Author and committer are recorded **as observed** — a login only when GitHub resolved the email, an empty
-login as observed-absent.
+The commit at every collected ref's head, in two halves (github-core#76, rulings 0.1/0.2; built
+in #78). **The neutral half is git_core's**: `git_core__git_commit` holds what Git records — object
+id, dates, author and committer name and email — under the global identity `(hash_algorithm, oid)`
+minted by `tap_plugin.git_core.identity.git_commit_id`, so the same commit observed from any host
+is one node; `STORES_COMMIT__git_core` from the neutral repository says this repository holds it,
+`RESOLVES_COMMIT__git_core` from the ref says the ref peels to it. **The observed half is ours**:
+`github_core__commit_observation` holds the login GitHub resolved each email to (empty is
+observed-absent) and GitHub's signature verification verdict, keyed on the host, the repository's
+stable id and the commit identity — because GitHub persists the verification record per repository
+network (GitHub docs, retrieved 2026-09-02), the same commit in two unrelated networks can carry two
+verdicts, and a per-commit verdict field would let one overwrite the other. `OBSERVES_COMMIT` links
+the observation to the commit, `OBSERVED_IN_REPOSITORY` to the hosting record. A stable record updated in
+place; TAP field history carries change. The cross-fork join on the network root stays a follow-on
+once `Repository.parent` is collected.
 
 **Collected at no additional cost.** A `CommitSlice` fragment on the config-layer refs query's
 targets (and on `Tag.target` for annotated tags) — scalar fields on nodes already requested,
 measured at `rateLimit.cost: 1` on 2026-09-02 — under `repository:contents:read`, the `refs`
-source's own triple.
+source's own triple. The manifest declares `commits` (neutral) and `commit_observations` (ours)
+as two sources on that one fragment.
 
 **The signature has three states, never two.** GitHub's verification `state` when a signature
 exists; `unsigned` when GitHub returned `signature: null`, which is an observed value, with
 `signature_valid: null` rather than false; and `unobservable` when the field was not answered. A
 degraded GraphQL field arrives as `null` beside an `errors[]` entry — indistinguishable from an
 unsigned commit — so the config layer **prunes the key at every errored path** before shaping, an
-absent key lands as `unobservable`, and a body whose `committedDate` was pruned emits no node.
-
-`POINTS_AT` (ref → commit) is property-free: the corpus's `observed_at` duplicates batch provenance
-and `git_ref.head_sha` field history. A moved ref re-derives the relation (github-core#14, shape G);
-under additive-only collection the old edge lingers, and reconciliation, not a flag, is the fix.
+absent key lands as `unobservable`, and a body whose `committedDate` was pruned emits nothing.
 
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-commits-1 | One Node Per Repository And SHA | In Development | Every ref carrying a commit slice yields a `git_commit` keyed on `owner/repo` + SHA and a `POINTS_AT` from the ref; two refs in one repository at one commit share the node. | The verification record is network-scoped, so the key is never wider than a repository. |
-| req-github-core-commits-2 | Signature In Three States | In Development | A signed commit stores GitHub's `state`, kind, validity and signer; `signature: null` stores `unsigned` with `signature_valid: null`; a `signature` key pruned for a field error stores `unobservable`; a ref whose commit slice is absent emits no commit and no edge. | Never false for unsigned or unobservable. |
-| req-github-core-commits-3 | Identity As Observed | In Development | `author_login` / `committer_login` are set only when GitHub resolved the email to an account; the raw name and email are kept alongside. | |
-| req-github-core-commits-4 | No Extra Request Or Permission | In Development | The slice rides the config-layer refs query; the manifest declares `repository:contents:read`, already in the union, and the conformance extract carries the traversed `Commit`, `GitActor` and `GitSignature` fields. | |
+| req-github-core-commits-1 | One Neutral Commit Per Oid, One Observation Per Repository | Implemented | Every ref carrying a commit slice yields a `git_core__git_commit` keyed `sha1:oid` (shared across refs and repositories) with `STORES_COMMIT` from the neutral repository and `RESOLVES_COMMIT` from the ref, plus a `commit_observation` keyed host + repository stable id + commit with `OBSERVES_COMMIT` and `OBSERVED_IN_REPOSITORY`. | The verification record is network-scoped, so the OBSERVATION is per repository; the commit is not. |
+| req-github-core-commits-2 | Signature In Three States | Implemented | The observation stores GitHub's `state`, kind, validity and signer; `signature: null` stores `unsigned` with `signature_valid: null`; a `signature` key pruned for a field error stores `unobservable`; a ref whose commit slice is absent emits no commit, no observation and no edge. | Never false for unsigned or unobservable. |
+| req-github-core-commits-3 | Identity As Observed | Implemented | `author_login` / `committer_login` on the observation are set only when GitHub resolved the email to an account; the raw name and email live on the neutral commit. | |
+| req-github-core-commits-4 | No Extra Request Or Permission | Implemented | Both sources ride the config-layer refs query; the manifest declares `repository:contents:read`, already in the union, and the conformance extract carries the traversed `Commit`, `GitActor` and `GitSignature` fields. | |
+| req-github-core-commits-5 | Nothing Observed On The Neutral Commit | Implemented | The neutral commit envelope carries only intrinsic fields and `{"git.object": "commit"}`; no login, verdict or `github.*` dimension. | `tests/test_commits.py`. |
 
 ### Status Checks
 ----
@@ -731,7 +733,10 @@ incidents and a ruleset's target is one enum spanning `branch|tag|push`, so a sp
 that join across two types and two edges. The slug is a modelling name; views render "Branches"
 and "Tags".
 
-Identity keys on the full ref path, since a branch and a tag may share a short name.
+Identity is the NEUTRAL repository's id plus the full ref path, minted by git_core (github-core#76/#78): the
+ref is `git_core__git_ref`, declared by the neutral `git_core__git_repository` this record `HOSTS_REPOSITORY`
+(`DECLARES_REF__git_core`), and it carries only `{"git.object": "ref"}` — no `owner/repo`, no `github.*`. A branch
+and a tag may share a short name, so the path is the key.
 
 **Tag-movement detection is not implemented and does not need to be.** `head_sha` is a field on a
 node with a deterministic id, so the grid's own field history records the move; detection is a
@@ -743,7 +748,7 @@ re-tag that swaps only the tag object moves one and not the other.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-refs-1 | Branches And Tags Are One Type | Implemented | Both land as `git_ref` with `ref_type` ∈ `branch`\|`tag`, keyed on the full ref path, joined to the repository by `HAS_REF`. | |
+| req-github-core-refs-1 | Branches And Tags Are One Type | Implemented | Both land as `git_core__git_ref` with `ref_type` ∈ `branch`\|`tag`, keyed on the neutral repository id + full ref path, joined to the neutral repository by `DECLARES_REF__git_core`; the hosting record reaches them through `HOSTS_REPOSITORY`. | Was `github_core__git_ref` + `HAS_REF` until github-core#78. |
 | req-github-core-refs-2 | Annotated Tags Keep Both SHAs | Implemented | `target_sha` is what the ref holds; `head_sha` is the commit it resolves to. They differ for an annotated tag. | |
 | req-github-core-refs-3 | Truncation Is Reported | Implemented | When the per-repository page cap leaves refs uncollected, the run records a warning naming the count and stating that absence in the batch is not evidence of deletion. | Same discipline as the scope-enumeration assertion (`req-github-core-org-scope-3`). |
 | req-github-core-refs-4 | Config Layer Only | Implemented | Refs arrive in the GraphQL config layer at no extra request. A repos-only scope, which runs no GraphQL enumeration, collects none — and says so rather than reporting a repository with no branches. | |

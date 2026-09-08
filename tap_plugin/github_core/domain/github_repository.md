@@ -26,6 +26,8 @@ The cost is the same as for the account: a **transfer or rename produces a new n
 
 ## Boundaries
 
+- **Not the repository as a Git object.** Since github-core#76 that is the neutral `git_core__git_repository` this record links to with `HOSTS_REPOSITORY`; refs and stored commits hang off the neutral node. This record keeps the hosting facts.
+
 Deliberately **not** covered:
 
 - **Contents.** This is not a code model. The only file this plugin reads is `.github/workflows/*`, and it is held in memory, parsed, and retained as text on the workflow node (`req-github-core-workflow-parse-5`) — never as a repository tree.

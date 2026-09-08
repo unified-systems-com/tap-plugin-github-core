@@ -1,13 +1,13 @@
 {
   "slug": "PROTECTS__github_core",
   "name": "Protects",
-  "description": "A ruleset gates a repository, or a specific ref within it. One ruleset defined at the organization protects many repositories, so this is the edge that carries application while the ruleset node carries definition.",
+  "description": "A ruleset gates a repository, or a specific ref within it. One ruleset defined at the organization protects many repositories, so this is the edge that carries application while the ruleset node carries definition. (Ref target: the neutral git_core__git_ref since github-core#76.)",
   "sources": [
     "github_core__github_ruleset"
   ],
   "targets": [
     "github_core__github_repository",
-    "github_core__git_ref"
+    "git_core__git_ref"
   ],
   "default_dimensions": {
     "github.platform": "github.com",
@@ -28,7 +28,7 @@
           "declared",
           "resolved"
         ],
-        "description": "`declared` \u2014 the ruleset applies to the repository and its pattern is recorded verbatim. `resolved` \u2014 the pattern was matched against a ref actually observed on the grid. A view that shows what protects `main` today wants resolved; an audit of intent wants declared."
+        "description": "`declared` — the ruleset applies to the repository and its pattern is recorded verbatim. `resolved` — the pattern was matched against a ref actually observed on the grid. A view that shows what protects `main` today wants resolved; an audit of intent wants declared."
       }
     }
   }

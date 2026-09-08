@@ -58,15 +58,23 @@ class StatusCheck(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "owner_login": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
-        "context": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "owner_login": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
+        "context": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "name": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
     CREATE_REQUIRED: ClassVar[list[str]] = ["owner_login", "context"]
 
-    owner_login = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    owner_login = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     # The context string exactly as the rule wrote it — the name a check run must carry.
     context = models.CharField(max_length=512, blank=True, default="", db_index=True)
     name = models.CharField(max_length=512, blank=True, default="")

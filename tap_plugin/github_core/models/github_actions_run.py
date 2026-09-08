@@ -52,17 +52,29 @@ class GithubActionsRun(BaseModel):
     # against a `datetime` object that the API-input shape "string | null"
     # describes only the inbound JSON shape, not the at-rest Python value.
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "full_name": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
+        "full_name": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "run_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
-        "run_number": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "run_number": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "event": {"validation": "jsonschema", "schema": {"type": "string"}},
         "status": {"validation": "jsonschema", "schema": {"type": "string"}},
         "conclusion": {"validation": "jsonschema", "schema": {"type": "string"}},
         "head_sha": {"validation": "jsonschema", "schema": {"type": "string"}},
         "head_branch": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "run_attempt": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "run_attempt": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "actor_login": {"validation": "jsonschema", "schema": {"type": "string"}},
-        "triggering_actor_login": {"validation": "jsonschema", "schema": {"type": "string"}},
+        "triggering_actor_login": {
+            "validation": "jsonschema",
+            "schema": {"type": "string"},
+        },
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},

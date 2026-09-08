@@ -5,6 +5,7 @@ name = "TAP GitHub Core"
 description = "GitHub Actions models — the pipeline as declared (workflows, jobs, rulesets, environments) and as run (runs, jobs, runners, caches) — and what it produces (releases, artifacts, packages)."
 
 depends_on = [
+    { slug = "git_core", note = "The neutral Git vocabulary (github-core#76): the collector mints git_core__git_repository / git_ref / git_commit through tap_plugin.git_core.identity and targets those types from DECLARES_REF-adjacent edges (PROTECTS, SCOPED_TO, EVALUATED_ON_REF, TARGETS_REF) and from commit_observation." },
     { slug = "identity_core", note = "ENABLED_ON sources the identity_core__oidc_issuer type; the collector mints the issuer node via identity_core.issuer (the OIDC vocabulary lives there, not here)." },
 ]
 
@@ -19,8 +20,7 @@ github_core__github_runner = "tap_plugin.github_core.models.github_runner.Github
 github_core__github_app = "tap_plugin.github_core.models.github_app.GithubApp"
 github_core__app_installation = "tap_plugin.github_core.models.app_installation.AppInstallation"
 github_core__workflow_job = "tap_plugin.github_core.models.workflow_job.WorkflowJob"
-github_core__git_ref = "tap_plugin.github_core.models.git_ref.GitRef"
-github_core__git_commit = "tap_plugin.github_core.models.git_commit.GitCommit"
+github_core__commit_observation = "tap_plugin.github_core.models.commit_observation.CommitObservation"
 github_core__github_ruleset = "tap_plugin.github_core.models.github_ruleset.GithubRuleset"
 github_core__rule_suite = "tap_plugin.github_core.models.rule_suite.RuleSuite"
 github_core__status_check = "tap_plugin.github_core.models.status_check.StatusCheck"
@@ -44,7 +44,7 @@ REFERENCES_RESOURCE__github_core = "edges/REFERENCES_RESOURCE.edge.json"
 FEDERATES_VIA__github_core = "edges/FEDERATES_VIA.edge.json"
 DEFINES_JOB__github_core = "edges/DEFINES_JOB.edge.json"
 DEPENDS_ON_JOB__github_core = "edges/DEPENDS_ON_JOB.edge.json"
-HAS_REF__github_core = "edges/HAS_REF.edge.json"
+HOSTS_REPOSITORY__github_core = "edges/HOSTS_REPOSITORY.edge.json"
 PROTECTS__github_core = "edges/PROTECTS.edge.json"
 TRIGGERED_EVALUATION__github_core = "edges/TRIGGERED_EVALUATION.edge.json"
 BYPASSED_RULE__github_core = "edges/BYPASSED_RULE.edge.json"
@@ -60,7 +60,8 @@ USES_ACTION__github_core = "edges/USES_ACTION.edge.json"
 CALLS_WORKFLOW__github_core = "edges/CALLS_WORKFLOW.edge.json"
 TRIGGERS_WORKFLOW__github_core = "edges/TRIGGERS_WORKFLOW.edge.json"
 UPLOADS_ARTIFACT__github_core = "edges/UPLOADS_ARTIFACT.edge.json"
-POINTS_AT__github_core = "edges/POINTS_AT.edge.json"
+OBSERVES_COMMIT__github_core = "edges/OBSERVES_COMMIT.edge.json"
+OBSERVED_IN_REPOSITORY__github_core = "edges/OBSERVED_IN_REPOSITORY.edge.json"
 REQUIRES_CHECK__github_core = "edges/REQUIRES_CHECK.edge.json"
 PRODUCES_CHECK__github_core = "edges/PRODUCES_CHECK.edge.json"
 PUBLISHES_RELEASE__github_core = "edges/PUBLISHES_RELEASE.edge.json"

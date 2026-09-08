@@ -45,9 +45,12 @@ const T = {
     platform: "github_core__github_platform",
     account: "github_core__github_account",
     repository: "github_core__github_repository",
+    // The neutral git_core repository the hosting record HOSTS (github-core#76). Refs hang
+    // off it on the grid; the scene bridges them back under the hosting record and hides it.
+    gitRepository: "git_core__git_repository",
     workflow: "github_core__github_workflow",
     job: "github_core__workflow_job",
-    ref: "github_core__git_ref",
+    ref: "git_core__git_ref",
     ruleset: "github_core__github_ruleset",
     environment: "github_core__github_environment",
     app: "github_core__github_app",
@@ -62,7 +65,8 @@ const E = {
     definesWorkflow: "DEFINES_WORKFLOW__github_core",
     definesJob: "DEFINES_JOB__github_core",
     dependsOnJob: "DEPENDS_ON_JOB__github_core",
-    hasRef: "HAS_REF__github_core",
+    hostsRepository: "HOSTS_REPOSITORY__github_core",
+    declaresRef: "DECLARES_REF__git_core",
     protects: "PROTECTS__github_core",
     hasEnvironment: "HAS_ENVIRONMENT__github_core",
     enabledOn: "ENABLED_ON__github_core",
@@ -73,6 +77,9 @@ const E = {
 const SYN = {
     hostsThirdParty: "_MACHINERY_HOSTS_THIRD_PARTY",
     hasPlaceholder: "_MACHINERY_HAS_PLACEHOLDER",
+    // hosting record -> ref, derived from HOSTS_REPOSITORY + DECLARES_REF so the neutral
+    // repository node need not be a box of its own (github-core#76).
+    hasRef: "_MACHINERY_HAS_REF",
 };
 
 // Stages inside the repository box (stage 0 is the source end).
@@ -203,6 +210,7 @@ export async function execute(context) {
     _addPlaceholders(cy, repos);
 
     // ---- Third parties nest under github.com (no grid edge exists) -------
+    _bridgeRefsToHostingRecord(cy);
     _hostThirdParties(cy);
 
     // ---- Anything repo-scoped that no present repository owns is not part
@@ -246,7 +254,7 @@ export async function execute(context) {
             {name: "platform-hosts-third-party", gryphon: `(parent:${T.platform})-[:${SYN.hostsThirdParty}]->(child)`},
             {name: "account-owns-repository", gryphon: `(parent:${T.account})-[:${E.ownsRepo}]->(child:${T.repository})`},
             {name: "repository-defines-workflow", gryphon: `(parent:${T.repository})-[:${E.definesWorkflow}]->(child:${T.workflow})`},
-            {name: "repository-has-ref", gryphon: `(parent:${T.repository})-[:${E.hasRef}]->(child:${T.ref})`},
+            {name: "repository-has-ref", gryphon: `(parent:${T.repository})-[:${SYN.hasRef}]->(child:${T.ref})`},
             {name: "repository-has-environment", gryphon: `(parent:${T.repository})-[:${E.hasEnvironment}]->(child:${T.environment})`},
             {name: "ruleset-protects-repository", gryphon: `(parent:${T.repository})<-[:${E.protects}]-(child:${T.ruleset})`},
             {name: "repository-has-placeholder", gryphon: `(parent:${T.repository})-[:${SYN.hasPlaceholder}]->(child:${T.placeholder})`},
@@ -335,8 +343,10 @@ async function _fetchFacts(fullNames, warn) {
             "RETURN w.entity_id AS entity_id, w.data.workflow_id AS workflow_id, w.data.path AS path, w.data.configuration AS configuration",
         ]},
         {kind: "refs", into: facts.refs, query: [
-            `MATCH (r:${T.ref})`,
-            "WHERE r.data.full_name = $repo",
+            // The neutral ref carries no owner/repo name: it belongs to the git_core repository
+            // the hosting record HOSTS (github-core#76), so the facts query walks that path.
+            `MATCH (h:${T.repository})-[:${E.hostsRepository}]->(g:${T.gitRepository})-[:${E.declaresRef}]->(r:${T.ref})`,
+            "WHERE h.data.full_name = $repo",
             "RETURN r.entity_id AS entity_id, r.data.ref_type AS ref_type, r.data.is_default AS is_default, r.data.name AS name",
         ]},
     ];
@@ -483,7 +493,7 @@ function _planRefs(cy, facts, stackOver) {
         const isDefault = fact.is_default === true;
         const isTag = fact.ref_type === "tag";
         ref.data("_order", isDefault ? 0 : (isTag ? 1 : 2));
-        const owner = ref.incomers(edgeSel(E.hasRef)).sources().first();
+        const owner = ref.incomers(edgeSel(SYN.hasRef)).sources().first();
         const repoId = owner.nonempty() ? owner.id() : "";
         if (!byRepo.has(repoId)) byRepo.set(repoId, {kept: [], branches: []});
         if (isDefault || isTag) byRepo.get(repoId).kept.push(ref);
@@ -534,6 +544,27 @@ function _addPlaceholders(cy, repos) {
     if (additions.length) cy.add(additions);
 }
 
+// Refs live on the neutral git_core repository (HOSTS_REPOSITORY -> DECLARES_REF). The
+// machinery view nests them under the HOSTING record: add a scene-local hasRef edge per ref
+// and hide the neutral repository node, which has no box of its own here. Never written to
+// the grid. A ref whose neutral repository is not on the canvas gets no bridge and is hidden
+// by _hideOrphans below, which is the honest outcome for a scene that omitted the node.
+function _bridgeRefsToHostingRecord(cy) {
+    const additions = [];
+    cy.nodes(`[entity_type = "${T.ref}"]`).forEach((ref) => {
+        const gitRepo = ref.incomers(edgeSel(E.declaresRef)).sources().first();
+        if (gitRepo.empty()) return;
+        const hosting = gitRepo.incomers(edgeSel(E.hostsRepository)).sources().first();
+        if (hosting.empty()) return;
+        const id = `${SYN.hasRef}:${ref.id()}`;
+        if (cy.getElementById(id).empty()) {
+            additions.push({group: "edges", data: {id, source: hosting.id(), target: ref.id(), label: SYN.hasRef, edge_type: SYN.hasRef, _synthetic: true}});
+        }
+    });
+    if (additions.length) cy.add(additions);
+    cy.nodes(`[entity_type = "${T.gitRepository}"]`).forEach((n) => { n.data("_machinery_hidden", true); n.addClass(ELEVATION_HIDDEN_CLASS); });
+}
+
 function _hostThirdParties(cy) {
     const platform = cy.nodes(`[entity_type = "${T.platform}"]`).first();
     if (platform.empty()) return;
@@ -558,7 +589,7 @@ function _hideOrphans(cy, repos, warn) {
     cy.nodes(`[entity_type = "${T.app}"]`).forEach((n) => { if (!attachedTo(n, E.enabledOn, "out")) hidden.push(n); });
     cy.nodes(`[entity_type = "${T.environment}"]`).forEach((n) => { if (!attachedTo(n, E.hasEnvironment, "in")) hidden.push(n); });
     cy.nodes(`[entity_type = "${T.workflow}"], [entity_type = "${T.ref}"]`).forEach((n) => {
-        const et = n.data("entity_type") === T.workflow ? E.definesWorkflow : E.hasRef;
+        const et = n.data("entity_type") === T.workflow ? E.definesWorkflow : SYN.hasRef;
         if (!attachedTo(n, et, "in")) hidden.push(n);
     });
     // A job whose DEFINES_JOB edge does not lead to a workflow that survived

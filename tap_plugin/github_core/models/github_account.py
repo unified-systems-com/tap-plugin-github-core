@@ -41,8 +41,14 @@ class GithubAccount(BaseModel):
     }
 
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
-        "login": {"validation": "jsonschema", "schema": {"type": "string", "minLength": 1}},
-        "github_id": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        "login": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
+        "github_id": {
+            "validation": "jsonschema",
+            "schema": {"type": ["integer", "null"]},
+        },
         "account_type": {"validation": "jsonschema", "schema": {"type": "string"}},
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
