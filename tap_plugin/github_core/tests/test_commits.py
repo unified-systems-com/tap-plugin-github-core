@@ -283,6 +283,28 @@ class TestEmission:
         )
         assert observed_in["edge"]["to_entity_id"] == str(repository_id("acme/widget"))
 
+    def test_a_target_without_a_typename_gets_its_kind_from_the_peel(self) -> None:
+        """Live collection 2026-09-08: refs whose target carried no `__typename` failed git_core's
+        target_type-when-target_sha rule. The peel decides: differs from head -> tag object, else commit.
+        """
+        c = self._collector()
+        node = _repo_node()
+        for ref in node["branchRefs"]["nodes"] + node["tagRefs"]["nodes"]:
+            ref["target"].pop("__typename", None)
+        c._config = {"acme/widget": node}
+        nodes, _edges = self._emit(c)
+        by_ref = {
+            n["node"]["ref"]: n["node"]
+            for n in nodes
+            if n["entity"]["entity_type"] == "git_core__git_ref"
+        }
+        assert by_ref["refs/heads/main"]["target_type"] == "commit"
+        assert by_ref["refs/tags/v1"]["target_type"] == "commit"
+        assert (
+            by_ref["refs/tags/v2"]["target_type"] == "tag"
+            and by_ref["refs/tags/v2"]["target_sha"] == "1" * 40
+        )
+
     def test_no_neutral_repository_means_no_refs_and_no_commits(self) -> None:
         nodes: list[dict] = []
         edges: list[dict] = []
@@ -323,8 +345,19 @@ class TestModelAndEdge:
         ).success
 
     def test_observes_commit_is_observation_to_commit_and_property_free(self) -> None:
-        obs = _create("github_core__commit_observation", {"full_name": "o/r", "sha": "c" * 40})
-        commit = _create("git_core__git_commit", {"hash_algorithm": "sha1", "oid": "c" * 40})
-        edge = create_edge(obs.entity, commit.entity, "OBSERVES_COMMIT__github_core", {})
-        assert edge.edge_type == "OBSERVES_COMMIT__github_core" and edge.properties == {}
-        assert edge.from_entity_id == obs.entity_id and edge.to_entity_id == commit.entity_id
+        obs = _create(
+            "github_core__commit_observation", {"full_name": "o/r", "sha": "c" * 40}
+        )
+        commit = _create(
+            "git_core__git_commit", {"hash_algorithm": "sha1", "oid": "c" * 40}
+        )
+        edge = create_edge(
+            obs.entity, commit.entity, "OBSERVES_COMMIT__github_core", {}
+        )
+        assert (
+            edge.edge_type == "OBSERVES_COMMIT__github_core" and edge.properties == {}
+        )
+        assert (
+            edge.from_entity_id == obs.entity_id
+            and edge.to_entity_id == commit.entity_id
+        )

@@ -1800,6 +1800,14 @@ class GithubCollector(CollectorBase):
             uuid_by_ref[ref["ref"]] = ref_uuid
             if ref["is_default"]:
                 self._default_refs.add(f"{full_name}#{ref['ref']}")
+            # git_core requires the target's kind whenever a target is named. GitHub's
+            # `__typename` supplies it when the query asked; when it did not, the peel says which:
+            # a target that differs from the resolved commit is a tag object, otherwise the commit.
+            target_type = ref["target_type"]
+            if ref["target_sha"] and not target_type:
+                target_type = (
+                    "tag" if ref["target_sha"] != ref["head_sha"] else "commit"
+                )
             nodes.append(
                 node_envelope(
                     entity_id=ref_uuid,
@@ -1812,7 +1820,7 @@ class GithubCollector(CollectorBase):
                         "name": ref["name"],
                         "head_sha": ref["head_sha"],
                         "target_sha": ref["target_sha"],
-                        "target_type": ref["target_type"],
+                        "target_type": target_type,
                         "is_default": ref["is_default"],
                         "configuration": {},
                         "tags": {},
@@ -1959,7 +1967,10 @@ class GithubCollector(CollectorBase):
         )
         edges.append(
             self._edge(
-                "OBSERVED_IN_REPOSITORY__github_core", observation_uuid, repo_uuid, git_dims
+                "OBSERVED_IN_REPOSITORY__github_core",
+                observation_uuid,
+                repo_uuid,
+                git_dims,
             )
         )
 
