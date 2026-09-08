@@ -26,7 +26,7 @@ dependencies = [
     "tap-plugin-identity-core",
     # The collector mints git_core's repository / ref / commit ids through
     # tap_plugin.git_core.identity and emits those neutral types (github-core#76).
-    "git-core-tap",
+    "git-core-tap>=0.1.0,<0.2",
 ]
 
 [project.entry-points."tap.plugins"]
