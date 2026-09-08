@@ -75,10 +75,12 @@ class TestIdentity:
             str(workflow_job_id("o/r", 1, "build"))
             == "54d41673-76fd-519d-9c9e-f60c310a0b49"
         )
-        # Refs are git_core's since github-core#76: repository identity + full path, minted there.
-        assert str(
-            git_ref_id(git_repository_id("github.com", "1"), "refs/heads/main")
-        ) == str(git_ref_id(git_repository_id("github.com", "1"), "refs/heads/main"))
+        # Refs are git_core's since github-core#76: repository identity + full path, minted there —
+        # pinned here too, because this collector's emitted ids depend on that derivation.
+        assert (
+            str(git_ref_id(git_repository_id("github.com", "1"), "refs/heads/main"))
+            == "d23f94cb-47b2-54f0-ab39-b335586fd80d"
+        )
         assert str(ruleset_id("o", 7)) == "c4a175e4-20e4-563f-a41e-15c24d4f35f1"
 
     def test_a_branch_and_a_tag_of_the_same_name_are_different_nodes(self) -> None:
