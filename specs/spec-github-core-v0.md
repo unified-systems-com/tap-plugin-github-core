@@ -795,7 +795,9 @@ verdict is `checks_rollup_state` (GitHub's `StatusState`), the evidence is `chec
 run (Checks API — GitHub Actions and most Apps, naming the producing App) and every commit status
 (the older API Codacy and SonarCloud still post, naming its creator), in one list because a
 required context may be either. A head that carries no rollup is `""` — nothing ran — which is
-not `SUCCESS` and must not render green. Check runs are not minted as nodes here; a `check_run`
+not `SUCCESS` and must not render green; and `checks_observability` says whether that blank was
+GitHub's answer (`observed`) or a refused read the pruning left behind (`unobservable`), because
+a permission failure on the rollup must not serialize like nothing having run. Check runs are not minted as nodes here; a `check_run`
 node joined to `status_check` is the follow-on that github-core#75 names for the App-produced half.
 
 Everything rides **one GraphQL query of its own**, paged at five repositories: `pullRequests`
@@ -828,7 +830,7 @@ by their sources; an App installed earlier re-accepts nothing.
 | req-github-core-pull-requests-1 | One Node Per Pull Request | In Development | Every pull request in the window lands as one `pull_request` per (base repository, number) carrying state, draft flag, author, head and base refs and SHAs, review decision, mergeability, timestamps, sizes, labels, outstanding review requests and latest reviews. | |
 | req-github-core-pull-requests-2 | Joined To The Neutral Nodes | In Development | `PROPOSES_REF` onto the head ref when the head lives in the base repository, `TARGETS_BASE_REF` onto the base ref, `PROPOSES_COMMIT` onto the head commit — each only when the endpoint was observed in the batch; a fork head draws no ref edge. | Dangling edges dropped, facts kept on the node. |
 | req-github-core-pull-requests-3 | Author Is An Edge | In Development | `OPENS_PULL_REQUEST` from the author's account, or from the `github_app` when the actor is a Bot, carrying `author_association`. | |
-| req-github-core-pull-requests-4 | Build Status From The Rollup | In Development | `checks_rollup_state` equals the head commit's `statusCheckRollup.state` and `checks` itemises every check run and commit status it counted with its producer and, for a check run, GitHub's `check_run_id` (a rerun mints a higher id for the same name); a head with no rollup is `""`, never `SUCCESS`; a rollup wider than the page is marked truncated. | Includes App-produced checks no workflow in scope produces. |
+| req-github-core-pull-requests-4 | Build Status From The Rollup | In Development | `checks_rollup_state` equals the head commit's `statusCheckRollup.state` and `checks` itemises every check run and commit status it counted with its producer and, for a check run, GitHub's `check_run_id` (a rerun mints a higher id for the same name); a head with no rollup is `""` with `checks_observability = observed`, never `SUCCESS`; a rollup or contexts GitHub refused (pruned) is `checks_observability = unobservable` with a warning, never the same blank; a rollup wider than the page is marked truncated. | Includes App-produced checks no workflow in scope produces. |
 | req-github-core-pull-requests-5 | Refused Is Not Empty | In Development | A degraded `pullRequests` field marks the repository `unobservable` with a warning and mints nothing; a repos-only scope leaves `""`; the window's cap is visible as `pull_requests_total` and a truncation warning. | Three states, never two. |
 | req-github-core-pull-requests-6 | Permissions Derived | In Development | The three sources declare `repository:pull_requests:read`, `repository:checks:read`, `repository:statuses:read`; the ledger entries are `requested` citing exactly those sources; the GraphQL extract covers every traversed type and field. | No new grant on the App. |
 

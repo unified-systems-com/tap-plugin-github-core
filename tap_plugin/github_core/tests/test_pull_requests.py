@@ -229,13 +229,39 @@ class TestBuildStatusFromTheRollup:
         assert len(ids) == len(set(ids))
         assert fields["configuration"]["checks_total"] == len(fields["checks"])
         assert fields["configuration"]["checks_truncated"] is False
+        assert fields["checks_observability"] == "observed"
 
-    def test_a_head_with_no_rollup_is_blank_not_green(self) -> None:
+    def test_a_head_with_no_rollup_is_blank_not_green_and_the_blank_is_observed(self) -> None:
         _, nodes, _ = _emit(_collector())
         fork = _pulls(nodes)[_FORK_PR]["node"]
         assert fork["checks_rollup_state"] == ""
         assert fork["checks"] == []
         assert fork["configuration"]["checks_total"] is None
+        assert fork["checks_observability"] == "observed"  # GitHub said null: nothing ran, a fact
+
+    @pytest.mark.parametrize("pruned", ["statusCheckRollup", "contexts", "commits"])
+    def test_a_refused_rollup_is_unobservable_not_nothing_ran(self, pruned: str) -> None:
+        # What `prune_errored_paths` leaves behind when the credential could not read the path:
+        # the KEY is gone, which must not serialize like GitHub's own "no rollup" (key with null).
+        repo = json.loads(json.dumps(_FIXTURE["repository"]))
+        first = next(n for n in repo["pullRequests"]["nodes"] if n["number"] < 90000)
+        if pruned == "commits":
+            del first["commits"]
+        elif pruned == "statusCheckRollup":
+            del first["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
+        else:
+            del first["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]
+        collector = _collector({_REPO: repo})
+        _, nodes, _ = _emit(collector)
+        fields = _pulls(nodes)[first["number"]]["node"]
+        assert fields["checks_observability"] == "unobservable"
+        assert fields["checks_rollup_state"] == ""
+        assert fields["checks"] == []
+        assert fields["configuration"]["checks_total"] is None
+        assert "PULL_REQUEST_CHECKS_UNOBSERVABLE" in _codes(collector.warns)
+        # The others in the same repository are unaffected.
+        others = [n["node"]["checks_observability"] for k, n in _pulls(nodes).items() if k != first["number"]]
+        assert set(others) == {"observed"}
 
     def test_a_failed_and_a_succeeded_rollup_are_both_captured(self) -> None:
         _, nodes, _ = _emit(_collector())

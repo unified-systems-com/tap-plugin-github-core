@@ -169,6 +169,7 @@ _SITE_PULL_REQUESTS_COLLECTED = "7376"
 _SITE_PULL_REQUEST_CHECKS_TRUNCATED = "2ce1"
 _SITE_GRAPHQL_PULLS = "8d2d"
 _SITE_GRAPHQL_PULLS_FAILED = "7e0f"
+_SITE_PULL_REQUEST_CHECKS_UNOBSERVABLE = "323f"
 
 #: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
 #: three calls against a repository that is NOT in scope; past the cap an edge lands as
@@ -2098,6 +2099,7 @@ class GithubCollector(CollectorBase):
         pulls_dims = {**repo_dims, "github.surface": "pulls", "github.observation": "execution"}
         by_state: dict[str, int] = {}
         checks_truncated = 0
+        checks_unobservable = 0
         for pr in pulls:
             number = pr.get("number")
             if number is None:
@@ -2106,6 +2108,8 @@ class GithubCollector(CollectorBase):
             checks_total = pr.pop("checks_total", None)
             if checks_total is not None and checks_total > len(pr["checks"]):
                 checks_truncated += 1
+            if pr["checks_observability"] == _UNOBSERVABLE:
+                checks_unobservable += 1
             by_state[pr["state"]] = by_state.get(pr["state"], 0) + 1
             fields = {
                 **pr,
@@ -2165,6 +2169,15 @@ class GithubCollector(CollectorBase):
                 f"{full_name}: {missing} pull request(s) beyond the most-recently-updated window were "
                 f"not collected. Absence of a pull request in this batch is NOT evidence it does not exist.",
                 message_data={"repo": full_name, "missing": missing, "collected": len(pulls)},
+            )
+        if checks_unobservable:
+            self.record_warn(
+                _SITE_PULL_REQUEST_CHECKS_UNOBSERVABLE,
+                "PULL_REQUEST_CHECKS_UNOBSERVABLE",
+                f"{full_name}: the check rollup could not be read for {checks_unobservable} pull request(s) — "
+                f"their build status is NOT observed, which is not the same as nothing having run; "
+                f"`checks_observability` says so on each.",
+                message_data={"repo": full_name, "pull_requests": checks_unobservable},
             )
         if checks_truncated:
             self.record_warn(

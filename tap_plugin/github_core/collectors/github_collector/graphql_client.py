@@ -612,9 +612,16 @@ class GithubGraphQLClient:
             author = node.get("author") or {}
             commits_conn = node.get("commits") or {}
             head = next(iter(commits_conn.get("nodes") or []), None) or {}
-            rollup = (head.get("commit") or {}).get("statusCheckRollup") or {}
+            head_commit = head.get("commit") or {}
+            # A pruned path (the credential could not read it) leaves the KEY absent; GitHub's own
+            # "no rollup" is the key present with null. The two must not serialize alike.
+            rollup_observed = (
+                "commits" in node and "statusCheckRollup" in head_commit
+                and ("contexts" in (head_commit.get("statusCheckRollup") or {"contexts": None}))
+            )
+            rollup = head_commit.get("statusCheckRollup") or {}
             contexts_conn = rollup.get("contexts") or {}
-            contexts = [c for c in (contexts_conn.get("nodes") or []) if c]
+            contexts = [c for c in (contexts_conn.get("nodes") or []) if c] if rollup_observed else []
             out.append(
                 {
                     "number": node.get("number"),
@@ -659,10 +666,12 @@ class GithubGraphQLClient:
                         if rv
                     ],
                     "html_url": str(node.get("url") or ""),
-                    # The rollup: `""` when the head commit carries none (nothing ran), never SUCCESS.
-                    "checks_rollup_state": str(rollup.get("state") or ""),
-                    "checks_total": contexts_conn.get("totalCount"),
+                    # The rollup: `""` when the head commit carries none (nothing ran), never SUCCESS —
+                    # and `checks_observability` says whether that blank was answered or refused.
+                    "checks_rollup_state": str(rollup.get("state") or "") if rollup_observed else "",
+                    "checks_total": contexts_conn.get("totalCount") if rollup_observed else None,
                     "checks": [GithubGraphQLClient._check_context(c) for c in contexts],
+                    "checks_observability": "observed" if rollup_observed else "unobservable",
                 }
             )
         return out, missing

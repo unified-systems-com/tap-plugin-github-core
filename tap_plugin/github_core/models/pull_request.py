@@ -80,6 +80,7 @@ class PullRequest(BaseModel):
         "latest_reviews": {"type": "array"},
         "checks_rollup_state": {"type": "string"},
         "checks": {"type": "array"},
+        "checks_observability": {"type": "string", "enum": ["", "observed", "unobservable"]},
         "html_url": {"type": "string"},
         "configuration": {"type": "object"},
         "tags": {"type": "object"},
@@ -119,6 +120,13 @@ class PullRequest(BaseModel):
         "latest_reviews": {"validation": "jsonschema", "schema": {"type": "array", "items": {"type": "object"}}},
         "checks_rollup_state": {"validation": "jsonschema", "schema": {"type": "string", "enum": ROLLUP_STATES}},
         "checks": {"validation": "jsonschema", "schema": {"type": "array", "items": {"type": "object"}}},
+        # Whether the head commit's rollup was READ: `observed` (GitHub answered, possibly with no
+        # rollup — then `checks_rollup_state` is "" and that blank is a fact), `unobservable` (the
+        # rollup or its contexts were refused and pruned — the blank means nothing), "" (never asked).
+        "checks_observability": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "enum": ["", "observed", "unobservable"]},
+        },
         "html_url": {"validation": "jsonschema", "schema": {"type": "string"}},
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
@@ -163,6 +171,9 @@ class PullRequest(BaseModel):
     checks_rollup_state = models.CharField(max_length=16, blank=True, default="", db_index=True)
     #: `[{"kind": "check_run"|"status", "name": .., "status": .., "conclusion": .., "app": .., "url": ..}]`
     checks = models.JSONField(default=list, blank=True)
+    #: The `bypass_observability` ruling on the rollup: a refused rollup is `unobservable`, never a
+    #: blank that reads as "nothing ran".
+    checks_observability = models.CharField(max_length=16, blank=True, default="")
     html_url = models.URLField(max_length=512, blank=True, default="")
     configuration = models.JSONField(default=dict, blank=True)
     tags = models.JSONField(default=dict, blank=True)
