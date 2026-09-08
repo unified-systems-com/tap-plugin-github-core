@@ -476,6 +476,45 @@
       "permission": "repository:contents:read",
       "permission_failure": "degrade_with_warning",
       "description": "Peels an ANNOTATED tag to its commit: `git/ref/tags/{ref}` returns the tag object's SHA for an annotated tag, and that SHA is not the commit a runner checks out. One extra call, only when the ref's object type is `tag`."
+    },
+    {
+      "name": "custom_property_schema",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}/properties/schema",
+      "item_path": "[*]",
+      "target_entity_type": "github_core__github_custom_property",
+      "fields": [
+        "property_name",
+        "value_type",
+        "required",
+        "default_value",
+        "description",
+        "allowed_values",
+        "values_editable_by",
+        "source_type",
+        "url",
+        "require_explicit_values"
+      ],
+      "permission": "organization:custom_properties:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "The organization's custom-property DEFINITIONS, one node each (req-github-core-custom-properties). Read once per run after the repository walk. Organizations only: a user account has no schema endpoint and the surface is skipped, not degraded. A refusal marks every collected repository's `custom_properties_observability` as `unobservable`."
+    },
+    {
+      "name": "custom_property_values",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}/properties/values",
+      "query": {
+        "per_page": "100"
+      },
+      "item_path": "[*]",
+      "target_entity_type": "github_core__github_repository",
+      "fields": [
+        "repository_full_name",
+        "properties"
+      ],
+      "permission": "organization:custom_properties:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Every repository's custom-property VALUES in one paginated listing, stamped onto `github_repository.custom_properties` keyed by property name, built over the declared names first so a declared-but-unset property lands as null (req-github-core-custom-properties). The listing reports each declared property per repository with `value: null` when unset (measured 2026-09-08 on unified-systems-com)."
     }
   ],
   "edges": [

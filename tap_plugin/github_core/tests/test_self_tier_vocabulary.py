@@ -1100,8 +1100,10 @@ class TestVocabularyIsDeclared:
             "administration": "read",
         }
         # `packages` arrived with the outputs (github-core#31) and is the one permission an
-        # existing installation must re-accept; every other surface reads under the prior set.
-        assert org_perms == {"administration": "read", "packages": "read"}
+        # existing installation must re-accept; `custom_properties` (github-core#77) was already
+        # granted on the product App as an exploratory read and is now derived from its two
+        # sources; every other surface reads under the prior set.
+        assert org_perms == {"administration": "read", "packages": "read", "custom_properties": "read"}
         assert all(
             level == "read" for level in {**repo_perms, **org_perms}.values()
         ), "the collector never asks for write"

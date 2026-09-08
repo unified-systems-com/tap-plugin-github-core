@@ -83,6 +83,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-commits | [Commits](#commits) | Implemented | 2026-09-08 (github-core#76/#78): the commit's INTRINSIC half is the neutral `git_core__git_commit` (identity `sha1:oid`, one node however many hosts store it; `STORES_COMMIT` from the neutral repository, `RESOLVES_COMMIT` from the ref); GitHub's OBSERVED half — resolved logins, signature verdict in three states — is `commit_observation`, keyed per host + repository stable id + commit (`OBSERVES_COMMIT`, `OBSERVED_IN_REPOSITORY`). Sliced from a `CommitSlice` fragment on the config-layer refs query at no extra request. |
 | req-github-core-refs | [Refs](#refs) | Implemented | Branches and tags, one type. Since github-core#76/#78 the ref is the neutral `git_core__git_ref` (identity = neutral repository id + full path; `DECLARES_REF__git_core` from the neutral repository this record `HOSTS_REPOSITORY`); this plugin emits it and targets it from `PROTECTS` / `SCOPED_TO_REF` / `EVALUATED_ON_REF` / `TARGETS_REF`. Row added per github-core#69. |
 | req-github-core-status-checks | [Status Checks](#status-checks) | In Development | 2026-09-02 (github-core#61): `status_check` keyed `<owner>#<context>` from the ruleset detail's `required_status_checks` parameters; `REQUIRES_CHECK` with the rule's qualifiers; `PRODUCES_CHECK` derived from job display names with stated confidence, only toward required contexts an Actions job may produce. A refused detail is counted as not observable, never as no requirement. |
+| req-github-core-custom-properties | [Custom Properties](#custom-properties) | Implemented | 2026-09-08 (github-core#77; live-verified the same day with the App credential alone): `github_custom_property` keyed `<owner>#<property_name>` from the organization's schema endpoint; every repository's values stamped as `github_repository.custom_properties` built over the declared names (null = observed-unset) with a three-state `custom_properties_observability`. No edge — the value lives once, on the repository. Adds nothing to the App: `organization:custom_properties:read` was already granted, now derived. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON_REPOSITORY` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -718,6 +719,53 @@ post-pass after the whole scope is walked.
 | req-github-core-status-checks-2 | Unreadable Requirements Are Counted | In Development | A `required_status_checks` rule with no parameters (the type-only fallback) mints nothing, warns per ruleset, and is counted in the run summary. | Shape E. |
 | req-github-core-status-checks-3 | Producers Derived With Stated Confidence | In Development | `PRODUCES_CHECK` from a workflow whose job display name equals the context (`exact`) or is its matrix template (`matrix_template`), only where a requirement admits an Actions check; the summary lists producible contexts with no producer. | |
 | req-github-core-status-checks-4 | No Extra Request Or Permission | In Development | Both edges derive from the `rulesets` and `workflow_yaml` sources already in the manifest. | |
+
+### Custom Properties
+----
+RID: `req-github-core-custom-properties`
+
+Status: `Implemented`
+
+The organization's own metadata over its repositories (github-core#77). GitHub gave every one of
+its repositories a durable owner not with a built-in field but with custom properties —
+`ownership-type`, `ownership-name` — declared by the organization and validated by an App. That is
+the mechanism a console groups, filters and orders repositories by, and it is where `criticality`,
+`lifecycle` and `repository-role` live for the organization that builds TAP (git-serious-double-tap#2).
+The collector hard-codes none of those names: it lands whatever the organization declares.
+
+Two objects. The **definition** is a node, `github_custom_property`, keyed **`<owner>#<property_name>`**
+— owner-scoped like the ruleset, because one organization declares the property once and every
+repository's value is read against that one declaration. The **value** is a field on the repository,
+`github_repository.custom_properties`, a map keyed by property name exactly as GitHub reports it. No
+edge joins them: a repository with any value would point at every definition, so the edge would carry
+nothing, and a value on the edge would be a second copy of the value. The definition passes the node
+test as an independently-edited declaration with its own history and its own table, not by fan-in.
+
+**Unset is a fact, and it is on the wire.** The values listing reports every declared property per
+repository with `value: null` when unset (measured 2026-09-08). The map is nonetheless built over the
+declared names first, so an entry the listing omitted for a reported repository is still null. A
+collected repository the listing did not report at all is `unobservable` with an empty map and is
+named in a warning — an omitted row is a row we did not get, not five unset values. Three states on the repository,
+`custom_properties_observability`, the `bypass_observability` ruling applied: `observed` (an empty
+map is then a fact), `unobservable` (the definitions or the values were refused — no definition node
+is minted when the schema is refused, and the map must not render as "none set"), `""` (never asked:
+a repos-only scope, or a user account, where custom properties do not exist and a refusal would be
+a false claim).
+
+Both reads are one organization-scoped call each after the repository walk, at
+`organization:custom_properties:read` — GitHub's "Custom properties" organization permission,
+already granted on the product App and now derived from the manifest rather than held as an
+exploratory grant.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-custom-properties-1 | Definitions Land As Nodes | Implemented | Every property the organization's schema endpoint reports lands as one `github_custom_property` per (owner, name) carrying its type, allowed values, required flag, default, description, editability and source. | Names never normalized. |
+| req-github-core-custom-properties-2 | Values Stamped On The Repository | Implemented | Every collected repository the listing reports carries `custom_properties` with one key per declared property, the reported value or null when unset, and `custom_properties_observability = observed`; a collected repository the listing omits is `unobservable` with an empty map and a warning naming it. | The map is built over the declared names first; an omitted row is never promoted to all-unset. |
+| req-github-core-custom-properties-3 | Refused Is Not Empty | Implemented | A refused schema read mints no definition and marks every collected repository `unobservable` with an empty map and a warning; a refused values read lands the definitions and marks the values `unobservable`. | Shape E. |
+| req-github-core-custom-properties-4 | Not Asked Is Not Refused | Implemented | A user-owned scope or a repos-only scope skips the surface with an information record; repositories keep `""`, never `unobservable`. | Three states, never two. |
+| req-github-core-custom-properties-5 | Permission Derived From The Manifest | Implemented | Both sources declare `organization:custom_properties:read`; the ledger entry is `requested` citing exactly those two sources; the OpenAPI extract carries both paths. | No new grant on the App. |
 
 ### Refs
 ----
