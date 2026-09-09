@@ -78,7 +78,7 @@ export async function execute(context) {
         const facts = await _fetchWorkflowFacts(wf, warn);
         if (!facts) continue;
         const jobs = _jobsOf(cy, wf);
-        const jobFacts = new Map((await _fetchJobFacts(facts.full_name, warn)).map((r) => [String(r.entity_id), r]));
+        const jobFacts = new Map((await _fetchJobFacts(wf, warn)).map((r) => [String(r.entity_id), r]));
         _rankJobs(cy, wf, jobs, facts, jobFacts, warn);
         const declared = _addSteps(cy, wf, jobs, facts);
         const observed = await _fetchArtifacts(facts.full_name, facts.path, warn);
@@ -150,18 +150,20 @@ async function _fetchWorkflowFacts(wf, warn) {
     }
 }
 
-async function _fetchJobFacts(fullName, warn) {
+async function _fetchJobFacts(wf, warn) {
+    // Scoped through the workflow's own DEFINES_JOB edge: only this workflow's jobs, never the
+    // repository's (unified-ai-review on PR# 94).
     try {
         return await _gryphonRows(
             [
-                `MATCH (j:${T.job})`,
-                "WHERE j.data.full_name = $repo",
+                `MATCH (w:${T.workflow})-[:${E.definesJob}]->(j:${T.job})`,
+                "WHERE w.entity_id = $id",
                 "RETURN j.entity_id AS entity_id, j.data.job_key AS job_key, j.data.name AS name, j.data.needs AS needs",
             ],
-            {repo: fullName},
+            {id: wf.id()},
         );
     } catch (err) {
-        warn("anatomy_job_facts", `${fullName}: ${err.message}`);
+        warn("anatomy_job_facts", `${wf.data("label")}: ${err.message}`);
         return [];
     }
 }
