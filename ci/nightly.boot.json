@@ -14,6 +14,16 @@
         "note": "Package-mode (tap_plugin.git_core). The neutral Git vocabulary github_core emits (github-core#76). Pinned at the immutable tag v0.1.0 (released 2026-09-08).1.0 (a moving branch is not a pin — PR# 80 review); then the tag. Listed first: github_core declares depends_on git_core and the pre-boot gate checks order."
       },
       {
+        "slug": "compliance_core",
+        "enabled": true,
+        "source": {
+          "type": "git",
+          "url": "https://github.com/unified-systems-com/tap-plugin-compliance-core",
+          "rev": "43fda8e08af4f0a9b4ef1d43b67fc6f20722523b"
+        },
+        "note": "Package-mode (tap_plugin.compliance_core). The regime-agnostic finding substrate: github_core's collector mints compliance_core__compliance_finding for every scanner alert and DETAILS_FINDING targets its type (github-core#89), so github_core declares it in depends_on and the pre-boot gate checks order. Pinned to the commit v0.2.2 pointed at on 2026-09-09, not the tag, for the same reason identity_core is."
+      },
+      {
         "slug": "identity_core",
         "enabled": true,
         "source": {

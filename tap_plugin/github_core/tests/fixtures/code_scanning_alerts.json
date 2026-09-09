@@ -1,0 +1,1021 @@
+{
+  "_captured": {
+    "date": "2026-09-09",
+    "account": "notgeorge (gh CLI OAuth token, read access to unified-systems-com/tap)",
+    "repository": "unified-systems-com/tap",
+    "calls": {
+      "open": "GET /repos/unified-systems-com/tap/code-scanning/alerts?state=open&per_page=100",
+      "dismissed": "GET /repos/unified-systems-com/tap/code-scanning/alerts?state=dismissed&per_page=5",
+      "fixed": "GET /repos/unified-systems-com/tap/code-scanning/alerts?state=fixed&per_page=3",
+      "not_enabled_404": "GET /repos/unified-systems-com/.github/code-scanning/alerts?per_page=1 (HTTP 404 body, verbatim)"
+    },
+    "note": "Verbatim responses; nothing stripped. The same day, the alerts endpoint WITHOUT a `state` parameter returned 100 items across all three states (1 open, 2 dismissed, 97 fixed), which is why the collector makes one paginated call."
+  },
+  "open": [
+    {
+      "number": 164,
+      "created_at": "2026-08-26T19:29:57Z",
+      "updated_at": "2026-08-26T19:29:57Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/164",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/164",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S6549",
+        "severity": "warning",
+        "description": "Accessing files should not lead to filesystem oracle attacks",
+        "name": "pythonsecurity:S6549",
+        "tags": [
+          "cwe"
+        ],
+        "full_description": "Accessing files should not lead to filesystem oracle attacks",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Applications behave as filesystem oracles when they disclose to attackers if resources from the filesystem exist or not.</p>\n<p>A user with malicious intent would inject specially crafted values, such as <code>../</code>, to change the initially intended path. The resulting\npath would resolve to a location somewhere in the filesystem which the user should not normally have access to.</p>\n<h3>What is the potential impact?</h3>\n<p>An attacker exploiting a filesystem oracle vulnerability can determine if a file exists or not.</p>\n<p>The files that can be affected are limited by the permission of the process that runs the application. Worst case scenario: the process runs with\nelevated privileges, and therefore any file can be affected.</p>\n<p>Below are some real-world scenarios that illustrate some impacts of an attacker exploiting the vulnerability.</p>\n<h4>Information gathering</h4>\n<p>The vulnerability is exploited to gather information about the host system. The filesystem oracle can help identify user accounts, running\nservices, or the exact version of installed software.</p>\n<h2>How to fix it in Python Standard Library</h2>\n<h3>Code examples</h3>\n<p>The following code is vulnerable to a file system oracle as it allows testing the existence of a file anywhere on the file system.</p>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nfrom pathlib import Path\nfrom flask import Flask, request\n\napp = Flask('example')\nTARGET_DIRECTORY = Path(\"/path/to/target/directory/\")\n\n@app.route('/example')\ndef example():\n    filename = request.args.get(\"filename\")\n    file_path = Path(TARGET_DIRECTORY, filename)\n    if not file_path.exists():  # Noncompliant\n        raise IOError(\"File does not exist in the target directory\")\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nfrom pathlib import Path\nfrom flask import Flask, request\n\napp = Flask('example')\nTARGET_DIRECTORY = Path(\"/path/to/target/directory/\")\n\n@app.route('/example')\ndef example():\n    filename = request.args.get(\"filename\")\n    file_path = Path(TARGET_DIRECTORY, filename)\n    canonical_path = file_path.resolve()\n    try:\n        canonical_path.relative_to(TARGET_DIRECTORY.resolve())\n    except ValueError:\n        raise IOError(\"Entry is outside of the target directory\")\n    if not canonical_path.exists():\n        raise IOError(\"File does not exist in the target directory\")\n</pre>\n<h3>How does this work?</h3>\n<h4>Canonical path validation</h4>\n<p>The universal way to avoid filesystem oracle vulnerabilities is to validate paths constructed from untrusted data:</p>\n<ol>\n  <li>Ensure the target directory path ends with a forward slash to prevent partial path traversal (see the \"Pitfalls\" section).</li>\n  <li>Resolve the canonical path of the file by using methods like <code>pathlib.Path.resolve</code>. This will resolve relative paths or path\n  components like <code>../</code> and remove any ambiguity regarding the file\u2019s location.</li>\n  <li>Check that the canonical path is within the directory where the file should be located.</li>\n</ol>\n<p><strong>Important Note</strong>: The order of this process pattern is important. The code must follow this order exactly to be secure by\ndesign:</p>\n<ol>\n  <li><code>data = transform(user_input);</code></li>\n  <li><code>data = normalize(data);</code></li>\n  <li><code>data = sanitize(data);</code></li>\n  <li><code>use(data);</code></li>\n</ol>\n<p>As pointed out in <a href=\"https://www.youtube.com/watch?v=V-DdcKADnFk\">this SonarSource talk</a>, failure to follow this exact order leads to\nsecurity vulnerabilities.</p>\n<h3>Pitfalls</h3>\n<h4>Partial Path Traversal</h4>\n<p>When validating untrusted paths by checking if they start with a trusted folder name, <strong>ensure the validation string contains a path\nseparator as the last character</strong>.\n  <br>\n  A partial path traversal vulnerability can be unintentionally introduced into the application without a path separator as the last character of the\n  validation strings.</p>\n<p>For example, the following code is vulnerable to partial path injection. Note that the string <code>target_directory</code> does not end with a\npath separator:</p>\n<pre>\nimport os\n\ntarget_directory = \"/Users/John\"\n\ndef endpoint(filename: str):\n    file_path = os.path.join(target_directory, filename)\n    canonical_path = os.path.abspath(file_path)\n\n    if not canonical_path.startswith(target_directory):\n        raise IOError(\"Entry is outside of the target directory\")\n</pre>\n<p>This check can be bypassed if other directories start with <code>John</code>. For instance, <code>\"/Users/Johnny\".startswith(\"/Users/John\")</code>\nreturns <code>True</code>. Thus, for validation, <code>\"/Users/John\"</code> should actually be <code>\"/Users/John/\"</code>.</p>\n<h4>Do not use pathlib.Path.joinpath or the `/` operator as a validator</h4>\n<p>As specified in the <a href=\"https://docs.python.org/3/library/pathlib.html#pathlib.PurePath.joinpath\">official documentation</a>, if the given\nparameter is an absolute path, the base object from which the method is called is discarded and is not included in the resulting string.</p>\n<p>This means that including untrusted data in the parameter and using the resulting string for file operations may lead to a path traversal\nvulnerability.</p>\n<h2>Resources</h2>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A01_2021-Broken_Access_Control/\">Top 10 2021 Category A1 - Broken Access Control</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A5_2017-Broken_Access_Control\">Top 10 2017 Category A5 - Broken Access\n  Control</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/20\">CWE-20 - Improper Input Validation</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/22\">CWE-22 - Improper Limitation of a Pathname to a Restricted Directory ('Path\n  Traversal')</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaA_jNdlUzyOKZ-Dr7DN-->Change this code to not construct the path from user-controlled data. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaA_jNdlUzyOKZ-Dr7DN&open=AaA_jNdlUzyOKZ-Dr7DN\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/preboot.py",
+          "start_line": 460,
+          "end_line": 460,
+          "start_column": 8,
+          "end_column": 27
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/164/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 129,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-23T21:14:23Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/129",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/129",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S6350",
+        "severity": "warning",
+        "description": "System command arguments constructed from user input should be validated",
+        "name": "pythonsecurity:S6350",
+        "tags": [
+          "cwe",
+          "former-hotspot"
+        ],
+        "full_description": "System command arguments constructed from user input should be validated",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Arguments of system commands are processed by the executed program and are used to configure and influence its behavior. When these arguments are\nconstructed from user input, attackers can inject malicious arguments that alter the command\u2019s intended behavior.</p>\n<p>Control over a single argument might be enough for an attacker to trigger dangerous features. For example, arguments like <code>-delete</code> or\n<code>-exec</code> for the <code>find</code> command can completely change what the command does, potentially allowing an attacker to execute\narbitrary commands or overwrite/delete arbitrary files.</p>\n<h3>What is the potential impact?</h3>\n<p>Constructing a single command arguments based on untrusted user inputs might lead to arbitrary command execution depending on the command and the\nparameters that controlled by the attacker.</p>\n<p>The impact also depends on the access control measures taken on the target system OS. In the worst-case scenario, the process runs with root\nprivileges, and therefore any OS commands or programs may be affected.</p>\n<p>Below are some real-world scenarios that illustrate some impacts of an attacker exploiting the vulnerability.</p>\n<h4>Denial of service and data leaks</h4>\n<p>In this scenario, the attack aims to disrupt the organization\u2019s activities and profit from data leaks.</p>\n<p>An attacker could, for example:</p>\n<ul>\n  <li>download the internal server\u2019s data, most likely to sell it</li>\n  <li>modify data, send malware</li>\n  <li>stop services or exhaust resources (with fork bombs for example)</li>\n</ul>\n<p>This threat is particularly insidious if the attacked organization does not maintain a disaster recovery plan (DRP).</p>\n<h4>Root privilege escalation and pivot</h4>\n<p>In this scenario, the attacker can do everything described in the previous section. The difference is that the attacker also manages to elevate\ntheir privileges to an administrative level and attacks other servers.</p>\n<p>Here, the impact depends on how much the target company focuses on its Defense In Depth. For example, the entire infrastructure can be compromised\nby a combination of OS injections and <strong>misconfiguration</strong> of:</p>\n<ul>\n  <li>Docker or Kubernetes clusters</li>\n  <li>cloud services</li>\n  <li>network firewalls and routing</li>\n  <li>OS access control</li>\n</ul>\n<h2>How to fix it</h2>\n<p>Use an allow-list to restrict the arguments to trusted values. This ensures that only pre-approved, safe values can be passed to the system\ncommand. Validate each argument against the allow-list before executing the command.</p>\n<h3>Code examples</h3>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nimport subprocess\n\n@app.route('/example')\ndef example():\n    input = request.args.get(\"data\")\n    subprocess.run([\"/usr/bin/find\", input]) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nimport subprocess\n\n@app.route('/example')\ndef example():\n    ALLOWED = [\"file1\", \"file2\", \"file3\"]\n    input = request.args.get(\"data\")\n    if input in ALLOWED:\n        subprocess.run([\"/usr/bin/find\", input])\n</pre>\n<h2>Resources</h2>\n<h3>Documentation</h3>\n<ul>\n  <li>PHP Supply Chain Attack on Composer - <a href=\"https://blog.sonarsource.com/php-supply-chain-attack-on-composer\">Analysis of\n  CVE-2021-29472</a></li>\n</ul>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/88\">CWE-88 - Argument Injection or Modification</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWntukY5_UfzfQJfV-->Make sure that this user-controlled command argument doesn't lead to unwanted behavior. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWntukY5_UfzfQJfV&open=AaAwWntukY5_UfzfQJfV\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "scripts/sbom/generate.py",
+          "start_line": 350,
+          "end_line": 350,
+          "start_column": 12,
+          "end_column": 67
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/129/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 125,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-23T21:14:23Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/125",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/125",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S6350",
+        "severity": "warning",
+        "description": "System command arguments constructed from user input should be validated",
+        "name": "pythonsecurity:S6350",
+        "tags": [
+          "cwe",
+          "former-hotspot"
+        ],
+        "full_description": "System command arguments constructed from user input should be validated",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Arguments of system commands are processed by the executed program and are used to configure and influence its behavior. When these arguments are\nconstructed from user input, attackers can inject malicious arguments that alter the command\u2019s intended behavior.</p>\n<p>Control over a single argument might be enough for an attacker to trigger dangerous features. For example, arguments like <code>-delete</code> or\n<code>-exec</code> for the <code>find</code> command can completely change what the command does, potentially allowing an attacker to execute\narbitrary commands or overwrite/delete arbitrary files.</p>\n<h3>What is the potential impact?</h3>\n<p>Constructing a single command arguments based on untrusted user inputs might lead to arbitrary command execution depending on the command and the\nparameters that controlled by the attacker.</p>\n<p>The impact also depends on the access control measures taken on the target system OS. In the worst-case scenario, the process runs with root\nprivileges, and therefore any OS commands or programs may be affected.</p>\n<p>Below are some real-world scenarios that illustrate some impacts of an attacker exploiting the vulnerability.</p>\n<h4>Denial of service and data leaks</h4>\n<p>In this scenario, the attack aims to disrupt the organization\u2019s activities and profit from data leaks.</p>\n<p>An attacker could, for example:</p>\n<ul>\n  <li>download the internal server\u2019s data, most likely to sell it</li>\n  <li>modify data, send malware</li>\n  <li>stop services or exhaust resources (with fork bombs for example)</li>\n</ul>\n<p>This threat is particularly insidious if the attacked organization does not maintain a disaster recovery plan (DRP).</p>\n<h4>Root privilege escalation and pivot</h4>\n<p>In this scenario, the attacker can do everything described in the previous section. The difference is that the attacker also manages to elevate\ntheir privileges to an administrative level and attacks other servers.</p>\n<p>Here, the impact depends on how much the target company focuses on its Defense In Depth. For example, the entire infrastructure can be compromised\nby a combination of OS injections and <strong>misconfiguration</strong> of:</p>\n<ul>\n  <li>Docker or Kubernetes clusters</li>\n  <li>cloud services</li>\n  <li>network firewalls and routing</li>\n  <li>OS access control</li>\n</ul>\n<h2>How to fix it</h2>\n<p>Use an allow-list to restrict the arguments to trusted values. This ensures that only pre-approved, safe values can be passed to the system\ncommand. Validate each argument against the allow-list before executing the command.</p>\n<h3>Code examples</h3>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nimport subprocess\n\n@app.route('/example')\ndef example():\n    input = request.args.get(\"data\")\n    subprocess.run([\"/usr/bin/find\", input]) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nimport subprocess\n\n@app.route('/example')\ndef example():\n    ALLOWED = [\"file1\", \"file2\", \"file3\"]\n    input = request.args.get(\"data\")\n    if input in ALLOWED:\n        subprocess.run([\"/usr/bin/find\", input])\n</pre>\n<h2>Resources</h2>\n<h3>Documentation</h3>\n<ul>\n  <li>PHP Supply Chain Attack on Composer - <a href=\"https://blog.sonarsource.com/php-supply-chain-attack-on-composer\">Analysis of\n  CVE-2021-29472</a></li>\n</ul>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/88\">CWE-88 - Argument Injection or Modification</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWno0kY5_UfzfQJew-->Make sure that this user-controlled command argument doesn't lead to unwanted behavior. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWno0kY5_UfzfQJew&open=AaAwWno0kY5_UfzfQJew\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/preboot.py",
+          "start_line": 582,
+          "end_line": 582,
+          "start_column": 16,
+          "end_column": 118
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/125/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 124,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-23T21:14:23Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/124",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/124",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S6350",
+        "severity": "warning",
+        "description": "System command arguments constructed from user input should be validated",
+        "name": "pythonsecurity:S6350",
+        "tags": [
+          "cwe",
+          "former-hotspot"
+        ],
+        "full_description": "System command arguments constructed from user input should be validated",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Arguments of system commands are processed by the executed program and are used to configure and influence its behavior. When these arguments are\nconstructed from user input, attackers can inject malicious arguments that alter the command\u2019s intended behavior.</p>\n<p>Control over a single argument might be enough for an attacker to trigger dangerous features. For example, arguments like <code>-delete</code> or\n<code>-exec</code> for the <code>find</code> command can completely change what the command does, potentially allowing an attacker to execute\narbitrary commands or overwrite/delete arbitrary files.</p>\n<h3>What is the potential impact?</h3>\n<p>Constructing a single command arguments based on untrusted user inputs might lead to arbitrary command execution depending on the command and the\nparameters that controlled by the attacker.</p>\n<p>The impact also depends on the access control measures taken on the target system OS. In the worst-case scenario, the process runs with root\nprivileges, and therefore any OS commands or programs may be affected.</p>\n<p>Below are some real-world scenarios that illustrate some impacts of an attacker exploiting the vulnerability.</p>\n<h4>Denial of service and data leaks</h4>\n<p>In this scenario, the attack aims to disrupt the organization\u2019s activities and profit from data leaks.</p>\n<p>An attacker could, for example:</p>\n<ul>\n  <li>download the internal server\u2019s data, most likely to sell it</li>\n  <li>modify data, send malware</li>\n  <li>stop services or exhaust resources (with fork bombs for example)</li>\n</ul>\n<p>This threat is particularly insidious if the attacked organization does not maintain a disaster recovery plan (DRP).</p>\n<h4>Root privilege escalation and pivot</h4>\n<p>In this scenario, the attacker can do everything described in the previous section. The difference is that the attacker also manages to elevate\ntheir privileges to an administrative level and attacks other servers.</p>\n<p>Here, the impact depends on how much the target company focuses on its Defense In Depth. For example, the entire infrastructure can be compromised\nby a combination of OS injections and <strong>misconfiguration</strong> of:</p>\n<ul>\n  <li>Docker or Kubernetes clusters</li>\n  <li>cloud services</li>\n  <li>network firewalls and routing</li>\n  <li>OS access control</li>\n</ul>\n<h2>How to fix it</h2>\n<p>Use an allow-list to restrict the arguments to trusted values. This ensures that only pre-approved, safe values can be passed to the system\ncommand. Validate each argument against the allow-list before executing the command.</p>\n<h3>Code examples</h3>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nimport subprocess\n\n@app.route('/example')\ndef example():\n    input = request.args.get(\"data\")\n    subprocess.run([\"/usr/bin/find\", input]) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nimport subprocess\n\n@app.route('/example')\ndef example():\n    ALLOWED = [\"file1\", \"file2\", \"file3\"]\n    input = request.args.get(\"data\")\n    if input in ALLOWED:\n        subprocess.run([\"/usr/bin/find\", input])\n</pre>\n<h2>Resources</h2>\n<h3>Documentation</h3>\n<ul>\n  <li>PHP Supply Chain Attack on Composer - <a href=\"https://blog.sonarsource.com/php-supply-chain-attack-on-composer\">Analysis of\n  CVE-2021-29472</a></li>\n</ul>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/88\">CWE-88 - Argument Injection or Modification</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWno0kY5_UfzfQJev-->Make sure that this user-controlled command argument doesn't lead to unwanted behavior. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWno0kY5_UfzfQJev&open=AaAwWno0kY5_UfzfQJev\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/preboot.py",
+          "start_line": 580,
+          "end_line": 580,
+          "start_column": 16,
+          "end_column": 103
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/124/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 123,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-23T21:14:23Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/123",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/123",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "Web:S5247",
+        "severity": "warning",
+        "description": "Auto-escaping in HTML template engines should not be disabled",
+        "name": "Web:S5247",
+        "tags": [
+          "cwe",
+          "former-hotspot"
+        ],
+        "full_description": "Auto-escaping in HTML template engines should not be disabled",
+        "help": "<p>Template engines, such as Twig, Django, and Jinja2, provide automatic escaping of template variables to prevent cross-site scripting (XSS) attacks,\nbut this protection can be explicitly disabled.</p>\n<h2>Why is this an issue?</h2>\n<p>Template engines provide auto-escaping as a safety mechanism that transforms HTML special characters in variable output before rendering,\npreventing user-controlled input from being interpreted as HTML or JavaScript by the browser. Disabling this protection \u2014 through settings like\n<code>autoescape: false</code>, escape-bypass filters like <code>|safe</code>, or equivalent configuration \u2014 allows untrusted input to pass through\nunmodified and be executed by the browser as markup or script.</p>\n<h3>What is the potential impact?</h3>\n<p>When auto-escaping is disabled, an attacker who can control the content of template variables can inject malicious HTML or JavaScript into pages\nserved to other users. An attacker could steal session tokens, redirect users to phishing pages, or perform unauthorized actions on behalf of the\nvictim.</p>\n<h2>How to fix it in Django Templates</h2>\n<h3>Code examples</h3>\n<p>The following examples configure the template engine to disable its auto-escaping feature, allowing template variables to be rendered without HTML\nencoding.</p>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\n&lt;!-- Django templates --&gt;\n&lt;p&gt;{{ variable|safe }}&lt;/p&gt;&lt;!-- Noncompliant --&gt;\n{% autoescape off %}&lt;!-- Noncompliant --&gt;\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\n&lt;!-- Django templates --&gt;\n&lt;p&gt;{{ variable }}&lt;/p&gt;\n{% autoescape on %}\n</pre>\n<h2>Resources</h2>\n<h3>Documentation</h3>\n<ul>\n  <li><a href=\"https://github.com/OWASP/CheatSheetSeries/blob/master/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.md\">OWASP Cheat Sheet</a>\n  - XSS Prevention Cheat Sheet</li>\n</ul>\n<h3>Standards</h3>\n<ul>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/79\">CWE-79 - Improper Neutralization of Input During Web Page Generation ('Cross-site\n  Scripting')</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A7_2017-Cross-Site_Scripting_(XSS)\">Top 10 2017 Category A7 - Cross-Site Scripting\n  (XSS)</a></li>\n</ul>",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWnlykY5_UfzfQJeN-->Make sure disabling auto-escaping feature is safe here. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWnlykY5_UfzfQJeN&open=AaAwWnlykY5_UfzfQJeN\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap_web/templates/tap_web/synthetic_page.html",
+          "start_line": 28,
+          "end_line": 28,
+          "start_column": 27,
+          "end_column": 35
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/123/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 101,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-23T21:14:23Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/101",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/101",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "githubactions:S6506",
+        "severity": "warning",
+        "description": "HTTPS should be enforced on HTTP clients following redirects",
+        "name": "githubactions:S6506",
+        "tags": [
+          "cwe",
+          "former-hotspot"
+        ],
+        "full_description": "HTTPS should be enforced on HTTP clients following redirects",
+        "help": "<p>When downloading files over HTTPS, following redirects without enforcing the protocol can expose the transfer to a downgrade attack.</p>\n<h2>Why is this an issue?</h2>\n<p>HTTP is a clear-text protocol that provides no encryption, making communications vulnerable to interception and modification. When an HTTP client\nis configured to follow redirects, an initial HTTPS connection can be silently downgraded to HTTP if the server redirects to an insecure location.\nThis rule detects <code>curl</code> commands that follow redirects using <code>-L</code> or <code>--location</code> without the <code>--proto\n\"=https\"</code> option, and <code>wget</code> commands that allow redirects without <code>--max-redirect=0</code>.</p>\n<h3>What is the potential impact?</h3>\n<h4>Exposure of sensitive data</h4>\n<p>An attacker with access to network traffic can read the contents of the downloaded file, including any sensitive data it contains.</p>\n<h4>Supply chain compromise</h4>\n<p>Because a downgraded HTTP connection is unencrypted, an attacker in a position to intercept traffic can modify the downloaded file in transit. If\nthe file is an install script or software package, injected malicious code will execute on the target system.</p>\n<h2>How to fix it in cURL</h2>\n<h3>Code examples</h3>\n<p>The following command uses <code>-L</code> to follow redirects without restricting the protocol to HTTPS, allowing the connection to be silently\ndowngraded.</p>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nname: Install Script\n\non: push\n\njobs:\n  install:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Download and run install script\n        run: curl --tlsv1.2 -sSf -L https://might-redirect.example.com/install.sh -o install.sh  # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<p>Use <code>--proto \"=https\"</code> to ensure requests are only made using HTTPS. Any attempt to redirect to a location using HTTP will result in an\nerror.</p>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nname: Install Script\n\non: push\n\njobs:\n  install:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Download and run install script\n        run: curl --proto \"=https\" --tlsv1.2 -sSf -L https://might-redirect.example.com/install.sh -o install.sh\n</pre>\n<p>If you expect the server to return the file without redirects, remove the <code>-L</code> or <code>--location</code> option instead.</p>\n<pre>\nname: Install Script\n\non: push\n\njobs:\n  install:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Download and run install script\n        run: curl --tlsv1.2 -sSf https://might-redirect.example.com/install.sh -o install.sh\n</pre>\n<h2>Resources</h2>\n<h3>Documentation</h3>\n<ul>\n  <li><a href=\"https://curl.se/docs/manpage.html#--proto\">curl.1 the man page</a> - <code>--proto &lt;protocols&gt;</code></li>\n  <li><a href=\"https://www.gnu.org/software/wget/manual/wget.html#HTTP-Options\">wget - GNU Wget Manual</a> - <code>--max-redirect=</code></li>\n</ul>\n<h3>Articles &amp; blog posts</h3>\n<ul>\n  <li><a href=\"https://github.com/ssllabs/research/wiki/SSL-and-TLS-Deployment-Best-Practices#41-encrypt-everything\">SSL and TLS Deployment Best\n  Practices</a> - Encrypt Everything</li>\n</ul>\n<h3>Standards</h3>\n<ul>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/757\">CWE-757 - Selection of Less-Secure Algorithm During Negotiation ('Algorithm\n  Downgrade')</a></li>\n</ul>",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWn1QkY5_UfzfQJhF-->Not enforcing HTTPS here might allow for redirections to insecure websites. Make sure it is safe here. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWn1QkY5_UfzfQJhF&open=AaAwWn1QkY5_UfzfQJhF\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": ".github/workflows/product-lines.yml",
+          "start_line": 130,
+          "end_line": 130,
+          "start_column": 11,
+          "end_column": 28
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/101/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 99,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-23T21:14:23Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/99",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/99",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "githubactions:S8544",
+        "severity": "warning",
+        "description": "Python dependencies should be locked to verified versions",
+        "name": "githubactions:S8544",
+        "tags": [],
+        "full_description": "Python dependencies should be locked to verified versions",
+        "help": "<p>pip, uv, poetry, and pipenv allows declaring dependencies with version ranges rather than exact versions. When a project is built on a new system,\nthe package manager performs dependency resolution: it queries the package registry and selects a specific version satisfying each declared range,\nthen records the result in a lock file. Committing this lock file to source control ensures that all subsequent builds \u2014 on any machine or CI system \u2014\nuse exactly the same resolved versions.</p>\n<h2>Why is this an issue?</h2>\n<p>Without a committed lock file, dependency resolution runs anew on every fresh build, always selecting the latest version available that satisfies\nthe declared range. This means different developers and CI systems may silently use different dependency versions, leaving the project exposed if a\nmalicious version of a dependency is published within the allowed range.</p>\n<p>Note, if you are authoring a library, an argument can be made to avoid lock files to allow detecting upstream dependency changes that could\notherwise silently break your downstream consumers' builds. However, regularly updating your lock file ensures reproducible builds while still giving\nyou visibility into upstream dependency changes.</p>\n<h3>What is the potential impact?</h3>\n<p>If an attacker publishes a malicious version of a dependency within your declared version range, an unlocked project may automatically adopt it on\nthe next fresh build. This can result in arbitrary code execution, data exfiltration, or backdoors being silently introduced into your application as\npart of a supply chain attack.</p>\n<h2>How to fix it in pip</h2>\n<p>Installing dependencies is safe as long as a valid, up-to-date lock file is present. However, relying on this implicit behaviour means a stale or\nmissing lock file can silently cause the package manager to resolve and download new versions, opening the door to dependency substitution attacks.\nUsing a command that explicitly requires the lock file to exist and be respected makes the expectation clear and prevents accidental updates from\nslipping in unnoticed.</p>\n<h3>Code examples</h3>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nsteps:\n  - run: pip install -r requirements.txt # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<p>Use <code>pip install --require-hashes</code> to install from the required lock file <code>requirements.txt</code> (with hashes).</p>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nsteps:\n  - run: pip install --require-hashes -r requirements.txt\n</pre>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"7\" data-diff-type=\"noncompliant\">\nsteps:\n  - run: pip install example # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<p>For direct package installations, <code>pip install --require-hashes</code> cannot be used. Pin the exact version of the package to prevent\nunintended upgrades. Note that this only pins the top-level package; transitive dependencies remain unpinned. Using a lock file (such as a\n<code>requirements.txt</code> with hashes) is the recommended practice for full reproducibility.</p>\n<pre data-diff-id=\"7\" data-diff-type=\"compliant\">\nsteps:\n  - run: pip install example==1.0.0\n</pre>\n<h2>Resources</h2>\n<ul>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/494\">CWE-494 - Download of Code Without Integrity Check</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/829\">CWE-829 - Inclusion of Functionality from Untrusted Control Sphere</a></li>\n</ul>",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWn1FkY5_UfzfQJhD-->Using dependencies without locking resolved versions is security-sensitive. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWn1FkY5_UfzfQJhD&open=AaAwWn1FkY5_UfzfQJhD\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": ".github/workflows/plugin-ci.yml",
+          "start_line": 135,
+          "end_line": 135,
+          "start_column": 11,
+          "end_column": 17
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/99/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 84,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-23T21:14:23Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/84",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/84",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S2083",
+        "severity": "warning",
+        "description": "I/O function calls should not be vulnerable to path injection attacks",
+        "name": "pythonsecurity:S2083",
+        "tags": [
+          "cwe"
+        ],
+        "full_description": "I/O function calls should not be vulnerable to path injection attacks",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Path injections occur when an application uses untrusted data to construct a file path and access this file without validating its path first.</p>\n<p>A user with malicious intent would inject specially crafted values, such as <code>../</code>, to change the initial intended path. The resulting\npath would resolve somewhere in the filesystem where the user should not normally have access to.</p>\n<h3>What is the potential impact?</h3>\n<p>A web application is vulnerable to path injection and an attacker is able to exploit it.</p>\n<p>The files that can be affected are limited by the permission of the process that runs the application. Worst case scenario: the process runs with\nroot privileges on Linux, and therefore any file can be affected.</p>\n<p>Below are some real-world scenarios that illustrate some impacts of an attacker exploiting the vulnerability.</p>\n<h4>Override or delete arbitrary files</h4>\n<p>The injected path component tampers with the location of a file the application is supposed to delete or write into. The vulnerability is exploited\nto remove or corrupt files that are critical for the application or for the system to work properly.</p>\n<p>It could result in data being lost or the application being unavailable.</p>\n<h4>Read arbitrary files</h4>\n<p>The injected path component tampers with the location of a file the application is supposed to read and output. The vulnerability is exploited to\nleak the content of arbitrary files from the file system, including sensitive files like SSH private keys.</p>\n<h2>How to fix it in Flask</h2>\n<h3>Code examples</h3>\n<p>The following code is vulnerable to path injection as it creates a path using untrusted data without validation.</p>\n<p>In this particular case, the code can be exploited with the following input to read arbitrary files outside of the intended directory:</p>\n<pre>\n../../../../\n</pre>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nfrom flask import Flask, request, send_from_directory\n\napp = Flask('example')\n\n@app.route('/example')\ndef example():\n    my_file = request.args['my_file']\n    return send_file(\"static/%s\" % my_file, as_attachment=True) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nfrom flask import Flask, request, send_from_directory\n\napp = Flask('example')\n\n@app.route('/example')\ndef example():\n    my_file = request.args['my_file']\n    return send_from_directory('static', my_file)\n</pre>\n<h3>How does this work?</h3>\n<p>The universal method to prevent path injection is to validate paths created from untrusted data. This can be done either manually or automatically,\ndepending on whether the library includes a data sanitization feature and the required function.</p>\n<p>Here, send_from_directory can be considered a secure-by-design API.</p>\n<h4>Use secure-by-design APIs</h4>\n<p>Some libraries contain APIs with these three capabilities:</p>\n<ul>\n  <li>File retrieval in a file system.</li>\n  <li>Restriction of the file retrieval to a specific folder (thus sanitizing and validating untrusted data).</li>\n  <li>A feature, such as a file download or file deletion.</li>\n</ul>\n<p>They can be referred to as \"secure-by-design\" APIs. Using this type of API, such as 'send_from_directory', brings multiple layers of security to\nthe code while keeping the code base shorter.</p>\n<p>Behind the scenes, this function protects against both regular and partial path injection.</p>\n<h3>Pitfalls</h3>\n<h4>Do not use os.path.join as a validator</h4>\n<p>The <a href=\"https://docs.python.org/3/library/os.path.html#os.path.join\">official documentation</a> states that if any argument other than the\nfirst is an absolute path, any previous argument is discarded.</p>\n<p>This means that including untrusted data in any of the parameters and using the resulting string for file operations may lead to a path traversal\nvulnerability.</p>\n<p>If you want to learn more about this pitfall, read <a href=\"https://blog.sonarsource.com/10-unknown-security-pitfalls-for-python/\">our blog post\nabout it</a>.</p>\n<h2>Resources</h2>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A01_2021-Broken_Access_Control/\">Top 10 2021 Category A1 - Broken Access Control</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A5_2017-Broken_Access_Control\">Top 10 2017 Category A5 - Broken Access\n  Control</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/20\">CWE-20 - Improper Input Validation</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/22\">CWE-22 - Improper Limitation of a Pathname to a Restricted Directory ('Path\n  Traversal')</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "high"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWnsDkY5_UfzfQJfA-->Change this code to not construct the path from user-controlled data. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWnsDkY5_UfzfQJfA&open=AaAwWnsDkY5_UfzfQJfA\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/jsonfiles.py",
+          "start_line": 72,
+          "end_line": 72,
+          "start_column": 15,
+          "end_column": 47
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/84/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 83,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-23T21:14:23Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/83",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/83",
+      "state": "open",
+      "fixed_at": null,
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S2083",
+        "severity": "warning",
+        "description": "I/O function calls should not be vulnerable to path injection attacks",
+        "name": "pythonsecurity:S2083",
+        "tags": [
+          "cwe"
+        ],
+        "full_description": "I/O function calls should not be vulnerable to path injection attacks",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Path injections occur when an application uses untrusted data to construct a file path and access this file without validating its path first.</p>\n<p>A user with malicious intent would inject specially crafted values, such as <code>../</code>, to change the initial intended path. The resulting\npath would resolve somewhere in the filesystem where the user should not normally have access to.</p>\n<h3>What is the potential impact?</h3>\n<p>A web application is vulnerable to path injection and an attacker is able to exploit it.</p>\n<p>The files that can be affected are limited by the permission of the process that runs the application. Worst case scenario: the process runs with\nroot privileges on Linux, and therefore any file can be affected.</p>\n<p>Below are some real-world scenarios that illustrate some impacts of an attacker exploiting the vulnerability.</p>\n<h4>Override or delete arbitrary files</h4>\n<p>The injected path component tampers with the location of a file the application is supposed to delete or write into. The vulnerability is exploited\nto remove or corrupt files that are critical for the application or for the system to work properly.</p>\n<p>It could result in data being lost or the application being unavailable.</p>\n<h4>Read arbitrary files</h4>\n<p>The injected path component tampers with the location of a file the application is supposed to read and output. The vulnerability is exploited to\nleak the content of arbitrary files from the file system, including sensitive files like SSH private keys.</p>\n<h2>How to fix it in Flask</h2>\n<h3>Code examples</h3>\n<p>The following code is vulnerable to path injection as it creates a path using untrusted data without validation.</p>\n<p>In this particular case, the code can be exploited with the following input to read arbitrary files outside of the intended directory:</p>\n<pre>\n../../../../\n</pre>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nfrom flask import Flask, request, send_from_directory\n\napp = Flask('example')\n\n@app.route('/example')\ndef example():\n    my_file = request.args['my_file']\n    return send_file(\"static/%s\" % my_file, as_attachment=True) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nfrom flask import Flask, request, send_from_directory\n\napp = Flask('example')\n\n@app.route('/example')\ndef example():\n    my_file = request.args['my_file']\n    return send_from_directory('static', my_file)\n</pre>\n<h3>How does this work?</h3>\n<p>The universal method to prevent path injection is to validate paths created from untrusted data. This can be done either manually or automatically,\ndepending on whether the library includes a data sanitization feature and the required function.</p>\n<p>Here, send_from_directory can be considered a secure-by-design API.</p>\n<h4>Use secure-by-design APIs</h4>\n<p>Some libraries contain APIs with these three capabilities:</p>\n<ul>\n  <li>File retrieval in a file system.</li>\n  <li>Restriction of the file retrieval to a specific folder (thus sanitizing and validating untrusted data).</li>\n  <li>A feature, such as a file download or file deletion.</li>\n</ul>\n<p>They can be referred to as \"secure-by-design\" APIs. Using this type of API, such as 'send_from_directory', brings multiple layers of security to\nthe code while keeping the code base shorter.</p>\n<p>Behind the scenes, this function protects against both regular and partial path injection.</p>\n<h3>Pitfalls</h3>\n<h4>Do not use os.path.join as a validator</h4>\n<p>The <a href=\"https://docs.python.org/3/library/os.path.html#os.path.join\">official documentation</a> states that if any argument other than the\nfirst is an absolute path, any previous argument is discarded.</p>\n<p>This means that including untrusted data in any of the parameters and using the resulting string for file operations may lead to a path traversal\nvulnerability.</p>\n<p>If you want to learn more about this pitfall, read <a href=\"https://blog.sonarsource.com/10-unknown-security-pitfalls-for-python/\">our blog post\nabout it</a>.</p>\n<h2>Resources</h2>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A01_2021-Broken_Access_Control/\">Top 10 2021 Category A1 - Broken Access Control</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A5_2017-Broken_Access_Control\">Top 10 2017 Category A5 - Broken Access\n  Control</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/20\">CWE-20 - Improper Input Validation</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/22\">CWE-22 - Improper Limitation of a Pathname to a Restricted Directory ('Path\n  Traversal')</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "high"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "open",
+        "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWnrukY5_UfzfQJe9-->Change this code to not construct the path from user-controlled data. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWnrukY5_UfzfQJe9&open=AaAwWnrukY5_UfzfQJe9\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/boot_records.py",
+          "start_line": 287,
+          "end_line": 287,
+          "start_column": 13,
+          "end_column": 65
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/83/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    }
+  ],
+  "dismissed": [
+    {
+      "number": 165,
+      "created_at": "2026-08-26T19:29:57Z",
+      "updated_at": "2026-08-31T21:38:49Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/165",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/165",
+      "state": "dismissed",
+      "fixed_at": "2026-08-31T22:42:34Z",
+      "dismissed_by": {
+        "login": "sonarqubecloud[bot]",
+        "id": 39514782,
+        "node_id": "MDM6Qm90Mzk1MTQ3ODI=",
+        "avatar_url": "https://avatars.githubusercontent.com/in/12526?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D",
+        "html_url": "https://github.com/apps/sonarqubecloud",
+        "followers_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "dismissed_at": "2026-08-31T21:38:49Z",
+      "dismissed_reason": "false positive",
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S5145",
+        "severity": "warning",
+        "description": "Logging should not be vulnerable to injection attacks",
+        "name": "pythonsecurity:S5145",
+        "tags": [
+          "cwe"
+        ],
+        "full_description": "Logging should not be vulnerable to injection attacks",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Log injection occurs when an application fails to sanitize untrusted data used for logging.</p>\n<p>An attacker can forge log content to prevent an organization from being able to trace back malicious activities.</p>\n<h3>What is the potential impact?</h3>\n<p>If an attacker can insert arbitrary data into a log file, the integrity of the chain of events being recorded can be compromised.\n  <br>\n  This frequently occurs because attackers can inject the log entry separator of the logger framework, commonly newlines, and thus insert artificial\n  log entries.\n  <br>\n  Other attacks could also occur requiring only field pollution, such as cross-site scripting (XSS) or code injection (for example, Log4Shell) if the\n  logged data is fed to other application components, which may interpret the injected data differently.\n  <br></p>\n<p>The focus of this rule is newline character replacement.</p>\n<h4>Log Forge</h4>\n<p>An attacker, able to create independent log entries by injecting log entry separators, inserts bogus data into a log file to conceal his malicious\nactivities. This obscures the content for an incident response team to trace the origin of the breach as the indicators of compromise (IoCs) lead to\nfake application events.</p>\n<h2>How to fix it in Flask</h2>\n<h3>Code examples</h3>\n<p>The following code is vulnerable to log injection as it constructs log entries using untrusted data. An attacker can leverage this to manipulate\nthe chain of events being recorded.</p>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nimport logging\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    app.logger.critical(\"%s\", data) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nimport logging\nimport base64\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    if data.isalnum():\n        app.logger.critical(\"%s\", data)\n    else:\n        app.logger.critical(\"Invalid Input: %s\", base64.b64encode(data.encode('UTF-8')))\n</pre>\n<h3>How does this work?</h3>\n<p>Data used for logging should be content-restricted and typed. This can be done by validating the data content or sanitizing it.\n  <br>\n  Validation and sanitization mainly revolve around preventing carriage return (CR) and line feed (LF) characters. However, further actions could be\n  required based on the application context and the logged data usage.</p>\n<p>Here, the example compliant code uses the <code>isalnum</code> function to ensure the untrusted data is safe. If not, it performs Base64 encoding\nto protect from log injection.</p>\n<h2>Resources</h2>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/\">Top 10 2021 Category A9 - Security Logging and\n  Monitoring Failures</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A10_2017-Insufficient_Logging%2526Monitoring\">Top 10 2017 Category A10 -\n  Insufficient Logging &amp; Monitoring</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/20\">CWE-20 - Improper Input Validation</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/117\">CWE-117 - Improper Output Neutralization for Logs</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "low"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "dismissed",
+        "commit_sha": "2fd2de237463388a9ba2a44171aa599385fc0d34",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaA_jNdlUzyOKZ-Dr7DM-->Change this code to not log user-controlled data. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaA_jNdlUzyOKZ-Dr7DM&open=AaA_jNdlUzyOKZ-Dr7DM\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/preboot.py",
+          "start_line": 724,
+          "end_line": 730,
+          "start_column": 13,
+          "end_column": 14
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/165/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 158,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-31T21:39:01Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/158",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/158",
+      "state": "dismissed",
+      "fixed_at": "2026-08-31T22:42:34Z",
+      "dismissed_by": {
+        "login": "sonarqubecloud[bot]",
+        "id": 39514782,
+        "node_id": "MDM6Qm90Mzk1MTQ3ODI=",
+        "avatar_url": "https://avatars.githubusercontent.com/in/12526?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D",
+        "html_url": "https://github.com/apps/sonarqubecloud",
+        "followers_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "dismissed_at": "2026-08-31T21:39:01Z",
+      "dismissed_reason": "false positive",
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S5145",
+        "severity": "warning",
+        "description": "Logging should not be vulnerable to injection attacks",
+        "name": "pythonsecurity:S5145",
+        "tags": [
+          "cwe"
+        ],
+        "full_description": "Logging should not be vulnerable to injection attacks",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Log injection occurs when an application fails to sanitize untrusted data used for logging.</p>\n<p>An attacker can forge log content to prevent an organization from being able to trace back malicious activities.</p>\n<h3>What is the potential impact?</h3>\n<p>If an attacker can insert arbitrary data into a log file, the integrity of the chain of events being recorded can be compromised.\n  <br>\n  This frequently occurs because attackers can inject the log entry separator of the logger framework, commonly newlines, and thus insert artificial\n  log entries.\n  <br>\n  Other attacks could also occur requiring only field pollution, such as cross-site scripting (XSS) or code injection (for example, Log4Shell) if the\n  logged data is fed to other application components, which may interpret the injected data differently.\n  <br></p>\n<p>The focus of this rule is newline character replacement.</p>\n<h4>Log Forge</h4>\n<p>An attacker, able to create independent log entries by injecting log entry separators, inserts bogus data into a log file to conceal his malicious\nactivities. This obscures the content for an incident response team to trace the origin of the breach as the indicators of compromise (IoCs) lead to\nfake application events.</p>\n<h2>How to fix it in Flask</h2>\n<h3>Code examples</h3>\n<p>The following code is vulnerable to log injection as it constructs log entries using untrusted data. An attacker can leverage this to manipulate\nthe chain of events being recorded.</p>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nimport logging\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    app.logger.critical(\"%s\", data) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nimport logging\nimport base64\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    if data.isalnum():\n        app.logger.critical(\"%s\", data)\n    else:\n        app.logger.critical(\"Invalid Input: %s\", base64.b64encode(data.encode('UTF-8')))\n</pre>\n<h3>How does this work?</h3>\n<p>Data used for logging should be content-restricted and typed. This can be done by validating the data content or sanitizing it.\n  <br>\n  Validation and sanitization mainly revolve around preventing carriage return (CR) and line feed (LF) characters. However, further actions could be\n  required based on the application context and the logged data usage.</p>\n<p>Here, the example compliant code uses the <code>isalnum</code> function to ensure the untrusted data is safe. If not, it performs Base64 encoding\nto protect from log injection.</p>\n<h2>Resources</h2>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/\">Top 10 2021 Category A9 - Security Logging and\n  Monitoring Failures</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A10_2017-Insufficient_Logging%2526Monitoring\">Top 10 2017 Category A10 -\n  Insufficient Logging &amp; Monitoring</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/20\">CWE-20 - Improper Input Validation</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/117\">CWE-117 - Improper Output Neutralization for Logs</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "low"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "dismissed",
+        "commit_sha": "2fd2de237463388a9ba2a44171aa599385fc0d34",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWno0kY5_UfzfQJeu-->Change this code to not log user-controlled data. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWno0kY5_UfzfQJeu&open=AaAwWno0kY5_UfzfQJeu\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/preboot.py",
+          "start_line": 540,
+          "end_line": 540,
+          "start_column": 13,
+          "end_column": 101
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/158/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 157,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-31T21:39:00Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/157",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/157",
+      "state": "dismissed",
+      "fixed_at": "2026-08-31T22:42:34Z",
+      "dismissed_by": {
+        "login": "sonarqubecloud[bot]",
+        "id": 39514782,
+        "node_id": "MDM6Qm90Mzk1MTQ3ODI=",
+        "avatar_url": "https://avatars.githubusercontent.com/in/12526?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D",
+        "html_url": "https://github.com/apps/sonarqubecloud",
+        "followers_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "dismissed_at": "2026-08-31T21:39:00Z",
+      "dismissed_reason": "false positive",
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S5145",
+        "severity": "warning",
+        "description": "Logging should not be vulnerable to injection attacks",
+        "name": "pythonsecurity:S5145",
+        "tags": [
+          "cwe"
+        ],
+        "full_description": "Logging should not be vulnerable to injection attacks",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Log injection occurs when an application fails to sanitize untrusted data used for logging.</p>\n<p>An attacker can forge log content to prevent an organization from being able to trace back malicious activities.</p>\n<h3>What is the potential impact?</h3>\n<p>If an attacker can insert arbitrary data into a log file, the integrity of the chain of events being recorded can be compromised.\n  <br>\n  This frequently occurs because attackers can inject the log entry separator of the logger framework, commonly newlines, and thus insert artificial\n  log entries.\n  <br>\n  Other attacks could also occur requiring only field pollution, such as cross-site scripting (XSS) or code injection (for example, Log4Shell) if the\n  logged data is fed to other application components, which may interpret the injected data differently.\n  <br></p>\n<p>The focus of this rule is newline character replacement.</p>\n<h4>Log Forge</h4>\n<p>An attacker, able to create independent log entries by injecting log entry separators, inserts bogus data into a log file to conceal his malicious\nactivities. This obscures the content for an incident response team to trace the origin of the breach as the indicators of compromise (IoCs) lead to\nfake application events.</p>\n<h2>How to fix it in Flask</h2>\n<h3>Code examples</h3>\n<p>The following code is vulnerable to log injection as it constructs log entries using untrusted data. An attacker can leverage this to manipulate\nthe chain of events being recorded.</p>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nimport logging\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    app.logger.critical(\"%s\", data) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nimport logging\nimport base64\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    if data.isalnum():\n        app.logger.critical(\"%s\", data)\n    else:\n        app.logger.critical(\"Invalid Input: %s\", base64.b64encode(data.encode('UTF-8')))\n</pre>\n<h3>How does this work?</h3>\n<p>Data used for logging should be content-restricted and typed. This can be done by validating the data content or sanitizing it.\n  <br>\n  Validation and sanitization mainly revolve around preventing carriage return (CR) and line feed (LF) characters. However, further actions could be\n  required based on the application context and the logged data usage.</p>\n<p>Here, the example compliant code uses the <code>isalnum</code> function to ensure the untrusted data is safe. If not, it performs Base64 encoding\nto protect from log injection.</p>\n<h2>Resources</h2>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/\">Top 10 2021 Category A9 - Security Logging and\n  Monitoring Failures</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A10_2017-Insufficient_Logging%2526Monitoring\">Top 10 2017 Category A10 -\n  Insufficient Logging &amp; Monitoring</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/20\">CWE-20 - Improper Input Validation</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/117\">CWE-117 - Improper Output Neutralization for Logs</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "low"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "dismissed",
+        "commit_sha": "2fd2de237463388a9ba2a44171aa599385fc0d34",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWno0kY5_UfzfQJet-->Change this code to not log user-controlled data. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWno0kY5_UfzfQJet&open=AaAwWno0kY5_UfzfQJet\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/preboot.py",
+          "start_line": 530,
+          "end_line": 530,
+          "start_column": 13,
+          "end_column": 101
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/157/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 156,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-31T21:39:01Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/156",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/156",
+      "state": "dismissed",
+      "fixed_at": "2026-08-31T22:42:34Z",
+      "dismissed_by": {
+        "login": "sonarqubecloud[bot]",
+        "id": 39514782,
+        "node_id": "MDM6Qm90Mzk1MTQ3ODI=",
+        "avatar_url": "https://avatars.githubusercontent.com/in/12526?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D",
+        "html_url": "https://github.com/apps/sonarqubecloud",
+        "followers_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "dismissed_at": "2026-08-31T21:39:01Z",
+      "dismissed_reason": "false positive",
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S5145",
+        "severity": "warning",
+        "description": "Logging should not be vulnerable to injection attacks",
+        "name": "pythonsecurity:S5145",
+        "tags": [
+          "cwe"
+        ],
+        "full_description": "Logging should not be vulnerable to injection attacks",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Log injection occurs when an application fails to sanitize untrusted data used for logging.</p>\n<p>An attacker can forge log content to prevent an organization from being able to trace back malicious activities.</p>\n<h3>What is the potential impact?</h3>\n<p>If an attacker can insert arbitrary data into a log file, the integrity of the chain of events being recorded can be compromised.\n  <br>\n  This frequently occurs because attackers can inject the log entry separator of the logger framework, commonly newlines, and thus insert artificial\n  log entries.\n  <br>\n  Other attacks could also occur requiring only field pollution, such as cross-site scripting (XSS) or code injection (for example, Log4Shell) if the\n  logged data is fed to other application components, which may interpret the injected data differently.\n  <br></p>\n<p>The focus of this rule is newline character replacement.</p>\n<h4>Log Forge</h4>\n<p>An attacker, able to create independent log entries by injecting log entry separators, inserts bogus data into a log file to conceal his malicious\nactivities. This obscures the content for an incident response team to trace the origin of the breach as the indicators of compromise (IoCs) lead to\nfake application events.</p>\n<h2>How to fix it in Flask</h2>\n<h3>Code examples</h3>\n<p>The following code is vulnerable to log injection as it constructs log entries using untrusted data. An attacker can leverage this to manipulate\nthe chain of events being recorded.</p>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nimport logging\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    app.logger.critical(\"%s\", data) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nimport logging\nimport base64\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    if data.isalnum():\n        app.logger.critical(\"%s\", data)\n    else:\n        app.logger.critical(\"Invalid Input: %s\", base64.b64encode(data.encode('UTF-8')))\n</pre>\n<h3>How does this work?</h3>\n<p>Data used for logging should be content-restricted and typed. This can be done by validating the data content or sanitizing it.\n  <br>\n  Validation and sanitization mainly revolve around preventing carriage return (CR) and line feed (LF) characters. However, further actions could be\n  required based on the application context and the logged data usage.</p>\n<p>Here, the example compliant code uses the <code>isalnum</code> function to ensure the untrusted data is safe. If not, it performs Base64 encoding\nto protect from log injection.</p>\n<h2>Resources</h2>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/\">Top 10 2021 Category A9 - Security Logging and\n  Monitoring Failures</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A10_2017-Insufficient_Logging%2526Monitoring\">Top 10 2017 Category A10 -\n  Insufficient Logging &amp; Monitoring</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/20\">CWE-20 - Improper Input Validation</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/117\">CWE-117 - Improper Output Neutralization for Logs</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "low"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "dismissed",
+        "commit_sha": "2fd2de237463388a9ba2a44171aa599385fc0d34",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWno0kY5_UfzfQJes-->Change this code to not log user-controlled data. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWno0kY5_UfzfQJes&open=AaAwWno0kY5_UfzfQJes\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/preboot.py",
+          "start_line": 542,
+          "end_line": 542,
+          "start_column": 9,
+          "end_column": 69
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/156/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 155,
+      "created_at": "2026-08-23T21:14:23Z",
+      "updated_at": "2026-08-31T21:38:59Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/155",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/155",
+      "state": "dismissed",
+      "fixed_at": "2026-08-31T22:42:34Z",
+      "dismissed_by": {
+        "login": "sonarqubecloud[bot]",
+        "id": 39514782,
+        "node_id": "MDM6Qm90Mzk1MTQ3ODI=",
+        "avatar_url": "https://avatars.githubusercontent.com/in/12526?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D",
+        "html_url": "https://github.com/apps/sonarqubecloud",
+        "followers_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/sonarqubecloud%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "dismissed_at": "2026-08-31T21:38:59Z",
+      "dismissed_reason": "false positive",
+      "dismissed_comment": null,
+      "rule": {
+        "id": "pythonsecurity:S5145",
+        "severity": "warning",
+        "description": "Logging should not be vulnerable to injection attacks",
+        "name": "pythonsecurity:S5145",
+        "tags": [
+          "cwe"
+        ],
+        "full_description": "Logging should not be vulnerable to injection attacks",
+        "help": "<h2>Why is this an issue?</h2>\n<p>Log injection occurs when an application fails to sanitize untrusted data used for logging.</p>\n<p>An attacker can forge log content to prevent an organization from being able to trace back malicious activities.</p>\n<h3>What is the potential impact?</h3>\n<p>If an attacker can insert arbitrary data into a log file, the integrity of the chain of events being recorded can be compromised.\n  <br>\n  This frequently occurs because attackers can inject the log entry separator of the logger framework, commonly newlines, and thus insert artificial\n  log entries.\n  <br>\n  Other attacks could also occur requiring only field pollution, such as cross-site scripting (XSS) or code injection (for example, Log4Shell) if the\n  logged data is fed to other application components, which may interpret the injected data differently.\n  <br></p>\n<p>The focus of this rule is newline character replacement.</p>\n<h4>Log Forge</h4>\n<p>An attacker, able to create independent log entries by injecting log entry separators, inserts bogus data into a log file to conceal his malicious\nactivities. This obscures the content for an incident response team to trace the origin of the breach as the indicators of compromise (IoCs) lead to\nfake application events.</p>\n<h2>How to fix it in Flask</h2>\n<h3>Code examples</h3>\n<p>The following code is vulnerable to log injection as it constructs log entries using untrusted data. An attacker can leverage this to manipulate\nthe chain of events being recorded.</p>\n<h4>Noncompliant code example</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"noncompliant\">\nimport logging\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    app.logger.critical(\"%s\", data) # Noncompliant\n</pre>\n<h4>Compliant solution</h4>\n<pre data-diff-id=\"1\" data-diff-type=\"compliant\">\nimport logging\nimport base64\n\napp = Flask(__name__)\n\n@app.route('/example')\ndef log():\n    data = request.args[\"data\"]\n    if data.isalnum():\n        app.logger.critical(\"%s\", data)\n    else:\n        app.logger.critical(\"Invalid Input: %s\", base64.b64encode(data.encode('UTF-8')))\n</pre>\n<h3>How does this work?</h3>\n<p>Data used for logging should be content-restricted and typed. This can be done by validating the data content or sanitizing it.\n  <br>\n  Validation and sanitization mainly revolve around preventing carriage return (CR) and line feed (LF) characters. However, further actions could be\n  required based on the application context and the logged data usage.</p>\n<p>Here, the example compliant code uses the <code>isalnum</code> function to ensure the untrusted data is safe. If not, it performs Base64 encoding\nto protect from log injection.</p>\n<h2>Resources</h2>\n<h3>Standards</h3>\n<ul>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A03_2021-Injection/\">Top 10 2021 Category A3 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/\">Top 10 2021 Category A9 - Security Logging and\n  Monitoring Failures</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A1_2017-Injection\">Top 10 2017 Category A1 - Injection</a></li>\n  <li>OWASP - <a href=\"https://owasp.org/www-project-top-ten/2017/A10_2017-Insufficient_Logging%2526Monitoring\">Top 10 2017 Category A10 -\n  Insufficient Logging &amp; Monitoring</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/20\">CWE-20 - Improper Input Validation</a></li>\n  <li>CWE - <a href=\"https://cwe.mitre.org/data/definitions/117\">CWE-117 - Improper Output Neutralization for Logs</a></li>\n  <li>STIG Viewer - <a href=\"https://stigviewer.com/stigs/application_security_and_development/2024-12-06/finding/V-222609\">Application Security and\n  Development: V-222609</a> - The application must not be subject to input handling vulnerabilities.</li>\n</ul>",
+        "security_severity_level": "low"
+      },
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": "(default)",
+        "environment": "{}",
+        "category": "",
+        "state": "dismissed",
+        "commit_sha": "2fd2de237463388a9ba2a44171aa599385fc0d34",
+        "message": {
+          "text": "<!--SONAR_ISSUE_KEY:AaAwWno0kY5_UfzfQJer-->Change this code to not log user-controlled data. <p>See more on <a href=\"https://sonarcloud.io/project/issues?id=unified-systems-com_tap&issues=AaAwWno0kY5_UfzfQJer&open=AaAwWno0kY5_UfzfQJer\">SonarQube Cloud</a></p>"
+        },
+        "location": {
+          "path": "tap/preboot.py",
+          "start_line": 533,
+          "end_line": 533,
+          "start_column": 13,
+          "end_column": 116
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/155/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    }
+  ],
+  "fixed": [
+    {
+      "number": 274,
+      "created_at": "2026-09-03T13:46:33Z",
+      "updated_at": "2026-09-04T13:41:19Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/274",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/274",
+      "state": "fixed",
+      "fixed_at": "2026-09-04T13:41:19Z",
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "CVE-2026-15806",
+        "severity": "warning",
+        "description": "The HTTPPasswordMgr class in the urllib.request module, along with its ...",
+        "name": "OsPackageVulnerability",
+        "tags": [
+          "MEDIUM",
+          "security",
+          "vulnerability"
+        ],
+        "full_description": "The HTTPPasswordMgr class in the urllib.request module, along with its subclasses HTTPPasswordMgrWithDefaultRealm and HTTPPasswordMgrWithPriorAuth, did not take the URL scheme into account when matching stored credentials against a requested URL. Credentials added for an https:// URL were also used for requests to the same host over http://, so an attacker able to redirect or downgrade a client to plain HTTP (for example, via an HTTPS-to-HTTP redirect or an on-path position) could capture credentials in cleartext. Credentials added for http:// URLs could likewise be sent over https://.\n\nCredential matching is now scoped by URL scheme. Credentials registered with a URL that includes a scheme are only used for requests with the same scheme. Credentials registered with a bare authority (such as example.com or example.com:8080) continue to match any scheme, preserving compatibility with existing code, including proxy authentication.\n\nUsers who cannot upgrade immediately can mitigate by ensuring that applications ",
+        "help": "**Vulnerability CVE-2026-15806**\n| Severity | Package | Fixed Version | Link |\n| --- | --- | --- | --- |\n|MEDIUM|python-3.14-dev|3.14.7-r5|[CVE-2026-15806](https://avd.aquasec.com/nvd/cve-2026-15806)|\n\nThe HTTPPasswordMgr class in the urllib.request module, along with its subclasses HTTPPasswordMgrWithDefaultRealm and HTTPPasswordMgrWithPriorAuth, did not take the URL scheme into account when matching stored credentials against a requested URL. Credentials added for an https:// URL were also used for requests to the same host over http://, so an attacker able to redirect or downgrade a client to plain HTTP (for example, via an HTTPS-to-HTTP redirect or an on-path position) could capture credentials in cleartext. Credentials added for http:// URLs could likewise be sent over https://.\n\nCredential matching is now scoped by URL scheme. Credentials registered with a URL that includes a scheme are only used for requests with the same scheme. Credentials registered with a bare authority (such as example.com or example.com:8080) continue to match any scheme, preserving compatibility with existing code, including proxy authentication.\n\nUsers who cannot upgrade immediately can mitigate by ensuring that applications never make plain http:// requests to hosts for which credentials are registered, for example by not following redirects to http:// URLs.",
+        "help_uri": "https://avd.aquasec.com/nvd/cve-2026-15806",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "Trivy",
+        "guid": null,
+        "version": "0.70.0"
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": ".github/workflows/trivy-nightly.yml:scan",
+        "environment": "{\"image\":\"tap-web\"}",
+        "category": "trivy-tap-web",
+        "state": "fixed",
+        "commit_sha": "f69e2ac774afc196bb546ed11829835be847a6e9",
+        "message": {
+          "text": "Package: python-3.14-dev\nInstalled Version: 3.14.7-r4\nVulnerability CVE-2026-15806\nSeverity: MEDIUM\nFixed Version: 3.14.7-r5\nLink: [CVE-2026-15806](https://avd.aquasec.com/nvd/cve-2026-15806)"
+        },
+        "location": {
+          "path": "unified-systems-com/tap-web",
+          "start_line": 1,
+          "end_line": 1,
+          "start_column": 1,
+          "end_column": 1
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/274/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 273,
+      "created_at": "2026-09-03T13:46:33Z",
+      "updated_at": "2026-09-04T13:41:19Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/273",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/273",
+      "state": "fixed",
+      "fixed_at": "2026-09-04T13:41:19Z",
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "CVE-2026-15806",
+        "severity": "warning",
+        "description": "The HTTPPasswordMgr class in the urllib.request module, along with its ...",
+        "name": "OsPackageVulnerability",
+        "tags": [
+          "MEDIUM",
+          "security",
+          "vulnerability"
+        ],
+        "full_description": "The HTTPPasswordMgr class in the urllib.request module, along with its subclasses HTTPPasswordMgrWithDefaultRealm and HTTPPasswordMgrWithPriorAuth, did not take the URL scheme into account when matching stored credentials against a requested URL. Credentials added for an https:// URL were also used for requests to the same host over http://, so an attacker able to redirect or downgrade a client to plain HTTP (for example, via an HTTPS-to-HTTP redirect or an on-path position) could capture credentials in cleartext. Credentials added for http:// URLs could likewise be sent over https://.\n\nCredential matching is now scoped by URL scheme. Credentials registered with a URL that includes a scheme are only used for requests with the same scheme. Credentials registered with a bare authority (such as example.com or example.com:8080) continue to match any scheme, preserving compatibility with existing code, including proxy authentication.\n\nUsers who cannot upgrade immediately can mitigate by ensuring that applications ",
+        "help": "**Vulnerability CVE-2026-15806**\n| Severity | Package | Fixed Version | Link |\n| --- | --- | --- | --- |\n|MEDIUM|python-3.14-dev|3.14.7-r5|[CVE-2026-15806](https://avd.aquasec.com/nvd/cve-2026-15806)|\n\nThe HTTPPasswordMgr class in the urllib.request module, along with its subclasses HTTPPasswordMgrWithDefaultRealm and HTTPPasswordMgrWithPriorAuth, did not take the URL scheme into account when matching stored credentials against a requested URL. Credentials added for an https:// URL were also used for requests to the same host over http://, so an attacker able to redirect or downgrade a client to plain HTTP (for example, via an HTTPS-to-HTTP redirect or an on-path position) could capture credentials in cleartext. Credentials added for http:// URLs could likewise be sent over https://.\n\nCredential matching is now scoped by URL scheme. Credentials registered with a URL that includes a scheme are only used for requests with the same scheme. Credentials registered with a bare authority (such as example.com or example.com:8080) continue to match any scheme, preserving compatibility with existing code, including proxy authentication.\n\nUsers who cannot upgrade immediately can mitigate by ensuring that applications never make plain http:// requests to hosts for which credentials are registered, for example by not following redirects to http:// URLs.",
+        "help_uri": "https://avd.aquasec.com/nvd/cve-2026-15806",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "Trivy",
+        "guid": null,
+        "version": "0.70.0"
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": ".github/workflows/trivy-nightly.yml:scan",
+        "environment": "{\"image\":\"tap-web\"}",
+        "category": "trivy-tap-web",
+        "state": "fixed",
+        "commit_sha": "f69e2ac774afc196bb546ed11829835be847a6e9",
+        "message": {
+          "text": "Package: python-3.14-base-dev\nInstalled Version: 3.14.7-r4\nVulnerability CVE-2026-15806\nSeverity: MEDIUM\nFixed Version: 3.14.7-r5\nLink: [CVE-2026-15806](https://avd.aquasec.com/nvd/cve-2026-15806)"
+        },
+        "location": {
+          "path": "unified-systems-com/tap-web",
+          "start_line": 1,
+          "end_line": 1,
+          "start_column": 1,
+          "end_column": 1
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/273/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    },
+    {
+      "number": 272,
+      "created_at": "2026-09-03T13:46:33Z",
+      "updated_at": "2026-09-04T13:41:19Z",
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/272",
+      "html_url": "https://github.com/unified-systems-com/tap/security/code-scanning/272",
+      "state": "fixed",
+      "fixed_at": "2026-09-04T13:41:19Z",
+      "dismissed_by": null,
+      "dismissed_at": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "rule": {
+        "id": "CVE-2026-15806",
+        "severity": "warning",
+        "description": "The HTTPPasswordMgr class in the urllib.request module, along with its ...",
+        "name": "OsPackageVulnerability",
+        "tags": [
+          "MEDIUM",
+          "security",
+          "vulnerability"
+        ],
+        "full_description": "The HTTPPasswordMgr class in the urllib.request module, along with its subclasses HTTPPasswordMgrWithDefaultRealm and HTTPPasswordMgrWithPriorAuth, did not take the URL scheme into account when matching stored credentials against a requested URL. Credentials added for an https:// URL were also used for requests to the same host over http://, so an attacker able to redirect or downgrade a client to plain HTTP (for example, via an HTTPS-to-HTTP redirect or an on-path position) could capture credentials in cleartext. Credentials added for http:// URLs could likewise be sent over https://.\n\nCredential matching is now scoped by URL scheme. Credentials registered with a URL that includes a scheme are only used for requests with the same scheme. Credentials registered with a bare authority (such as example.com or example.com:8080) continue to match any scheme, preserving compatibility with existing code, including proxy authentication.\n\nUsers who cannot upgrade immediately can mitigate by ensuring that applications ",
+        "help": "**Vulnerability CVE-2026-15806**\n| Severity | Package | Fixed Version | Link |\n| --- | --- | --- | --- |\n|MEDIUM|python-3.14-dev|3.14.7-r5|[CVE-2026-15806](https://avd.aquasec.com/nvd/cve-2026-15806)|\n\nThe HTTPPasswordMgr class in the urllib.request module, along with its subclasses HTTPPasswordMgrWithDefaultRealm and HTTPPasswordMgrWithPriorAuth, did not take the URL scheme into account when matching stored credentials against a requested URL. Credentials added for an https:// URL were also used for requests to the same host over http://, so an attacker able to redirect or downgrade a client to plain HTTP (for example, via an HTTPS-to-HTTP redirect or an on-path position) could capture credentials in cleartext. Credentials added for http:// URLs could likewise be sent over https://.\n\nCredential matching is now scoped by URL scheme. Credentials registered with a URL that includes a scheme are only used for requests with the same scheme. Credentials registered with a bare authority (such as example.com or example.com:8080) continue to match any scheme, preserving compatibility with existing code, including proxy authentication.\n\nUsers who cannot upgrade immediately can mitigate by ensuring that applications never make plain http:// requests to hosts for which credentials are registered, for example by not following redirects to http:// URLs.",
+        "help_uri": "https://avd.aquasec.com/nvd/cve-2026-15806",
+        "security_severity_level": "medium"
+      },
+      "tool": {
+        "name": "Trivy",
+        "guid": null,
+        "version": "0.70.0"
+      },
+      "most_recent_instance": {
+        "ref": "refs/heads/main",
+        "analysis_key": ".github/workflows/trivy-nightly.yml:scan",
+        "environment": "{\"image\":\"tap-web\"}",
+        "category": "trivy-tap-web",
+        "state": "fixed",
+        "commit_sha": "f69e2ac774afc196bb546ed11829835be847a6e9",
+        "message": {
+          "text": "Package: python-3.14-base\nInstalled Version: 3.14.7-r4\nVulnerability CVE-2026-15806\nSeverity: MEDIUM\nFixed Version: 3.14.7-r5\nLink: [CVE-2026-15806](https://avd.aquasec.com/nvd/cve-2026-15806)"
+        },
+        "location": {
+          "path": "unified-systems-com/tap-web",
+          "start_line": 1,
+          "end_line": 1,
+          "start_column": 1,
+          "end_column": 1
+        },
+        "classifications": []
+      },
+      "instances_url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/alerts/272/instances",
+      "dismissal_approved_by": null,
+      "assignees": []
+    }
+  ],
+  "not_enabled_404": {
+    "message": "no analysis found",
+    "documentation_url": "https://docs.github.com/rest/code-scanning/code-scanning#list-code-scanning-alerts-for-a-repository",
+    "status": "404"
+  }
+}

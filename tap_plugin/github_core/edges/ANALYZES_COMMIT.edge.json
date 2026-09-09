@@ -1,0 +1,16 @@
+{
+  "slug": "ANALYZES_COMMIT__github_core",
+  "name": "Analyzes Commit",
+  "description": "The commit a code scanning analysis ran against — the join from a scanner run onto git_core's neutral commit, and from there onto the workflow runs and pull requests that touched it. Drawn ONLY when that commit is on the grid; its absence is not evidence the commit was not analysed. The analysis node's `commit_sha` holds the sha regardless, so the fact survives the missing join.",
+  "sources": [
+    "github_core__code_scanning_analysis"
+  ],
+  "targets": [
+    "git_core__git_commit"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "security",
+    "github.observation": "execution"
+  }
+}

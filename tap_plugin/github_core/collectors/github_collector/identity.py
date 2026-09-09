@@ -134,6 +134,38 @@ def rule_suite_id(suite_id_int: int | str) -> UUID:
     return _id("github_core__rule_suite", str(suite_id_int))
 
 
+def code_scanning_alert_id(full_name: str, number: int | str) -> UUID:
+    """A code-scanning alert, keyed on the repository plus GitHub's alert number.
+
+    The number is how every URL and every dismissal names the alert within its repository, and
+    it is stable across re-analysis: a new analysis that finds the same result updates the alert
+    rather than opening a new one. Repository-scoped because numbers restart per repository.
+    """
+    return _id("github_core__code_scanning_alert", f"{full_name}#{number}")
+
+
+def code_scanning_analysis_id(full_name: str, analysis_id_int: int | str) -> UUID:
+    """One analysis (one SARIF upload), keyed on the repository plus GitHub's analysis id.
+
+    The id is platform-global like runs and artifacts; the repository prefix is belt-and-braces
+    in the same way `actions_artifact_id`'s is, recorded rather than re-derived.
+    """
+    return _id("github_core__code_scanning_analysis", f"{full_name}#{analysis_id_int}")
+
+
+def code_scanning_finding_id(full_name: str, number: int | str) -> UUID:
+    """The generic `compliance_core__compliance_finding` github_core mints for a code-scanning alert.
+
+    Minted under GITHUB_CORE_NAMESPACE — github_core is the author of the observation, so the
+    finding's identity is github_core's to derive — with the natural key
+    ``compliance_core__compliance_finding:{full_name}#code_scanning#{number}``. The middle
+    segment names the GitHub security surface the finding came from, so the same repository's
+    Dependabot alert number 7 (``#dependabot#7``) and code-scanning alert number 7 can never
+    collide; a future secret-scanning finding takes ``#secret_scanning#``.
+    """
+    return _id("compliance_core__compliance_finding", f"{full_name}#code_scanning#{number}")
+
+
 def environment_id(full_name: str, name: str) -> UUID:
     return _id("github_core__github_environment", f"{full_name}#{name}")
 

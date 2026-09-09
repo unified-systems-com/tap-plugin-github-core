@@ -3,6 +3,8 @@
 from tap_plugin.github_core.models.actions_artifact import ActionsArtifact
 from tap_plugin.github_core.models.actions_cache import ActionsCache
 from tap_plugin.github_core.models.app_installation import AppInstallation
+from tap_plugin.github_core.models.code_scanning_alert import CodeScanningAlert
+from tap_plugin.github_core.models.code_scanning_analysis import CodeScanningAnalysis
 from tap_plugin.github_core.models.commit_observation import CommitObservation
 from tap_plugin.github_core.models.github_account import GithubAccount
 from tap_plugin.github_core.models.github_action import GithubAction
@@ -29,6 +31,8 @@ __all__ = [
     "ActionsCache",
     "CommitObservation",
     "AppInstallation",
+    "CodeScanningAlert",
+    "CodeScanningAnalysis",
     "GithubAccount",
     "GithubAction",
     "GithubActionsJob",

@@ -130,6 +130,35 @@ _RENAMED_FROM: dict[str, dict[str, str]] = {
     "artifacts": {"artifact_id": "id"},
     "packages": {"package_id": "id"},
     "package_versions": {"version_id": "id"},
+    # Nested objects flattened onto the node, mapped to the TOP-LEVEL key they are read under
+    # (the same convention as `repository.owner_login` <- `owner`): `rule.*`, `tool.*`,
+    # `dismissed_by.login` and `most_recent_instance.*` (req-github-core-code-scanning).
+    "code_scanning_alerts": {
+        "dismissed_by_login": "dismissed_by",
+        "rule_id": "rule",
+        "rule_name": "rule",
+        "rule_severity": "rule",
+        "security_severity_level": "rule",
+        "rule_description": "rule",
+        "rule_tags": "rule",
+        "tool_name": "tool",
+        "tool_version": "tool",
+        "tool_guid": "tool",
+        "analysis_key": "most_recent_instance",
+        "category": "most_recent_instance",
+        "environment": "most_recent_instance",
+        "ref": "most_recent_instance",
+        "commit_sha": "most_recent_instance",
+        "location": "most_recent_instance",
+        "message": "most_recent_instance",
+        "classifications": "most_recent_instance",
+    },
+    "code_scanning_analyses": {
+        "analysis_id": "id",
+        "tool_name": "tool",
+        "tool_version": "tool",
+        "tool_guid": "tool",
+    },
 }
 
 
