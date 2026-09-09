@@ -81,3 +81,4 @@ BUILDS_PACKAGE_VERSION__github_core = "edges/BUILDS_PACKAGE_VERSION.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"
+workflow-page = "grift/workflow-page.grift.json"
