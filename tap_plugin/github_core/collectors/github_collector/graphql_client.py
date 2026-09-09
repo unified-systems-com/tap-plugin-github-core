@@ -60,6 +60,14 @@ _REF_PAGE_SIZE = 100
 # and `totalCount` says how many the cap left behind.
 _RELEASE_PAGE_SIZE = 50
 _RELEASE_ASSET_PAGE_SIZE = 50
+#: Pull requests per repository, most recently UPDATED first — the window a "what is waiting"
+#: view reads; the total is reported so the cap is visible (req-github-core-pull-requests).
+_PULL_REQUEST_PAGE_SIZE = 30
+_PULL_REQUEST_LABEL_PAGE_SIZE = 10
+_PULL_REQUEST_REVIEW_PAGE_SIZE = 10
+#: Check runs + commit statuses on the head commit. A large matrix can exceed this; the
+#: rollup's `totalCount` says so and the node records the shortfall.
+_CHECK_CONTEXT_PAGE_SIZE = 50
 _TIMEOUT_SECONDS = 60
 
 
@@ -188,6 +196,97 @@ fragment CommitSlice on Commit {
     "assets": _RELEASE_ASSET_PAGE_SIZE,
 }
 
+# Pull requests are a SECOND query, not more fields on the config layer. GitHub caps a query at
+# 500,000 possible nodes, computed from the page sizes multiplied down the tree, and the config
+# layer already asks for ~460,000 across its 100-repository page; fifty pull requests with their
+# labels, reviews and a hundred check contexts each would have put it at 1,269,100 (measured
+# 2026-09-08, `MAX_NODE_LIMIT_EXCEEDED`). The node budget is not the only ceiling: GitHub also
+# stops a query at ~10 seconds of execution (HTTP 502/504). Measured the same day against a
+# 24-repository organization: twenty repositories a page timed out every time, ten sat at the
+# edge (8-11 s, cost 15, one 502 in four runs — no single field to blame, each of `mergeable`,
+# the diff sizes and the rollup shaves a second or two), five is ~5 s. Five it is: five requests
+# for this organization, ~12,000 possible nodes each.
+_PULL_REQUEST_REPO_PAGE_SIZE = 5
+_PULL_REQUEST_QUERY = """
+query($login: String!, $cursor: String) {
+  rateLimit { cost remaining }
+  repositoryOwner(login: $login) {
+    __typename
+    ... on RepositoryOwner {
+      repositories(first: %(page)d, after: $cursor, ownerAffiliations: [OWNER]) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          nameWithOwner
+          pullRequests(first: %(pulls)d, orderBy: {field: UPDATED_AT, direction: DESC}) {
+            totalCount
+            nodes {
+              number
+              databaseId
+              title
+              state
+              isDraft
+              url
+              author { __typename login }
+              authorAssociation
+              headRefName
+              headRefOid
+              headRepository { nameWithOwner }
+              baseRefName
+              baseRefOid
+              createdAt
+              updatedAt
+              closedAt
+              mergedAt
+              mergeCommit { oid }
+              mergeable
+              reviewDecision
+              additions
+              deletions
+              changedFiles
+              labels(first: %(pr_labels)d) { totalCount nodes { name } }
+              reviewRequests(first: %(pr_reviews)d) {
+                totalCount
+                nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } }
+              }
+              latestReviews(first: %(pr_reviews)d) {
+                totalCount
+                nodes { author { login } state submittedAt }
+              }
+              commits(last: 1) {
+                totalCount
+                nodes {
+                  commit {
+                    oid
+                    statusCheckRollup {
+                      state
+                      contexts(first: %(checks)d) {
+                        totalCount
+                        nodes {
+                          __typename
+                          ... on CheckRun { databaseId name status conclusion detailsUrl checkSuite { app { slug } } }
+                          ... on StatusContext { context state targetUrl creator { login } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+""" % {
+    "page": _PULL_REQUEST_REPO_PAGE_SIZE,
+    "pulls": _PULL_REQUEST_PAGE_SIZE,
+    "pr_labels": _PULL_REQUEST_LABEL_PAGE_SIZE,
+    "pr_reviews": _PULL_REQUEST_REVIEW_PAGE_SIZE,
+    "checks": _CHECK_CONTEXT_PAGE_SIZE,
+}
+
 
 class GithubGraphQLClient:
     """Minimal GraphQL client: one query, cursor pagination, partial-error surfacing."""
@@ -280,6 +379,52 @@ class GithubGraphQLClient:
             self.last_remaining,
         )
         return repos, notes
+
+    def fetch_pull_request_layer(self, login: str) -> tuple[dict[str, dict[str, Any]], list[str]]:
+        """Return ``{nameWithOwner: {"pullRequests": ...}}`` for every repository under ``login``.
+
+        The same walk, error surfacing and pruning as `fetch_config_layer`, on the pull-request
+        query (see `_PULL_REQUEST_QUERY` for why it is a second query). A repository whose
+        `pullRequests` field degraded is returned WITHOUT that key, so the emitter reads absence
+        as "not answered" and never as "no pull requests".
+        """
+        by_repo: dict[str, dict[str, Any]] = {}
+        notes: list[str] = []
+        cursor: str | None = None
+        cost = 0
+        while True:
+            body = self._post(_PULL_REQUEST_QUERY, {"login": login, "cursor": cursor})
+            data = body["data"]
+            errors = body.get("errors") or []
+            for err in errors:
+                path = ".".join(str(p) for p in (err.get("path") or []))
+                note = f"{err.get('type', 'ERROR')}: {err.get('message', '')} at {path or '<root>'}"
+                if note not in notes:
+                    notes.append(note)
+            prune_errored_paths(data, errors)
+            rate = data.get("rateLimit") or {}
+            cost += int(rate.get("cost") or 0)
+            self.last_remaining = rate.get("remaining")
+            owner = data.get("repositoryOwner")
+            if owner is None:
+                raise GithubGraphQLError(f"no such account: {login!r}")
+            connection = owner.get("repositories") or {}
+            for node in connection.get("nodes") or []:
+                if node and node.get("nameWithOwner"):
+                    by_repo[str(node["nameWithOwner"])] = node
+            page = connection.get("pageInfo") or {}
+            if not page.get("hasNextPage"):
+                break
+            cursor = page.get("endCursor")
+        self.last_cost = cost
+        logger.info(
+            "[2b6e] graphql pull-request layer: %d repo(s) for %s, cost %d, %s point(s) remaining",
+            len(by_repo),
+            login,
+            cost,
+            self.last_remaining,
+        )
+        return by_repo, notes
 
     @staticmethod
     def refs(repo: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
@@ -445,6 +590,138 @@ class GithubGraphQLClient:
                 }
             )
         return out, missing
+
+    @staticmethod
+    def pull_requests(repo: dict[str, Any]) -> tuple[list[dict[str, Any]], int] | None:
+        """Pull requests of one repository, shaped for the emitter, plus how many the cap dropped.
+
+        Returns ``None`` when the config layer did not answer the `pullRequests` field at all —
+        a degraded field is pruned by `prune_errored_paths`, and the emitter must be able to
+        tell "no pull requests" from "could not read them". Otherwise ``(pull_requests, missing)``.
+
+        The head commit's check rollup is flattened onto the pull request: GitHub keeps it on the
+        commit, but the question it answers — what stands between THIS proposal and merge — is the
+        pull request's. `checks` itemises every check run and commit status the rollup counted,
+        each saying whether an App or a workflow produced it.
+        """
+        if "pullRequests" not in repo:
+            return None
+        connection = repo.get("pullRequests") or {}
+        nodes = [n for n in (connection.get("nodes") or []) if n]
+        missing = max(int(connection.get("totalCount") or 0) - len(nodes), 0)
+        out: list[dict[str, Any]] = []
+        for node in nodes:
+            author = node.get("author") or {}
+            commits_conn = node.get("commits") or {}
+            head = next(iter(commits_conn.get("nodes") or []), None) or {}
+            head_commit = head.get("commit") or {}
+            # A pruned path (the credential could not read it) leaves the KEY absent; GitHub's own
+            # "no rollup" is the key present with null. The two must not serialize alike.
+            rollup_observed = (
+                "commits" in node and "statusCheckRollup" in head_commit
+                and ("contexts" in (head_commit.get("statusCheckRollup") or {"contexts": None}))
+            )
+            rollup = head_commit.get("statusCheckRollup") or {}
+            contexts_conn = rollup.get("contexts") or {}
+            contexts = [c for c in (contexts_conn.get("nodes") or []) if c] if rollup_observed else []
+            out.append(
+                {
+                    "number": node.get("number"),
+                    "github_id": node.get("databaseId"),
+                    "title": str(node.get("title") or ""),
+                    "state": str(node.get("state") or ""),
+                    "is_draft": bool(node.get("isDraft", False)),
+                    "author_login": str(author.get("login") or ""),
+                    "author_type": str(author.get("__typename") or ""),
+                    "author_association": str(node.get("authorAssociation") or ""),
+                    "head_ref": str(node.get("headRefName") or ""),
+                    "head_sha": str(node.get("headRefOid") or "").lower(),
+                    "head_repository": str((node.get("headRepository") or {}).get("nameWithOwner") or ""),
+                    "base_ref": str(node.get("baseRefName") or ""),
+                    "base_sha": str(node.get("baseRefOid") or "").lower(),
+                    "review_decision": str(node.get("reviewDecision") or ""),
+                    "mergeable": str(node.get("mergeable") or ""),
+                    "merge_commit_sha": str((node.get("mergeCommit") or {}).get("oid") or "").lower(),
+                    "created_at": node.get("createdAt"),
+                    "updated_at": node.get("updatedAt"),
+                    "closed_at": node.get("closedAt"),
+                    "merged_at": node.get("mergedAt"),
+                    "commit_count": commits_conn.get("totalCount"),
+                    "additions": node.get("additions"),
+                    "deletions": node.get("deletions"),
+                    "changed_files": node.get("changedFiles"),
+                    "labels": [
+                        str(lb.get("name") or "") for lb in ((node.get("labels") or {}).get("nodes") or []) if lb
+                    ],
+                    "review_requests": [
+                        GithubGraphQLClient._review_request(rr)
+                        for rr in ((node.get("reviewRequests") or {}).get("nodes") or [])
+                        if rr and rr.get("requestedReviewer")
+                    ],
+                    "latest_reviews": [
+                        {
+                            "login": str((rv.get("author") or {}).get("login") or ""),
+                            "state": str(rv.get("state") or ""),
+                            "submitted_at": rv.get("submittedAt"),
+                        }
+                        for rv in ((node.get("latestReviews") or {}).get("nodes") or [])
+                        if rv
+                    ],
+                    "html_url": str(node.get("url") or ""),
+                    # GitHub's own counts for the three capped lists, so a page of ten is never
+                    # read as all of them — a reviewer beyond the cap would otherwise vanish from
+                    # "waiting on me". None when the connection did not report a count.
+                    "labels_total": (node.get("labels") or {}).get("totalCount"),
+                    "review_requests_total": (node.get("reviewRequests") or {}).get("totalCount"),
+                    "latest_reviews_total": (node.get("latestReviews") or {}).get("totalCount"),
+                    # The rollup: `""` when the head commit carries none (nothing ran), never SUCCESS —
+                    # and `checks_observability` says whether that blank was answered or refused.
+                    "checks_rollup_state": str(rollup.get("state") or "") if rollup_observed else "",
+                    "checks_total": contexts_conn.get("totalCount") if rollup_observed else None,
+                    "checks": [GithubGraphQLClient._check_context(c) for c in contexts],
+                    "checks_observability": "observed" if rollup_observed else "unobservable",
+                }
+            )
+        return out, missing
+
+    @staticmethod
+    def _review_request(request: dict[str, Any]) -> dict[str, Any]:
+        """One outstanding review request, as `{kind, login}` (a team's slug rides `login`)."""
+        reviewer = request.get("requestedReviewer") or {}
+        kind = "team" if reviewer.get("__typename") == "Team" else "user"
+        return {"kind": kind, "login": str(reviewer.get("login") or reviewer.get("slug") or "")}
+
+    @staticmethod
+    def _check_context(context: dict[str, Any]) -> dict[str, Any]:
+        """One entry of the head commit's rollup — a check run (Checks API) or a commit status.
+
+        Both kinds are kept in one list because the gate counts both: GitHub Actions and most
+        Apps post check runs, while Codacy, Sonar and older integrations post statuses, and a
+        required context may be either. `app` names the producer for a check run; a status names
+        its `creator` login instead, which is what the older API records. `check_run_id` is
+        GitHub's id for a check run — a rerun mints a new, higher id for the same (app, name),
+        which is what lets a consumer keep the latest without guessing from the url; a commit
+        status has no id and carries null.
+        """
+        if context.get("__typename") == "StatusContext":
+            return {
+                "kind": "status",
+                "check_run_id": None,
+                "name": str(context.get("context") or ""),
+                "status": "COMPLETED",
+                "conclusion": str(context.get("state") or ""),
+                "app": str((context.get("creator") or {}).get("login") or ""),
+                "url": str(context.get("targetUrl") or ""),
+            }
+        return {
+            "kind": "check_run",
+            "check_run_id": context.get("databaseId"),
+            "name": str(context.get("name") or ""),
+            "status": str(context.get("status") or ""),
+            "conclusion": str(context.get("conclusion") or ""),
+            "app": str(((context.get("checkSuite") or {}).get("app") or {}).get("slug") or ""),
+            "url": str(context.get("detailsUrl") or ""),
+        }
 
     @staticmethod
     def _release_asset(asset: dict[str, Any]) -> dict[str, Any]:

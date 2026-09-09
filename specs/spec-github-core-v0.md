@@ -84,6 +84,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-refs | [Refs](#refs) | Implemented | Branches and tags, one type. Since github-core#76/#78 the ref is the neutral `git_core__git_ref` (identity = neutral repository id + full path; `DECLARES_REF__git_core` from the neutral repository this record `HOSTS_REPOSITORY`); this plugin emits it and targets it from `PROTECTS` / `SCOPED_TO_REF` / `EVALUATED_ON_REF` / `TARGETS_REF`. Row added per github-core#69. |
 | req-github-core-status-checks | [Status Checks](#status-checks) | In Development | 2026-09-02 (github-core#61): `status_check` keyed `<owner>#<context>` from the ruleset detail's `required_status_checks` parameters; `REQUIRES_CHECK` with the rule's qualifiers; `PRODUCES_CHECK` derived from job display names with stated confidence, only toward required contexts an Actions job may produce. A refused detail is counted as not observable, never as no requirement. |
 | req-github-core-custom-properties | [Custom Properties](#custom-properties) | Implemented | 2026-09-08 (github-core#77; live-verified the same day with the App credential alone): `github_custom_property` keyed `<owner>#<property_name>` from the organization's schema endpoint; every repository's values stamped as `github_repository.custom_properties` built over the declared names (null = observed-unset) with a three-state `custom_properties_observability`. No edge — the value lives once, on the repository. Adds nothing to the App: `organization:custom_properties:read` was already granted, now derived. |
+| req-github-core-pull-requests | [Pull Requests](#pull-requests) | In Development | 2026-09-08 (github-core#82): `pull_request` keyed `<owner/repo>#<number>` from the config-layer `pullRequests` field, joined to git_core's neutral head/base ref and head commit (`PROPOSES_REF`, `TARGETS_BASE_REF`, `PROPOSES_COMMIT`) and to its author (`OPENS_PULL_REQUEST`); build status = the head commit's check rollup flattened onto the node, App-produced checks included. Lives in github_core, not git_core: a forge object, ruled 2026-09-08. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON_REPOSITORY` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -766,6 +767,72 @@ exploratory grant.
 | req-github-core-custom-properties-3 | Refused Is Not Empty | Implemented | A refused schema read mints no definition and marks every collected repository `unobservable` with an empty map and a warning; a refused values read lands the definitions and marks the values `unobservable`. | Shape E. |
 | req-github-core-custom-properties-4 | Not Asked Is Not Refused | Implemented | A user-owned scope or a repos-only scope skips the surface with an information record; repositories keep `""`, never `unobservable`. | Three states, never two. |
 | req-github-core-custom-properties-5 | Permission Derived From The Manifest | Implemented | Both sources declare `organization:custom_properties:read`; the ledger entry is `requested` citing exactly those two sources; the OpenAPI extract carries both paths. | No new grant on the App. |
+
+### Pull Requests
+----
+RID: `req-github-core-pull-requests`
+
+Status: `In Development`
+
+The forge's proposal to merge one ref into another, and what stands between it and merge
+(github-core#82). It is what git-serious's *why isn't this merging* and *what is waiting on me*
+read, and the demo's PR list with per-PR build status. **It lives here, not in git_core**: Git has
+branches and commits and no pull request; git_core's v0 non-goals exclude it as forge collaboration
+(github-core#76), and the vocabulary's neutral-capable mark (every forge has a merge request) is a
+future extraction, not a home. The node is GitHub's, keyed **`<owner/repo>#<number>`** on the
+base repository, and it points at git_core's neutral nodes the way `commit_observation` does:
+`PROPOSES_REF` (the head branch, only when it lives in the base repository — a fork's head is
+`head_repository` on the node and no edge), `TARGETS_BASE_REF` (the branch whose rulesets gate
+the merge, `PROTECTS_REF` landing on the same node) and `PROPOSES_COMMIT` (the head commit).
+Edge ids are computed from names; an endpoint not observed in the batch leaves the edge dangling
+and it is dropped, so the fact is on the node and the edge is the join when both ends were seen.
+`OPENS_PULL_REQUEST` comes from the author: an account, or the App when GitHub says `Bot`,
+carrying `author_association` — inside or outside the trust boundary is a property of the act.
+
+**Build status is the head commit's check rollup, flattened onto the pull request.** GitHub keeps
+`statusCheckRollup` on the commit; the question it answers is the pull request's. The one-word
+verdict is `checks_rollup_state` (GitHub's `StatusState`), the evidence is `checks`: every check
+run (Checks API — GitHub Actions and most Apps, naming the producing App) and every commit status
+(the older API Codacy and SonarCloud still post, naming its creator), in one list because a
+required context may be either. A head that carries no rollup is `""` — nothing ran — which is
+not `SUCCESS` and must not render green; and `checks_observability` says whether that blank was
+GitHub's answer (`observed`) or a refused read the pruning left behind (`unobservable`), because
+a permission failure on the rollup must not serialize like nothing having run. Check runs are not minted as nodes here; a `check_run`
+node joined to `status_check` is the follow-on that github-core#75 names for the App-produced half.
+
+Everything rides **one GraphQL query of its own**, paged at five repositories: `pullRequests`
+per repository, most recently updated first, capped (thirty) with GitHub's total on the repository
+node as `pull_requests_total` and a truncation warning, so a window is never read as the whole.
+It is a second query and not more fields on the config layer because GitHub caps a query at
+500,000 possible nodes, computed from the page sizes multiplied down the tree: the config layer
+already asks for about 460,000 across its hundred-repository page, and fifty pull requests with
+labels, reviews and a hundred check contexts each put it at 1,269,100 (measured 2026-09-08,
+`MAX_NODE_LIMIT_EXCEEDED`). The node budget is not the only ceiling: GitHub also stops a query
+at about ten seconds of execution (HTTP 502/504), and measured the same day twenty repositories
+a page timed out every time and ten sat at the edge, with no single field to blame — so five a
+page, about five seconds and eight rate-limit points each, five requests for this organization
+instead of one, still nothing beside the REST walk. Three states on the repository, `pull_requests_observability`: `observed` (zero rows is a
+fact), `unobservable` (the field degraded and was pruned, or the query failed), `""` (a
+repos-only scope runs no account query). GraphQL is chosen over REST because it is the only
+transport carrying `reviewDecision`, `mergeable` and the rollup in the same read; REST needs two
+further calls per pull request for the checks alone. `mergeable` is stored as GitHub's string (`MERGEABLE|CONFLICTING|UNKNOWN`) —
+it is computed lazily and a first read often says `UNKNOWN`, which a boolean would lie about.
+
+Permissions derived from the manifest: `repository:pull_requests:read` (the rows),
+`repository:checks:read` (the check-run half of the rollup), `repository:statuses:read` (the
+status half) — all three already granted on the product App as recommended reads, now requested
+by their sources; an App installed earlier re-accepts nothing.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-pull-requests-1 | One Node Per Pull Request | In Development | Every pull request in the window lands as one `pull_request` per (base repository, number) carrying state, draft flag, author, head and base refs and SHAs, review decision, mergeability, timestamps, sizes, labels, outstanding review requests and latest reviews. | |
+| req-github-core-pull-requests-2 | Joined To The Neutral Nodes | In Development | `PROPOSES_REF` onto the head ref when the head lives in the base repository, `TARGETS_BASE_REF` onto the base ref, `PROPOSES_COMMIT` onto the head commit — each only when the endpoint was observed in the batch; a fork head draws no ref edge. | Dangling edges dropped, facts kept on the node. |
+| req-github-core-pull-requests-3 | Author Is An Edge | In Development | `OPENS_PULL_REQUEST` from the author's account, or from the `github_app` when the actor is a Bot, carrying `author_association`. | |
+| req-github-core-pull-requests-4 | Build Status From The Rollup | In Development | `checks_rollup_state` equals the head commit's `statusCheckRollup.state` and `checks` itemises every check run and commit status it counted with its producer and, for a check run, GitHub's `check_run_id` (a rerun mints a higher id for the same name); a head with no rollup is `""` with `checks_observability = observed`, never `SUCCESS`; a rollup or contexts GitHub refused (pruned) is `checks_observability = unobservable` with a warning, never the same blank; a rollup wider than the page is marked truncated. | Includes App-produced checks no workflow in scope produces. |
+| req-github-core-pull-requests-5 | Refused Is Not Empty | In Development | A degraded `pullRequests` field marks the repository `unobservable` with a warning and mints nothing; a repos-only scope leaves `""`; the window's cap is visible as `pull_requests_total` and a truncation warning. | Three states, never two. |
+| req-github-core-pull-requests-6 | Permissions Derived | In Development | The three sources declare `repository:pull_requests:read`, `repository:checks:read`, `repository:statuses:read`; the ledger entries are `requested` citing exactly those sources; the GraphQL extract covers every traversed type and field. | No new grant on the App. |
 
 ### Refs
 ----

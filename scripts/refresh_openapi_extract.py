@@ -52,7 +52,7 @@ GQL_BRANCH = "main"
 #: in a 1,600-type schema proves nothing about the type we select it on.
 GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
     "Repository": ("nameWithOwner", "databaseId", "isArchived", "isFork", "visibility", "url",
-                   "defaultBranchRef", "rulesets", "environments", "refs", "releases", "object"),
+                   "defaultBranchRef", "rulesets", "environments", "refs", "releases", "pullRequests", "object"),
     "Release": ("databaseId", "name", "tagName", "isDraft", "isPrerelease", "isLatest", "createdAt",
                 "publishedAt", "url", "author", "tagCommit", "releaseAssets"),
     "ReleaseAsset": ("name", "size", "contentType", "downloadUrl", "createdAt"),
@@ -70,7 +70,7 @@ GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
     # to things that are genuinely NOT field selections — keywords, arguments, aliases and
     # connection plumbing — rather than hiding real fields behind a name-match.
     "GitObject": ("oid",),
-    "Commit": ("oid", "committedDate", "authoredDate", "author", "committer", "signature"),
+    "Commit": ("oid", "committedDate", "authoredDate", "author", "committer", "signature", "statusCheckRollup"),
     "GitActor": ("name", "email", "user"),
     "GitSignature": ("isValid", "state", "wasSignedByGitHub", "signer"),
     "RepositoryRuleConditions": ("refName",),
@@ -79,6 +79,45 @@ GQL_TRAVERSED: dict[str, tuple[str, ...]] = {
     "DeploymentProtectionRule": ("type", "timeout"),
     "App": ("databaseId", "slug", "name"),
     "Team": ("slug", "name"),
+    # Pull requests and the check rollup on their head commit (req-github-core-pull-requests).
+    "PullRequest": (
+        "number",
+        "databaseId",
+        "title",
+        "state",
+        "isDraft",
+        "url",
+        "author",
+        "authorAssociation",
+        "headRefName",
+        "headRefOid",
+        "headRepository",
+        "baseRefName",
+        "baseRefOid",
+        "createdAt",
+        "updatedAt",
+        "closedAt",
+        "mergedAt",
+        "mergeCommit",
+        "mergeable",
+        "reviewDecision",
+        "additions",
+        "deletions",
+        "changedFiles",
+        "labels",
+        "reviewRequests",
+        "latestReviews",
+        "commits",
+    ),
+    "Actor": ("login",),
+    "Label": ("name",),
+    "ReviewRequest": ("requestedReviewer",),
+    "PullRequestReview": ("author", "state", "submittedAt"),
+    "PullRequestCommit": ("commit",),
+    "StatusCheckRollup": ("state", "contexts"),
+    "CheckRun": ("databaseId", "name", "status", "conclusion", "detailsUrl", "checkSuite"),
+    "CheckSuite": ("app",),
+    "StatusContext": ("context", "state", "targetUrl", "creator"),
 }
 _HERE = Path(__file__).resolve().parent
 MANIFEST = _HERE.parent / "tap_plugin/github_core/collectors/github_collector/github_collection_manifest.json"

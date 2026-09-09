@@ -515,6 +515,70 @@
       "permission": "organization:custom_properties:read",
       "permission_failure": "degrade_with_warning",
       "description": "Every repository's custom-property VALUES in one paginated listing, stamped onto `github_repository.custom_properties` keyed by property name, built over the declared names first so a declared-but-unset property lands as null (req-github-core-custom-properties). The listing reports each declared property per repository with `value: null` when unset (measured 2026-09-08 on unified-systems-com)."
+    },
+    {
+      "name": "pull_requests",
+      "kind": "custom_fn",
+      "path": "POST /graphql (repository.pullRequests)",
+      "target_entity_type": "github_core__pull_request",
+      "fields": [
+        "number",
+        "github_id",
+        "title",
+        "state",
+        "is_draft",
+        "author_login",
+        "author_type",
+        "author_association",
+        "head_ref",
+        "head_sha",
+        "head_repository",
+        "base_ref",
+        "base_sha",
+        "review_decision",
+        "mergeable",
+        "merge_commit_sha",
+        "created_at",
+        "updated_at",
+        "closed_at",
+        "merged_at",
+        "commit_count",
+        "additions",
+        "deletions",
+        "changed_files",
+        "labels",
+        "review_requests",
+        "latest_reviews",
+        "html_url"
+      ],
+      "permission": "repository:pull_requests:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Pull requests per repository from a GraphQL query of their own (five repositories a page: the config layer is within 40k of GitHub's 500k-node ceiling, and a larger page hits the ~10 s execution limit), most recently updated first, capped with the total reported (req-github-core-pull-requests). The node is github_core's; `PROPOSES_REF` / `TARGETS_BASE_REF` / `PROPOSES_COMMIT` point at git_core's neutral ref and commit, `OPENS_PULL_REQUEST` at the author. A degraded field marks the repository `pull_requests_observability = unobservable`."
+    },
+    {
+      "name": "pull_request_checks",
+      "kind": "custom_fn",
+      "path": "POST /graphql (repository.pullRequests.commits.commit.statusCheckRollup, CheckRun contexts)",
+      "target_entity_type": "github_core__pull_request",
+      "fields": [
+        "checks_rollup_state",
+        "checks"
+      ],
+      "permission": "repository:checks:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "The head commit's check rollup — GitHub's combined verdict and the itemised check RUNS (Checks API: GitHub Actions and most Apps) — flattened onto the pull request as `checks_rollup_state` / `checks` (req-github-core-pull-requests). A head with no rollup is `\"\"`, never SUCCESS."
+    },
+    {
+      "name": "pull_request_statuses",
+      "kind": "custom_fn",
+      "path": "POST /graphql (repository.pullRequests.commits.commit.statusCheckRollup, StatusContext contexts)",
+      "target_entity_type": "github_core__pull_request",
+      "fields": [
+        "checks"
+      ],
+      "permission": "repository:statuses:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "The other half of the same rollup: commit STATUSES, the older API that Codacy, SonarCloud and other third parties still post and that a required check may be. Same list, `kind: status`; the creator login stands in for the App slug the Checks API would carry."
     }
   ],
   "edges": [
@@ -712,6 +776,32 @@
       "slug": "OBSERVED_IN_REPOSITORY__github_core",
       "source": "github_core__commit_observation",
       "target": "github_core__github_repository"
+    },
+    {
+      "slug": "OPENS_PULL_REQUEST__github_core",
+      "source": "github_core__github_account",
+      "target": "github_core__pull_request"
+    },
+    {
+      "slug": "OPENS_PULL_REQUEST__github_core",
+      "source": "github_core__github_app",
+      "target": "github_core__pull_request",
+      "condition": "the author is a Bot actor: its login is the App's slug"
+    },
+    {
+      "slug": "PROPOSES_REF__github_core",
+      "source": "github_core__pull_request",
+      "target": "git_core__git_ref"
+    },
+    {
+      "slug": "TARGETS_BASE_REF__github_core",
+      "source": "github_core__pull_request",
+      "target": "git_core__git_ref"
+    },
+    {
+      "slug": "PROPOSES_COMMIT__github_core",
+      "source": "github_core__pull_request",
+      "target": "git_core__git_commit"
     }
   ]
 }

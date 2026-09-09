@@ -22,6 +22,7 @@ from tap_plugin.git_core.identity import (
     git_repository_id,
 )
 from tap_plugin.github_core.models.github_custom_property import GithubCustomProperty
+from tap_plugin.github_core.models.pull_request import PullRequest
 from tap_plugin.github_core.models.status_check import StatusCheck
 from tap_plugin.identity_core.issuer import oidc_issuer_id, oidc_issuer_node_envelope
 
@@ -65,6 +66,7 @@ from .identity import (
     package_purl,
     package_version_id,
     platform_id,
+    pull_request_id,
     release_id,
     repository_id,
     rule_suite_id,
@@ -161,6 +163,14 @@ _SITE_CUSTOM_PROPERTIES_VALUES_UNOBSERVABLE = "fd72"
 _SITE_CUSTOM_PROPERTIES_COLLECTED = "3cba"
 _SITE_CUSTOM_PROPERTIES_SKIPPED = "906a"
 _SITE_CUSTOM_PROPERTIES_REPOSITORY_UNLISTED = "6d8f"
+_SITE_PULL_REQUESTS_UNOBSERVABLE = "0f32"
+_SITE_PULL_REQUESTS_TRUNCATED = "fb60"
+_SITE_PULL_REQUESTS_COLLECTED = "7376"
+_SITE_PULL_REQUEST_CHECKS_TRUNCATED = "2ce1"
+_SITE_GRAPHQL_PULLS = "8d2d"
+_SITE_GRAPHQL_PULLS_FAILED = "7e0f"
+_SITE_PULL_REQUEST_CHECKS_UNOBSERVABLE = "323f"
+_SITE_PULL_REQUEST_LISTS_TRUNCATED = "ace8"
 
 #: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
 #: three calls against a repository that is NOT in scope; past the cap an edge lands as
@@ -792,6 +802,9 @@ class GithubCollector(CollectorBase):
                     "GITHUB_GRAPHQL_FAILED",
                     f"config-layer fetch failed: {exc}",
                 )
+            # Pull requests: a second query merged into the same map (node-limit measurement in
+            # the client). Its failure degrades the surface and never aborts the run.
+            self._fetch_pull_request_layer(data, owner)
         try:
             repos = self._resolve_repos(client, owner, explicit_repos(data))
         except GithubAPIError as exc:
@@ -1056,6 +1069,49 @@ class GithubCollector(CollectorBase):
             )
         return config
 
+    def _fetch_pull_request_layer(self, data: dict[str, Any], owner: str) -> None:
+        """Fetch every repository's pull requests for ``owner`` and merge them into the config map.
+
+        A second GraphQL query (five repositories a page) rather than more fields on the config
+        layer — see `graphql_client._PULL_REQUEST_QUERY` for the node- and time-limit measurements. Merged
+        under each repository's `pullRequests` key so `_emit_pull_requests` reads one map; a
+        repository the query did not answer for gets NO key, and a query that fails outright
+        leaves every key absent, so both read as `unobservable` downstream rather than as "no
+        pull requests" (req-github-core-pull-requests).
+        """
+        gql = GithubGraphQLClient(token=self._auth.token(), api_base_url=api_base_url(data))
+        try:
+            by_repo, notes = gql.fetch_pull_request_layer(owner)
+        except GithubGraphQLError as exc:
+            self.record_warn(
+                _SITE_GRAPHQL_PULLS_FAILED,
+                "GRAPHQL_PULLS_FAILED",
+                f"Pull-request layer for {owner} failed — pull requests NOT observed for any repository, "
+                f"which is not the same as none being open: {exc}",
+                message_data={"owner": owner},
+            )
+            return
+        merged = 0
+        for full_name, node in by_repo.items():
+            if "pullRequests" not in node:
+                continue  # degraded and pruned: absence stays absence
+            self._config.setdefault(full_name, {})["pullRequests"] = node["pullRequests"]
+            merged += 1
+        self.record_info(
+            _SITE_GRAPHQL_PULLS,
+            "GRAPHQL_PULLS_FETCHED",
+            f"Pull-request layer for {owner}: {merged} of {len(by_repo)} repo(s) answered, "
+            f"cost {gql.last_cost} point(s).",
+            message_data={"repos": len(by_repo), "answered": merged, "cost": gql.last_cost, "remaining": gql.last_remaining},
+        )
+        for note in notes:
+            self.record_warn(
+                _SITE_GRAPHQL_DEGRADED,
+                "GRAPHQL_FIELD_DEGRADED",
+                f"Pull-request layer partially unreadable — {note}",
+                message_data={"detail": note},
+            )
+
     @staticmethod
     def _repo_payload_from_config(gql: dict[str, Any]) -> dict[str, Any]:
         """Shape a GraphQL repository node like the REST payload the emitters already consume."""
@@ -1300,6 +1356,10 @@ class GithubCollector(CollectorBase):
                 # "none set" (req-github-core-custom-properties).
                 "custom_properties": {},
                 "custom_properties_observability": "",
+                # Stamped by `_emit_pull_requests` once the config layer has been read for this
+                # repository; `""` is "never asked" (req-github-core-pull-requests).
+                "pull_requests_observability": "",
+                "pull_requests_total": None,
                 "configuration": {},
                 "tags": {},
             },
@@ -1384,6 +1444,10 @@ class GithubCollector(CollectorBase):
         env_uuid_by_name = self._emit_environments(
             full_name, repo_uuid, repo_dims, nodes, edges
         )
+        # Pull requests come from the pull-request layer merged into the same config map; the
+        # head/base edges target the neutral refs and commits emitted just above, and dangle (are
+        # dropped) when those were not seen.
+        self._emit_pull_requests(full_name, repo_envelope, git_repo_uuid, repo_dims, nodes, edges)
 
         # workflows + workflow YAML
         workflows = client.get_paginated(
@@ -1988,6 +2052,239 @@ class GithubCollector(CollectorBase):
                 git_dims,
             )
         )
+
+    def _emit_pull_requests(
+        self,
+        full_name: str,
+        repo_envelope: dict[str, Any],
+        git_repo_uuid: Any,
+        repo_dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """Emit the repository's pull requests with the check rollup on each head commit.
+
+        A pull request is a forge object wrapped around a branch and a commit (github-core#82):
+        the node is GitHub's, keyed on the base repository plus the number, and its edges point
+        at git_core's neutral ref and commit — `PROPOSES_REF` (head, only when the head lives in
+        this repository), `TARGETS_BASE_REF` (base) and `PROPOSES_COMMIT` (head commit). The ids
+        are computed from the names; an endpoint that was not observed in this batch leaves the
+        edge dangling and `_drop_dangling_edges` removes it, so `head_sha` on the node is the fact
+        and the edge is the join when both ends were seen.
+
+        Three states on the repository node. `observed`: the pull-request layer answered
+        `pullRequests`, so zero rows is a fact. `unobservable`: the field degraded (pruned by
+        `prune_errored_paths`) or the layer's query failed, so no row means nothing. `""`: a
+        repos-only scope runs no account query — never asked. The cap is visible as
+        `pull_requests_total` beside the rows and warned per repository, so a window of thirty is
+        never read as all of them.
+        """
+        node = repo_envelope["node"]
+        gql = self._config.get(full_name)
+        if not gql:
+            return
+        parsed = GithubGraphQLClient.pull_requests(gql)
+        if parsed is None:
+            node["pull_requests_observability"] = _UNOBSERVABLE
+            self.record_warn(
+                _SITE_PULL_REQUESTS_UNOBSERVABLE,
+                "PULL_REQUESTS_UNOBSERVABLE",
+                f"{full_name}: the config-layer query did not answer the pullRequests field — pull "
+                f"requests NOT observed, which is not the same as none being open.",
+                message_data={"repo": full_name},
+            )
+            return
+        pulls, missing = parsed
+        node["pull_requests_observability"] = _OBSERVED
+        node["pull_requests_total"] = len(pulls) + missing
+        pulls_dims = {**repo_dims, "github.surface": "pulls", "github.observation": "execution"}
+        by_state: dict[str, int] = {}
+        checks_truncated = 0
+        checks_unobservable = 0
+        lists_truncated_count = 0
+        for pr in pulls:
+            number = pr.get("number")
+            if number is None:
+                continue
+            pr_uuid = pull_request_id(full_name, number)
+            checks_total = pr.pop("checks_total", None)
+            if checks_total is not None and checks_total > len(pr["checks"]):
+                checks_truncated += 1
+            if pr["checks_observability"] == _UNOBSERVABLE:
+                checks_unobservable += 1
+            # The three capped lists: GitHub's count beside what the page held, and one flag a
+            # consumer can read before trusting `review_requests` as everyone who was asked.
+            list_totals = {
+                key: pr.pop(f"{key}_total", None) for key in ("labels", "review_requests", "latest_reviews")
+            }
+            lists_truncated = any(
+                total is not None and total > len(pr[key]) for key, total in list_totals.items()
+            )
+            if lists_truncated:
+                lists_truncated_count += 1
+            by_state[pr["state"]] = by_state.get(pr["state"], 0) + 1
+            fields = {
+                **pr,
+                "full_name": full_name,
+                "configuration": {
+                    # The rollup's own count, so a matrix wider than the page shows as a gap.
+                    "checks_total": checks_total,
+                    "checks_truncated": checks_total is not None and checks_total > len(pr["checks"]),
+                    "labels_total": list_totals["labels"],
+                    "review_requests_total": list_totals["review_requests"],
+                    "latest_reviews_total": list_totals["latest_reviews"],
+                    "lists_truncated": lists_truncated,
+                },
+                "tags": {},
+            }
+            nodes.append(
+                node_envelope(
+                    entity_id=pr_uuid,
+                    entity_type=PullRequest.ENTITY_TYPE,
+                    name=f"{full_name}#{number}",
+                    dimensions=pulls_dims,
+                    fields=fields,
+                )
+            )
+            self._emit_pull_request_author(pr, pr_uuid, pulls_dims, nodes, edges)
+            if git_repo_uuid is not None:
+                if pr["head_ref"] and pr["head_repository"] == full_name:
+                    edges.append(
+                        self._edge(
+                            "PROPOSES_REF__github_core",
+                            pr_uuid,
+                            git_ref_id(git_repo_uuid, f"refs/heads/{pr['head_ref']}"),
+                            pulls_dims,
+                            properties={"ref_name": pr["head_ref"]},
+                        )
+                    )
+                if pr["base_ref"]:
+                    edges.append(
+                        self._edge(
+                            "TARGETS_BASE_REF__github_core",
+                            pr_uuid,
+                            git_ref_id(git_repo_uuid, f"refs/heads/{pr['base_ref']}"),
+                            pulls_dims,
+                            properties={"ref_name": pr["base_ref"]},
+                        )
+                    )
+            if pr["head_sha"]:
+                algorithm = next((algo for algo, n in OID_LENGTH.items() if n == len(pr["head_sha"])), "sha1")
+                edges.append(
+                    self._edge(
+                        "PROPOSES_COMMIT__github_core",
+                        pr_uuid,
+                        git_commit_id(algorithm, pr["head_sha"]),
+                        pulls_dims,
+                    )
+                )
+        if missing:
+            self.record_warn(
+                _SITE_PULL_REQUESTS_TRUNCATED,
+                "PULL_REQUESTS_TRUNCATED",
+                f"{full_name}: {missing} pull request(s) beyond the most-recently-updated window were "
+                f"not collected. Absence of a pull request in this batch is NOT evidence it does not exist.",
+                message_data={"repo": full_name, "missing": missing, "collected": len(pulls)},
+            )
+        if checks_unobservable:
+            self.record_warn(
+                _SITE_PULL_REQUEST_CHECKS_UNOBSERVABLE,
+                "PULL_REQUEST_CHECKS_UNOBSERVABLE",
+                f"{full_name}: the check rollup could not be read for {checks_unobservable} pull request(s) — "
+                f"their build status is NOT observed, which is not the same as nothing having run; "
+                f"`checks_observability` says so on each.",
+                message_data={"repo": full_name, "pull_requests": checks_unobservable},
+            )
+        if lists_truncated_count:
+            self.record_warn(
+                _SITE_PULL_REQUEST_LISTS_TRUNCATED,
+                "PULL_REQUEST_LISTS_TRUNCATED",
+                f"{full_name}: {lists_truncated_count} pull request(s) carry more labels, review requests or "
+                f"reviews than the page of ten returned; `configuration.lists_truncated` says so on each, and "
+                f"`review_requests` is then NOT everyone who was asked.",
+                message_data={"repo": full_name, "pull_requests": lists_truncated_count},
+            )
+        if checks_truncated:
+            self.record_warn(
+                _SITE_PULL_REQUEST_CHECKS_TRUNCATED,
+                "PULL_REQUEST_CHECKS_TRUNCATED",
+                f"{full_name}: {checks_truncated} pull request(s) carry more checks than the page returned; "
+                f"their `checks` list is incomplete and says so in `configuration.checks_truncated`.",
+                message_data={"repo": full_name, "pull_requests": checks_truncated},
+            )
+        self.record_info(
+            _SITE_PULL_REQUESTS_COLLECTED,
+            "PULL_REQUESTS_COLLECTED",
+            f"{full_name}: {len(pulls)} of {len(pulls) + missing} pull request(s) collected "
+            + ", ".join(f"{n} {state.lower()}" for state, n in sorted(by_state.items()))
+            + ".",
+            message_data={"repo": full_name, "collected": len(pulls), "total": len(pulls) + missing, "by_state": by_state},
+        )
+
+    def _emit_pull_request_author(
+        self,
+        pr: dict[str, Any],
+        pr_uuid: Any,
+        dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """`OPENS_PULL_REQUEST` from the author — an account, or an App when GitHub says `Bot`.
+
+        A Bot actor's login is the App's slug (`renovate`, `dependabot`), so it joins the same
+        `github_app` node the installation inventory mints. A user is an ACCOUNT, minted like a
+        rule-suite actor: GitHub reports the login, never what kind of principal holds it.
+        """
+        login = pr["author_login"]
+        if not login:
+            return
+        properties = {"author_association": pr["author_association"]}
+        if pr["author_type"] == "Bot":
+            app_uuid = github_app_id(login)
+            if str(app_uuid) not in self._emitted_app_ids:
+                self._emitted_app_ids.add(str(app_uuid))
+                nodes.append(
+                    node_envelope(
+                        entity_id=app_uuid,
+                        entity_type="github_core__github_app",
+                        name=login,
+                        dimensions={**_PLATFORM_DIMENSIONS, "github.surface": "apps"},
+                        fields={
+                            "slug": login,
+                            "name": login,
+                            "app_id": None,
+                            "client_id": "",
+                            "html_url": f"https://github.com/apps/{login}",
+                            "description": "",
+                            "configuration": {},
+                            "tags": {},
+                        },
+                    )
+                )
+            edges.append(self._edge("OPENS_PULL_REQUEST__github_core", app_uuid, pr_uuid, dims, properties=properties))
+            return
+        actor_uuid = account_id(login)
+        if login not in self._emitted_actor_logins:
+            self._emitted_actor_logins.add(login)
+            nodes.append(
+                node_envelope(
+                    entity_id=actor_uuid,
+                    entity_type="github_core__github_account",
+                    name=login,
+                    dimensions={**_PLATFORM_DIMENSIONS, "github.surface": "accounts"},
+                    fields={
+                        "login": login,
+                        "github_id": None,
+                        # GitHub's actor kind (`User`, `Organization`, `Mannequin`) is what it said,
+                        # which is more than the rule-suite surface reports — and still not identity.
+                        "account_type": pr["author_type"],
+                        "html_url": f"https://github.com/{login}",
+                        "configuration": {},
+                        "tags": {},
+                    },
+                )
+            )
+        edges.append(self._edge("OPENS_PULL_REQUEST__github_core", actor_uuid, pr_uuid, dims, properties=properties))
 
     def _emit_rulesets(
         self,
