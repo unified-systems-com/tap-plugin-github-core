@@ -76,7 +76,7 @@ prose (`git-serious-tap/docs/doc-git-serious-shape-of-a-pipeline.md`).
 | --- | --- | :---: | --- |
 | req-github-core-machinery-module | [The Layout Module](#the-layout-module) | In Development | `static/github_core/js/projections/machinery.js`; standard tap layout contract; repository is an input |
 | req-github-core-machinery-nesting | [Containment](#containment) | In Development | `github.com ⊃ account ⊃ repository ⊃ workflow ⊃ job`; single-hop patterns force the account frame |
-| req-github-core-machinery-topography | [Topography](#topography) | In Development | landscape colouring — blue beds, a green field per workflow, mint job cards; palette lives on the models, never in the module (tap-plugin-github-core#86) |
+| req-github-core-machinery-topography | [Topography](#topography) | Implemented | landscape colouring — blue beds, a green field per workflow, mint job cards; palette lives on the models, never in the module (tap-plugin-github-core#86) |
 | req-github-core-machinery-stages | [Stage Ranking](#stage-ranking) | In Development | sources → pipelines → outputs; job rank = longest path over `DEPENDS_ON_JOB`; unresolved is a state |
 | req-github-core-machinery-flow | [Direction](#direction) | In Development | `flow: "rtl"` (default) or `"ltr"` — a sign on the stage axis |
 | req-github-core-machinery-tiers | [Tiers Outside The Repository](#tiers-outside-the-repository) | In Development | third parties top-centre; outputs to humans bottom-centre (reserved) |
@@ -169,7 +169,7 @@ box around its executed jobs (the live layer decides).
 ### Topography
 ----
 RID: `req-github-core-machinery-topography`
-Status: `In Development`
+Status: `Implemented`
 
 Containment gives the scene its shape; colour gives it relief. The scene is read as a landscape:
 the platform is a near-white frame, the account and repository are water-blue beds, and each
@@ -202,9 +202,9 @@ unresolved red, placeholder slate) rides on borders and stays legible on both ba
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-machinery-topography-1 | Land Is Green | In Development | `github_workflow` and `workflow_job` declare the land-band fills in the table above; both fills are green-family (G channel dominant, high lightness) and the job card is lighter than its field. | Unit test on the model metadata. |
-| req-github-core-machinery-topography-2 | The Module Restates No Palette | In Development | `machinery.js` contains no `background-color` for the workflow, job, repository or account types — only the placeholder's slate. | Static check on the module source. |
-| req-github-core-machinery-topography-3 | Observed On A Scene | Proposed | The git-serious repository page's machinery panel renders the tap repository's workflow boxes green with mint job cards inside the blue repository bed. | Observation on a running instance; separate from the build (work-issues-to-completion rule 4). |
+| req-github-core-machinery-topography-1 | Land Is Green | Implemented | `github_workflow` and `workflow_job` declare the land-band fills in the table above; both fills are green-family (G channel dominant, high lightness) and the job card is lighter than its field. | `tests/test_machinery_topography.py::test_land_band_is_green_and_layered`. |
+| req-github-core-machinery-topography-2 | The Module Restates No Palette | Implemented | `machinery.js` contains no `background-color` for the workflow, job, repository or account types — only the placeholder's slate. | `tests/test_machinery_topography.py::test_module_restates_no_palette`. |
+| req-github-core-machinery-topography-3 | Observed On A Scene | Implemented | The git-serious repository page's machinery panel renders the tap repository's workflow boxes green with mint job cards inside the blue repository bed. | Observed 2026-09-09 on the double-tap stack (8010), `/git-serious/repository?repo=unified-systems-com/tap`: green workflow boxes, mint job cards, blue bed, no console errors. |
 
 ---
 ### Stage Ranking
