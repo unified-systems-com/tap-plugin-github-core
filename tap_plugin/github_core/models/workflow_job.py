@@ -39,12 +39,13 @@ class WorkflowJob(BaseModel):
         "github.surface": "actions",
         "github.observation": "declaration",
     }
-    # The declaration family reads as a blueprint: white fill, Actions blue border,
-    # square-ish corners to sit visibly apart from the round execution nodes.
+    # A job is a card on its workflow's green field (see github_workflow): a
+    # paler mint than the field so it reads as raised ground, square-ish corners
+    # to sit visibly apart from the round execution nodes.
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {
         "tap_viz": {
             "shape": "rectangle",
-            "colors": {"fill": "#FFFFFF", "border": "#0969DA", "label": "#1F2328"},
+            "colors": {"fill": "#F0FBF3", "border": "#2DA44E", "label": "#1F2328"},
         }
     }
 
