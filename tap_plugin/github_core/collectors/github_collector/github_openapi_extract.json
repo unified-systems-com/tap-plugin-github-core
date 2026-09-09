@@ -1895,6 +1895,50 @@
       "present": true,
       "source": "workflows"
     },
+    "/repos/{owner}/{repo}/code-scanning/alerts": {
+      "item_properties": [
+        "assignees",
+        "created_at",
+        "dismissal_approved_by",
+        "dismissed_at",
+        "dismissed_by",
+        "dismissed_comment",
+        "dismissed_reason",
+        "fixed_at",
+        "html_url",
+        "instances_url",
+        "most_recent_instance",
+        "number",
+        "rule",
+        "state",
+        "tool",
+        "updated_at",
+        "url"
+      ],
+      "present": true,
+      "source": "code_scanning_alerts"
+    },
+    "/repos/{owner}/{repo}/code-scanning/analyses": {
+      "item_properties": [
+        "analysis_key",
+        "category",
+        "commit_sha",
+        "created_at",
+        "deletable",
+        "environment",
+        "error",
+        "id",
+        "ref",
+        "results_count",
+        "rules_count",
+        "sarif_id",
+        "tool",
+        "url",
+        "warning"
+      ],
+      "present": true,
+      "source": "code_scanning_analyses"
+    },
     "/repos/{owner}/{repo}/git/ref/{ref}": {
       "item_properties": [
         "node_id",

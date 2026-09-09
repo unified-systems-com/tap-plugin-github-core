@@ -313,9 +313,13 @@
       "until": "REFERENCES_SECRET lands"
     },
     "security_events": {
-      "state": "recommended",
+      "state": "requested",
       "level": "read",
-      "why": "Code-scanning alerts: the OUTPUT of the CodeQL dynamic workflow, and the alert surface of the security axis. Sensitive read — say so in the App's review table."
+      "why": "Code-scanning alerts: the OUTPUT of the CodeQL dynamic workflow, and the alert surface of the security axis. Sensitive read — say so in the App's review table. Requested 2026-09-09 (github-core#89): the alert and analysis listings per repository, each alert minted as a compliance_core finding.",
+      "sources": [
+        "code_scanning_alerts",
+        "code_scanning_analyses"
+      ]
     },
     "single_file": {
       "state": "not_applicable",

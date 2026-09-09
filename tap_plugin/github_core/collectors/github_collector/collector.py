@@ -55,6 +55,9 @@ from .identity import (
     actions_artifact_id,
     actions_cache_id,
     app_installation_id,
+    code_scanning_alert_id,
+    code_scanning_analysis_id,
+    code_scanning_finding_id,
     commit_observation_id,
     custom_property_id,
     edge_id,
@@ -171,6 +174,11 @@ _SITE_GRAPHQL_PULLS = "8d2d"
 _SITE_GRAPHQL_PULLS_FAILED = "7e0f"
 _SITE_PULL_REQUEST_CHECKS_UNOBSERVABLE = "323f"
 _SITE_PULL_REQUEST_LISTS_TRUNCATED = "ace8"
+_SITE_CODE_SCANNING_UNOBSERVABLE = "c723"
+_SITE_CODE_SCANNING_NOT_ENABLED = "8cab"
+_SITE_CODE_SCANNING_ALERTS_TRUNCATED = "5a88"
+_SITE_CODE_SCANNING_ANALYSES_TRUNCATED = "5314"
+_SITE_CODE_SCANNING_COLLECTED = "5c6f"
 
 #: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
 #: three calls against a repository that is NOT in scope; past the cap an edge lands as
@@ -313,6 +321,20 @@ _CONTAINER_TAG_SHA_MIN_HEX = 7
 _OUTPUT_SURFACES: tuple[str, ...] = ("releases", "artifacts", "packages")
 _OBSERVED = "observed"
 _UNOBSERVABLE = "unobservable"
+#: Third state for the code-scanning surface (req-github-core-code-scanning): GitHub said the
+#: feature is off for this repository — a 404 `no analysis found`, or a 403 naming Advanced
+#: Security on a private repository without it. Distinct from `unobservable`, which is the
+#: CREDENTIAL being refused: "off" is a fact about the repository, "refused" a fact about us.
+_NOT_ENABLED = "not_enabled"
+#: Page size for both code-scanning listings (GitHub's maximum).
+_CODE_SCANNING_PAGE_SIZE = 100
+#: How the 403/404 bodies say "the feature is off" rather than "you may not look" — matched
+#: case-insensitively against the response body. `no analysis found` is the documented 404 for a
+#: repository that never uploaded SARIF (captured verbatim 2026-09-09, tests/fixtures); the
+#: Advanced Security phrasing is GitHub's 403 for a private repository without GHAS.
+_CODE_SCANNING_NOT_ENABLED_MARKERS = ("advanced security", "no analysis found", "not enabled")
+#: Alert states GitHub publishes; the substrate finding folds `dismissed` and `fixed` to `resolved`.
+_CODE_SCANNING_OPEN = "open"
 
 # Ruleset condition tokens GitHub uses in place of a ref pattern.
 _REF_TOKEN_DEFAULT_BRANCH = (
@@ -1360,6 +1382,10 @@ class GithubCollector(CollectorBase):
                 # repository; `""` is "never asked" (req-github-core-pull-requests).
                 "pull_requests_observability": "",
                 "pull_requests_total": None,
+                # Stamped by `_collect_code_scanning` after workflows and commits are indexed;
+                # `""` is "never asked" (req-github-core-code-scanning). Four states, because
+                # "the feature is off" and "we were refused" are different facts.
+                "code_scanning_observability": "",
                 "configuration": {},
                 "tags": {},
             },
@@ -1657,6 +1683,18 @@ class GithubCollector(CollectorBase):
         # and a suite naming a ref we did not collect simply carries no edge.
         self._collect_rule_suites(
             client, full_name, observation_dims, ref_uuid_by_ref, nodes, edges
+        )
+        # Code-scanning alerts and analyses (req-github-core-code-scanning). After the workflow
+        # walk and the refs/commits, because a finding in a workflow file joins to that workflow
+        # by path and an analysis joins to its commit only when that commit is in this batch.
+        self._collect_code_scanning(
+            client,
+            full_name,
+            repo_uuid,
+            repo_envelope,
+            {**repo_dims, "github.surface": "security", "github.observation": "execution"},
+            nodes,
+            edges,
         )
 
         # EXECUTED_ON_RUNNER edges (only when an observed job runner_id matches a durable runner node).
@@ -1974,6 +2012,9 @@ class GithubCollector(CollectorBase):
             (algo for algo, n in OID_LENGTH.items() if n == len(oid)), "sha1"
         )
         commit_uuid = git_commit_id(hash_algorithm, oid)
+        # Run-wide index of every commit this run emitted, so a later surface naming a sha
+        # (a code-scanning analysis) can join ONLY to a commit that is in the batch.
+        self._commits_seen()[oid] = commit_uuid
         nodes.append(
             node_envelope(
                 entity_id=commit_uuid,
@@ -3780,6 +3821,368 @@ class GithubCollector(CollectorBase):
                 }
             )
         return out
+
+    # ---------- code scanning (req-github-core-code-scanning) ----------
+
+    def _commits_seen(self) -> dict[str, Any]:
+        """Run-wide index ``oid -> git_core__git_commit uuid`` of every commit emitted this run.
+
+        Lazy for the same reason as `_walk_state`: the per-repo walk is driven directly by tests
+        that never call `run()`. Filled by `_emit_commit`; read by any later surface that names a
+        commit sha and may join to it ONLY when the commit is in the batch.
+        """
+        index = getattr(self, "_commit_uuid_by_oid", None)
+        if index is None:
+            self._commit_uuid_by_oid: dict[str, Any] = {}
+            index = self._commit_uuid_by_oid
+        return index
+
+    def _collect_code_scanning(
+        self,
+        client: GithubClient,
+        full_name: str,
+        repo_uuid: Any,
+        repo_envelope: dict[str, Any],
+        dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        """Collect the repository's code-scanning alerts and analyses; mint one finding per alert.
+
+        Two REST listings, one permission (`security_events: read`). Every alert lands twice: as
+        the GitHub detail (`github_core__code_scanning_alert`, everything the API said) and as the
+        generic `compliance_core__compliance_finding` that the compliance substrate and its views
+        already understand — the finding is the SUBJECT, the alert is the EVIDENCE, joined by
+        `DETAILS_FINDING`. Each analysis (one SARIF upload) lands as
+        `github_core__code_scanning_analysis`, so "did the scanner run on this commit" is a
+        traversal rather than an inference from the absence of alerts.
+
+        Four states on the repository node, because three would lie. `observed`: both listings
+        answered 200, so zero alerts is a fact. `not_enabled`: GitHub said the feature is off —
+        the 404 `no analysis found`, or a 403 naming Advanced Security on a private repository
+        without it. `unobservable`: the credential was refused (a 403 without that phrase, or an
+        unexplained 404) — no alert means nothing. `""`: never asked. If either listing was
+        refused for credential reasons the repository is `unobservable`; otherwise if either said
+        the feature is off it is `not_enabled`; otherwise `observed`.
+
+        Alerts are walked to the end of the Link chain and the walk is checked; analyses are ONE
+        page of the most recent hundred, and a pending next page is warned. Both truncations are
+        recorded as non-evidence: absence of an alert or an analysis in this batch proves nothing.
+        """
+        alerts_state, alerts, alerts_complete, alerts_note = self._code_scanning_fetch(
+            client, full_name, "alerts", walk=True
+        )
+        analyses_state, analyses, analyses_complete, analyses_note = self._code_scanning_fetch(
+            client, full_name, "analyses", walk=False
+        )
+        states = {alerts_state, analyses_state}
+        if _UNOBSERVABLE in states:
+            state = _UNOBSERVABLE
+        elif _NOT_ENABLED in states:
+            state = _NOT_ENABLED
+        else:
+            state = _OBSERVED
+        repo_envelope["node"]["code_scanning_observability"] = state
+        notes = [n for n in (alerts_note, analyses_note) if n]
+        if state == _UNOBSERVABLE:
+            self.record_warn(
+                _SITE_CODE_SCANNING_UNOBSERVABLE,
+                "CODE_SCANNING_UNOBSERVABLE",
+                f"code scanning NOT observed for {full_name}, which is not the same as no findings: "
+                + "; ".join(notes),
+                message_data={
+                    "repo": full_name,
+                    "alerts": alerts_state,
+                    "analyses": analyses_state,
+                    "notes": notes,
+                },
+            )
+        elif state == _NOT_ENABLED:
+            self.record_info(
+                _SITE_CODE_SCANNING_NOT_ENABLED,
+                "CODE_SCANNING_NOT_ENABLED",
+                f"{full_name}: GitHub reports code scanning is not enabled for this repository "
+                f"({'; '.join(notes)}). No findings because nothing scans it — a gap, not a clean bill.",
+                message_data={"repo": full_name, "notes": notes},
+            )
+
+        workflow_by_path = self._walk_state()["by_path"]
+        commits_seen = self._commits_seen()
+        by_state: dict[str, int] = {}
+        by_tool: dict[str, int] = {}
+        workflow_linked = 0
+        for alert in alerts:
+            number = alert.get("number")
+            if number is None:
+                continue
+            detail = self._code_scanning_alert_fields(full_name, alert)
+            alert_uuid = code_scanning_alert_id(full_name, number)
+            finding_uuid = code_scanning_finding_id(full_name, number)
+            nodes.append(
+                node_envelope(
+                    entity_id=alert_uuid,
+                    entity_type="github_core__code_scanning_alert",
+                    name=f"#{number} {detail['tool_name']} {detail['rule_id']}".strip(),
+                    dimensions=dims,
+                    fields=detail,
+                )
+            )
+            finding = self._code_scanning_finding_fields(detail)
+            nodes.append(
+                node_envelope(
+                    entity_id=finding_uuid,
+                    entity_type="compliance_core__compliance_finding",
+                    name=finding["name"],
+                    dimensions={**dims, "compliance": "finding"},
+                    fields=finding,
+                )
+            )
+            edges.append(
+                self._edge(
+                    "HAS_COMPLIANCE_FINDING__compliance_core", repo_uuid, finding_uuid, dims
+                )
+            )
+            edges.append(
+                self._edge("DETAILS_FINDING__github_core", alert_uuid, finding_uuid, dims)
+            )
+            # A finding IN a workflow file is a finding ON that workflow — the same edge type from
+            # the workflow, when the path is one this run collected. A path we did not collect
+            # (a deleted workflow, a non-workflow file) simply carries no second edge.
+            wf_uuid = workflow_by_path.get((full_name, detail["location"]["path"]))
+            if wf_uuid is not None:
+                workflow_linked += 1
+                edges.append(
+                    self._edge(
+                        "HAS_COMPLIANCE_FINDING__compliance_core", wf_uuid, finding_uuid, dims
+                    )
+                )
+            by_state[detail["state"]] = by_state.get(detail["state"], 0) + 1
+            by_tool[detail["tool_name"]] = by_tool.get(detail["tool_name"], 0) + 1
+
+        analyses_by_tool: dict[str, int] = {}
+        commit_linked = 0
+        for analysis in analyses:
+            analysis_id_int = analysis.get("id")
+            if analysis_id_int is None:
+                continue
+            fields = self._code_scanning_analysis_fields(full_name, analysis)
+            analysis_uuid = code_scanning_analysis_id(full_name, analysis_id_int)
+            nodes.append(
+                node_envelope(
+                    entity_id=analysis_uuid,
+                    entity_type="github_core__code_scanning_analysis",
+                    name=(
+                        f"{fields['tool_name']} {fields['category'] or fields['analysis_key']} "
+                        f"@ {fields['commit_sha'][:12]}"
+                    ).strip(),
+                    dimensions=dims,
+                    fields=fields,
+                )
+            )
+            edges.append(
+                self._edge("ANALYZES_REPOSITORY__github_core", analysis_uuid, repo_uuid, dims)
+            )
+            # Only when the commit is in this batch. The sha stays on the node either way; a
+            # commit this run did not collect (a pull-request head past the ref window) is a
+            # normal thing, not a warning.
+            commit_uuid = commits_seen.get(fields["commit_sha"].lower())
+            if commit_uuid is not None:
+                commit_linked += 1
+                edges.append(
+                    self._edge("ANALYZES_COMMIT__github_core", analysis_uuid, commit_uuid, dims)
+                )
+            analyses_by_tool[fields["tool_name"]] = analyses_by_tool.get(fields["tool_name"], 0) + 1
+
+        if alerts_state == _OBSERVED and not alerts_complete:
+            self.record_warn(
+                _SITE_CODE_SCANNING_ALERTS_TRUNCATED,
+                "CODE_SCANNING_ALERTS_TRUNCATED",
+                f"{full_name}: the alert walk stopped at the page cap with {len(alerts)} collected and "
+                f"more pending. The alert set is INCOMPLETE; absence of an alert in this batch is not "
+                f"evidence it is fixed or dismissed.",
+                message_data={"repo": full_name, "collected": len(alerts)},
+            )
+        if analyses_state == _OBSERVED and not analyses_complete:
+            self.record_warn(
+                _SITE_CODE_SCANNING_ANALYSES_TRUNCATED,
+                "CODE_SCANNING_ANALYSES_TRUNCATED",
+                f"{full_name}: collected the {len(analyses)} most recent analyses; more exist. Absence of "
+                f"an analysis in this batch is not evidence it did not run.",
+                message_data={"repo": full_name, "collected": len(analyses)},
+            )
+        if state == _OBSERVED:
+            self.record_info(
+                _SITE_CODE_SCANNING_COLLECTED,
+                "CODE_SCANNING_COLLECTED",
+                f"{full_name}: {len(alerts)} code-scanning alert(s)"
+                + (
+                    " (" + ", ".join(f"{n} {s}" for s, n in sorted(by_state.items())) + ")"
+                    if by_state
+                    else ""
+                )
+                + (
+                    " by " + ", ".join(f"{t} {n}" for t, n in sorted(by_tool.items()))
+                    if by_tool
+                    else ""
+                )
+                + f", {workflow_linked} in a collected workflow file; {len(analyses)} analysis(es)"
+                + (
+                    " by " + ", ".join(f"{t} {n}" for t, n in sorted(analyses_by_tool.items()))
+                    if analyses_by_tool
+                    else ""
+                )
+                + f", {commit_linked} on a commit in this batch.",
+                message_data={
+                    "repo": full_name,
+                    "alerts": len(alerts),
+                    "alerts_by_state": by_state,
+                    "alerts_by_tool": by_tool,
+                    "alerts_complete": alerts_complete,
+                    "workflow_linked": workflow_linked,
+                    "analyses": len(analyses),
+                    "analyses_by_tool": analyses_by_tool,
+                    "analyses_complete": analyses_complete,
+                    "commit_linked": commit_linked,
+                },
+            )
+
+    def _code_scanning_fetch(
+        self,
+        client: GithubClient,
+        full_name: str,
+        surface: str,
+        *,
+        walk: bool,
+    ) -> tuple[str, list[dict[str, Any]], bool, str]:
+        """One code-scanning listing: ``(state, items, walk_complete, note)``.
+
+        `walk=True` follows the Link chain to its end (alerts); `walk=False` takes one page
+        (analyses). Either way `walk_complete` is the client's own verdict on whether a next page
+        was still pending, never inferred from the item count. A 403/404 is classified by its
+        BODY into `not_enabled` (GitHub says the feature is off) or `unobservable` (the credential
+        was refused); anything else re-raises like every sibling surface.
+        """
+        path = f"/repos/{full_name}/code-scanning/{surface}"
+        try:
+            items = client.get_paginated(
+                path,
+                params={"per_page": str(_CODE_SCANNING_PAGE_SIZE)},
+                max_pages=100 if walk else 1,
+            )
+        except GithubAPIError as exc:
+            if exc.status not in (403, 404):
+                raise
+            body = (exc.body or "").lower()
+            refused_as = (
+                _NOT_ENABLED
+                if any(marker in body for marker in _CODE_SCANNING_NOT_ENABLED_MARKERS)
+                else _UNOBSERVABLE
+            )
+            return refused_as, [], True, f"{surface} answered {exc.status}: {(exc.body or '')[:120]}"
+        complete = bool(getattr(client, "last_walk_complete", True))
+        return _OBSERVED, [item for item in items if isinstance(item, dict)], complete, ""
+
+    @staticmethod
+    def _code_scanning_alert_fields(full_name: str, alert: dict[str, Any]) -> dict[str, Any]:
+        """The detail node's fields, flattened from GitHub's nested alert.
+
+        Timestamps pass through as GitHub gave them (a string, or null = GitHub gave null);
+        nested optional strings become `""` when null; the raw alert rides `configuration` so
+        nothing the API said is lost to the flattening.
+        """
+        rule = alert.get("rule") or {}
+        tool = alert.get("tool") or {}
+        instance = alert.get("most_recent_instance") or {}
+        location = instance.get("location") or {}
+        dismissed_by = alert.get("dismissed_by") or {}
+        return {
+            "full_name": full_name,
+            "number": alert.get("number"),
+            "state": str(alert.get("state") or ""),
+            "created_at": alert.get("created_at"),
+            "updated_at": alert.get("updated_at"),
+            "fixed_at": alert.get("fixed_at"),
+            "dismissed_at": alert.get("dismissed_at"),
+            "dismissed_reason": str(alert.get("dismissed_reason") or ""),
+            "dismissed_comment": str(alert.get("dismissed_comment") or ""),
+            "dismissed_by_login": str(dismissed_by.get("login") or ""),
+            "html_url": str(alert.get("html_url") or ""),
+            "rule_id": str(rule.get("id") or ""),
+            "rule_name": str(rule.get("name") or ""),
+            "rule_severity": str(rule.get("severity") or ""),
+            "security_severity_level": str(rule.get("security_severity_level") or ""),
+            "rule_description": str(rule.get("description") or ""),
+            "rule_tags": list(rule.get("tags") or []),
+            "tool_name": str(tool.get("name") or ""),
+            "tool_version": str(tool.get("version") or ""),
+            "tool_guid": str(tool.get("guid") or ""),
+            "analysis_key": str(instance.get("analysis_key") or ""),
+            "category": str(instance.get("category") or ""),
+            "environment": str(instance.get("environment") or ""),
+            "ref": str(instance.get("ref") or ""),
+            "commit_sha": str(instance.get("commit_sha") or ""),
+            "location": {
+                "path": str(location.get("path") or ""),
+                "start_line": int(location.get("start_line") or 0),
+                "end_line": int(location.get("end_line") or 0),
+                "start_column": int(location.get("start_column") or 0),
+                "end_column": int(location.get("end_column") or 0),
+            },
+            "message": str((instance.get("message") or {}).get("text") or ""),
+            "classifications": list(instance.get("classifications") or []),
+            "instances_url": str(alert.get("instances_url") or ""),
+            "configuration": alert,
+            "tags": {},
+        }
+
+    @staticmethod
+    def _code_scanning_finding_fields(detail: dict[str, Any]) -> dict[str, Any]:
+        """Project the alert onto the compliance substrate's finding.
+
+        `status` folds GitHub's three states into the substrate's two: `open` stays open,
+        `dismissed` and `fixed` are both `resolved` — the substrate does not distinguish "went
+        away" from "was waved through", and the true state lives on the detail node one edge
+        away. The model has no `configuration`/`tags`, so none are emitted.
+        """
+        name = f"{detail['tool_name']} {detail['rule_id']}".strip() or f"code scanning alert #{detail['number']}"
+        summary = detail["rule_description"] or detail["rule_name"]
+        location = detail["location"]
+        parts = [detail["message"]] if detail["message"] else []
+        if location["path"]:
+            parts.append(f"{location['path']}:{location['start_line']}")
+        return {
+            "name": name[:255],
+            "summary": summary[:500],
+            "description": "\n\n".join(parts).strip(),
+            "status": "open" if detail["state"] == _CODE_SCANNING_OPEN else "resolved",
+        }
+
+    @staticmethod
+    def _code_scanning_analysis_fields(full_name: str, analysis: dict[str, Any]) -> dict[str, Any]:
+        """The analysis node's fields; counts pass through as given (null = GitHub gave null)."""
+        tool = analysis.get("tool") or {}
+        return {
+            "full_name": full_name,
+            "analysis_id": analysis.get("id"),
+            "ref": str(analysis.get("ref") or ""),
+            "commit_sha": str(analysis.get("commit_sha") or ""),
+            "analysis_key": str(analysis.get("analysis_key") or ""),
+            "category": str(analysis.get("category") or ""),
+            "environment": str(analysis.get("environment") or ""),
+            "tool_name": str(tool.get("name") or ""),
+            "tool_version": str(tool.get("version") or ""),
+            "tool_guid": str(tool.get("guid") or ""),
+            "created_at": analysis.get("created_at"),
+            "results_count": analysis.get("results_count"),
+            "rules_count": analysis.get("rules_count"),
+            "sarif_id": str(analysis.get("sarif_id") or ""),
+            "deletable": bool(analysis.get("deletable", False)),
+            "warning": str(analysis.get("warning") or ""),
+            "error": str(analysis.get("error") or ""),
+            "url": str(analysis.get("url") or ""),
+            "configuration": analysis,
+            "tags": {},
+        }
 
     def _collect_caches(
         self,

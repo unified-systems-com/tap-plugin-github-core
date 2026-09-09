@@ -1095,7 +1095,9 @@ class TestVocabularyIsDeclared:
         repo_perms, org_perms = module.derive_permissions()
         # `pull_requests`, `checks` and `statuses` arrived with the pull-request surface
         # (github-core#82): the rows, and the two halves of the head commit's check rollup. All
-        # three were already granted on the product App as recommended reads.
+        # three were already granted on the product App as recommended reads. `security_events`
+        # arrived with code scanning (github-core#89): the alert and analysis listings, each alert
+        # minted as a compliance_core finding. A sensitive read, recommended before it was derived.
         assert repo_perms == {
             "metadata": "read",
             "actions": "read",
@@ -1104,6 +1106,7 @@ class TestVocabularyIsDeclared:
             "pull_requests": "read",
             "checks": "read",
             "statuses": "read",
+            "security_events": "read",
         }
         # `packages` arrived with the outputs (github-core#31) and is the one permission an
         # existing installation must re-accept; `custom_properties` (github-core#77) was already

@@ -1,0 +1,16 @@
+{
+  "slug": "ANALYZES_REPOSITORY__github_core",
+  "name": "Analyzes Repository",
+  "description": "A code scanning analysis was uploaded against this repository: a scanner ran here. This is the edge that separates 'scanned clean' from 'never scanned' — a repository with no ANALYZES_REPOSITORY edges has no code scanning history on the grid, whatever its alert count says. It is NOT the alert's placement (a finding is placed on the repository by HAS_COMPLIANCE_FINDING) and NOT the commit join (ANALYZES_COMMIT).",
+  "sources": [
+    "github_core__code_scanning_analysis"
+  ],
+  "targets": [
+    "github_core__github_repository"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "security",
+    "github.observation": "execution"
+  }
+}

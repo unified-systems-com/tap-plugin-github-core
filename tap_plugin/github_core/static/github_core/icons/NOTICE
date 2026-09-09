@@ -25,3 +25,9 @@ padded viewBox, explicit #1f2328 fill and <title> as the rest of the derived set
 status-check.svg is derived from the Octicons `check-circle` glyph at v19.15.1 — the glyph
 GitHub renders beside a passing required check — with the same padded viewBox, explicit
 #1f2328 fill and <title> as the rest of the derived set.
+
+code-scanning-alert.svg is derived from the Octicons `codescan` glyph at v19.15.1 — the glyph
+GitHub renders beside a code scanning alert — and code-scanning-analysis.svg from the Octicons
+`codescan-checkmark` glyph at the same version — the glyph GitHub renders for a completed scan.
+Both carry the same padded viewBox, explicit #1f2328 fill and <title> as the rest of the derived
+set; the 21-unit glyphs are translated by 1.5 to centre them on the 24-unit grid.

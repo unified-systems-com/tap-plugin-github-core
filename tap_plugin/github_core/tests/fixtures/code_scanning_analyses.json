@@ -1,0 +1,229 @@
+{
+  "_captured": {
+    "date": "2026-09-09",
+    "account": "notgeorge (gh CLI OAuth token, read access to unified-systems-com/tap)",
+    "repository": "unified-systems-com/tap",
+    "calls": {
+      "analyses": "GET /repos/unified-systems-com/tap/code-scanning/analyses?per_page=10",
+      "not_enabled_404": "GET /repos/unified-systems-com/.github/code-scanning/analyses?per_page=1 (HTTP 404 body, verbatim)"
+    },
+    "note": "Verbatim responses; nothing stripped."
+  },
+  "analyses": [
+    {
+      "ref": "refs/pull/362/head",
+      "commit_sha": "1030aba9fac94d8835c5b1093cba22804c793819",
+      "analysis_key": "(default)",
+      "environment": "{}",
+      "category": "",
+      "error": "",
+      "created_at": "2026-09-09T21:11:11Z",
+      "results_count": 0,
+      "rules_count": 0,
+      "id": 1750940509,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750940509",
+      "sarif_id": "fb30e05c-ac92-11f1-8f12-565d421de249",
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "deletable": true,
+      "warning": ""
+    },
+    {
+      "ref": "refs/pull/362/head",
+      "commit_sha": "1030aba9fac94d8835c5b1093cba22804c793819",
+      "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+      "environment": "{\"build-mode\":\"none\",\"category\":\"/language:python\",\"language\":\"python\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+      "category": "/language:python",
+      "error": "",
+      "created_at": "2026-09-09T21:11:09Z",
+      "results_count": 0,
+      "rules_count": 43,
+      "id": 1750940357,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750940357",
+      "sarif_id": "fa6555fe-ac92-11f1-8445-f59ac88cef1a",
+      "tool": {
+        "name": "CodeQL",
+        "guid": null,
+        "version": "2.27.0"
+      },
+      "deletable": true,
+      "warning": ""
+    },
+    {
+      "ref": "refs/pull/362/head",
+      "commit_sha": "1030aba9fac94d8835c5b1093cba22804c793819",
+      "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+      "environment": "{\"build-mode\":\"none\",\"category\":\"/language:javascript-typescript\",\"language\":\"javascript-typescript\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+      "category": "/language:javascript-typescript",
+      "error": "",
+      "created_at": "2026-09-09T21:10:57Z",
+      "results_count": 0,
+      "rules_count": 87,
+      "id": 1750939338,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750939338",
+      "sarif_id": "f316aed8-ac92-11f1-8cea-e28c892cdf77",
+      "tool": {
+        "name": "CodeQL",
+        "guid": null,
+        "version": "2.27.0"
+      },
+      "deletable": true,
+      "warning": ""
+    },
+    {
+      "ref": "refs/pull/362/head",
+      "commit_sha": "1030aba9fac94d8835c5b1093cba22804c793819",
+      "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+      "environment": "{\"build-mode\":\"none\",\"category\":\"/language:actions\",\"language\":\"actions\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+      "category": "/language:actions",
+      "error": "",
+      "created_at": "2026-09-09T21:10:56Z",
+      "results_count": 0,
+      "rules_count": 17,
+      "id": 1750939264,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750939264",
+      "sarif_id": "f246dda2-ac92-11f1-85a0-f6ec162b3941",
+      "tool": {
+        "name": "CodeQL",
+        "guid": null,
+        "version": "2.27.0"
+      },
+      "deletable": true,
+      "warning": ""
+    },
+    {
+      "ref": "refs/pull/344/head",
+      "commit_sha": "71b3d2a8f3dc710efc7978c6465463b524249389",
+      "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+      "environment": "{\"build-mode\":\"none\",\"category\":\"/language:javascript-typescript\",\"language\":\"javascript-typescript\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+      "category": "/language:javascript-typescript",
+      "error": "",
+      "created_at": "2026-09-09T20:50:22Z",
+      "results_count": 0,
+      "rules_count": 87,
+      "id": 1750826663,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750826663",
+      "sarif_id": "129f5c44-ac90-11f1-917f-4a48416b79c7",
+      "tool": {
+        "name": "CodeQL",
+        "guid": null,
+        "version": "2.27.0"
+      },
+      "deletable": true,
+      "warning": ""
+    },
+    {
+      "ref": "refs/pull/344/head",
+      "commit_sha": "71b3d2a8f3dc710efc7978c6465463b524249389",
+      "analysis_key": "(default)",
+      "environment": "{}",
+      "category": "",
+      "error": "",
+      "created_at": "2026-09-09T20:50:18Z",
+      "results_count": 0,
+      "rules_count": 0,
+      "id": 1750826267,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750826267",
+      "sarif_id": "10391850-ac90-11f1-8981-2f76fac2c646",
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "deletable": true,
+      "warning": ""
+    },
+    {
+      "ref": "refs/pull/344/head",
+      "commit_sha": "71b3d2a8f3dc710efc7978c6465463b524249389",
+      "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+      "environment": "{\"build-mode\":\"none\",\"category\":\"/language:python\",\"language\":\"python\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+      "category": "/language:python",
+      "error": "",
+      "created_at": "2026-09-09T20:50:16Z",
+      "results_count": 0,
+      "rules_count": 43,
+      "id": 1750826036,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750826036",
+      "sarif_id": "0f4ddc1e-ac90-11f1-946c-9f6e4f6b1a39",
+      "tool": {
+        "name": "CodeQL",
+        "guid": null,
+        "version": "2.26.4"
+      },
+      "deletable": true,
+      "warning": ""
+    },
+    {
+      "ref": "refs/heads/main",
+      "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+      "analysis_key": "(default)",
+      "environment": "{}",
+      "category": "",
+      "error": "",
+      "created_at": "2026-09-09T20:50:13Z",
+      "results_count": 9,
+      "rules_count": 6,
+      "id": 1750825781,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750825781",
+      "sarif_id": "0deac2ec-ac90-11f1-985c-76056fc0e24d",
+      "tool": {
+        "name": "SonarCloud",
+        "guid": null,
+        "version": null
+      },
+      "deletable": true,
+      "warning": ""
+    },
+    {
+      "ref": "refs/pull/344/head",
+      "commit_sha": "2da22f3dce80af974ecbba5944dc941f47a321c5",
+      "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+      "environment": "{\"build-mode\":\"none\",\"category\":\"/language:python\",\"language\":\"python\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+      "category": "/language:python",
+      "error": "",
+      "created_at": "2026-09-09T20:50:13Z",
+      "results_count": 0,
+      "rules_count": 43,
+      "id": 1750825743,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750825743",
+      "sarif_id": "0d3f9d5e-ac90-11f1-9f92-c7bd0f18c1e1",
+      "tool": {
+        "name": "CodeQL",
+        "guid": null,
+        "version": "2.26.4"
+      },
+      "deletable": false,
+      "warning": ""
+    },
+    {
+      "ref": "refs/heads/main",
+      "commit_sha": "d214c1eadfb676c54e43beb05af8ee4a3ae164ae",
+      "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+      "environment": "{\"build-mode\":\"none\",\"category\":\"/language:python\",\"language\":\"python\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+      "category": "/language:python",
+      "error": "",
+      "created_at": "2026-09-09T20:50:06Z",
+      "results_count": 8,
+      "rules_count": 43,
+      "id": 1750824955,
+      "url": "https://api.github.com/repos/unified-systems-com/tap/code-scanning/analyses/1750824955",
+      "sarif_id": "08f849ee-ac90-11f1-888a-a03dbb64f340",
+      "tool": {
+        "name": "CodeQL",
+        "guid": null,
+        "version": "2.27.0"
+      },
+      "deletable": true,
+      "warning": ""
+    }
+  ],
+  "not_enabled_404": {
+    "message": "no analysis found",
+    "documentation_url": "https://docs.github.com/rest/code-scanning/code-scanning#list-code-scanning-analyses-for-a-repository",
+    "status": "404"
+  }
+}

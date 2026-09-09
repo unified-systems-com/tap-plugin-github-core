@@ -156,11 +156,31 @@ which the collector must read as "no policy", distinct from a refusal.
 accepts it on the installation (skill failure mode: *a probe returns 403 on a permission the table
 shows as granted*). GitHub offers no API for either step.
 
+**First flip of the sensitive-read tier (2026-09-09, github-core#89).** `security_events` entered the
+manifest with the sources `code_scanning_alerts` (`GET /repos/{owner}/{repo}/code-scanning/alerts`) and
+`code_scanning_analyses` (`GET /repos/{owner}/{repo}/code-scanning/analyses`) — `req-github-core-code-scanning`
+— and its ledger entry moved `recommended` → `requested` in the same change, citing exactly those two
+sources: the rule in `recommended-1`, exercised for the first time on a Tier B key. The installed
+`git-serious-exploratory` App already held it as an exploratory grant (33 read permissions on
+2026-09-09), so nothing was re-accepted here; an adopter's App minted from the manifest gains *Code
+scanning alerts: Read-only* from the declaration alone, and the rendered review table must mark it
+sensitive (`recommended-2`). Measured the same day: 9 open alerts on `unified-systems-com/tap`, 100
+analyses in the most recent page. `vulnerability_alerts` and `secret_scanning_alerts` stay
+`recommended` until their sources land.
+
+**Operator-side observation (2026-09-09, Issue# 88 - github-core).** GitHub's App-settings form offers
+permission controls that neither the OpenAPI `app-permissions` schema nor the ledger names — *Agent
+secrets* and *Codespaces secrets* among them. The same incompleteness the `repository_advisories`
+finding above established, seen from the form instead of the live App. Until the live-App diff
+(`ledger-6`) or a catalogue refresh surfaces their keys, they are classified by the form label alone as
+secret-*name* surfaces and fall under the deferred secret-names line; a key GitHub exposes for them
+enters the ledger with `catalogue_absent` evidence, never silently.
+
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-app-permissions-recommended-1 | Recommended Enters Only With A Source | Proposed | A recommended permission moves to `requested` in the same change that adds the manifest source consuming it, never before. | Enforced by ledger-4 once the source lands. |
+| req-github-core-app-permissions-recommended-1 | Recommended Enters Only With A Source | Proposed | A recommended permission moves to `requested` in the same change that adds the manifest source consuming it, never before. | Enforced by ledger-4 once the source lands. First exercised 2026-09-09: `security_events` with `code_scanning_alerts` / `code_scanning_analyses` (github-core#89). |
 | req-github-core-app-permissions-recommended-2 | Sensitive Reads Are Named | Proposed | The App's rendered review table marks `security_events`, `secret_scanning_alerts` and any secret-names permission as sensitive with the reason. | The create-github-app skill's table. |
 
 ---

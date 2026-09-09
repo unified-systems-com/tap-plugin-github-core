@@ -85,6 +85,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-status-checks | [Status Checks](#status-checks) | In Development | 2026-09-02 (github-core#61): `status_check` keyed `<owner>#<context>` from the ruleset detail's `required_status_checks` parameters; `REQUIRES_CHECK` with the rule's qualifiers; `PRODUCES_CHECK` derived from job display names with stated confidence, only toward required contexts an Actions job may produce. A refused detail is counted as not observable, never as no requirement. |
 | req-github-core-custom-properties | [Custom Properties](#custom-properties) | Implemented | 2026-09-08 (github-core#77; live-verified the same day with the App credential alone): `github_custom_property` keyed `<owner>#<property_name>` from the organization's schema endpoint; every repository's values stamped as `github_repository.custom_properties` built over the declared names (null = observed-unset) with a three-state `custom_properties_observability`. No edge — the value lives once, on the repository. Adds nothing to the App: `organization:custom_properties:read` was already granted, now derived. |
 | req-github-core-pull-requests | [Pull Requests](#pull-requests) | In Development | 2026-09-08 (github-core#82): `pull_request` keyed `<owner/repo>#<number>` from the config-layer `pullRequests` field, joined to git_core's neutral head/base ref and head commit (`PROPOSES_REF`, `TARGETS_BASE_REF`, `PROPOSES_COMMIT`) and to its author (`OPENS_PULL_REQUEST`); build status = the head commit's check rollup flattened onto the node, App-produced checks included. Lives in github_core, not git_core: a forge object, ruled 2026-09-08. |
+| req-github-core-code-scanning | [Code Scanning Alerts](#code-scanning-alerts) | In Development | 2026-09-09 (github-core#89): the first security-axis surface, under the ruling **one generic finding type, source-specific data behind an edge**. The generic type is compliance_core's existing `compliance_finding` (v0.2.2), which this collector MINTS one-per-alert and places with compliance_core's `HAS_COMPLIANCE_FINDING` (repository always, workflow when the path is one); `code_scanning_alert` is the DETAIL behind it via `DETAILS_FINDING`; `code_scanning_analysis` is the record that a scan RAN (`ANALYZES_REPOSITORY`, conditional `ANALYZES_COMMIT`). Four observability states on the repository. `security_events` recommended → requested. |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON_REPOSITORY` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -833,6 +834,135 @@ by their sources; an App installed earlier re-accepts nothing.
 | req-github-core-pull-requests-4 | Build Status From The Rollup | In Development | `checks_rollup_state` equals the head commit's `statusCheckRollup.state` and `checks` itemises every check run and commit status it counted with its producer and, for a check run, GitHub's `check_run_id` (a rerun mints a higher id for the same name); a head with no rollup is `""` with `checks_observability = observed`, never `SUCCESS`; a rollup or contexts GitHub refused (pruned) is `checks_observability = unobservable` with a warning, never the same blank; a rollup wider than the page is marked truncated. | Includes App-produced checks no workflow in scope produces. |
 | req-github-core-pull-requests-5 | Refused Is Not Empty | In Development | A degraded `pullRequests` field marks the repository `unobservable` with a warning and mints nothing; a repos-only scope leaves `""`; the window's cap is visible as `pull_requests_total` and a truncation warning. | Three states, never two. |
 | req-github-core-pull-requests-6 | Permissions Derived | In Development | The three sources declare `repository:pull_requests:read`, `repository:checks:read`, `repository:statuses:read`; the ledger entries are `requested` citing exactly those sources; the GraphQL extract covers every traversed type and field. | No new grant on the App. |
+
+### Code Scanning Alerts
+----
+RID: `req-github-core-code-scanning`
+
+Status: `In Development`
+
+GitHub aggregates every SARIF-emitting scanner an organisation runs — CodeQL, SonarCloud, Trivy,
+Grype, zizmor when uploaded — into one alert stream per repository with one lifecycle, and keeps a
+second object, the analysis, that records each upload whether or not it found anything. This
+requirement lands both (github-core#89): the first surface on the security axis, and the one that
+turns the CodeQL dynamic workflow, the Trivy and Grype lanes already on the grid from producers of
+nothing into producers of something.
+
+**The ruling (operator, 2026-09-09, session double-tap-git-serious): ONE generic finding type,
+source-specific data behind an edge.** The generic type is the EXISTING
+`compliance_core__compliance_finding` (compliance_core v0.2.2: `name` / `summary` / `description` /
+`status open|resolved`) — NOT a new github_core type. github_core adds `depends_on compliance_core`
+and its collector MINTS `compliance_finding` nodes, becoming the first collector to do so (the
+substrate's own spec records "no collector mints `compliance_finding`" as its v0 reality, and that
+sentence is now false in the right direction). The dependency direction is why the generic node is
+compliance_core's: it is a substrate with `depends_on = []`, depended on downward by every regime
+and every scanner; zizmor depends on github_core, so a github_core-owned generic finding would put
+the generic type ABOVE a consumer that already needs it, and zizmor's spec has been carrying its
+scanner-shaped finding as "a compliance-level node in disguise" since 2026-09-02 for want of exactly
+this ruling. The source-specific node — `code_scanning_alert` — is github_core's, and points at the
+finding through a github_core-owned edge, `DETAILS_FINDING`, detail → finding, because the substrate
+cannot name a github_core type as a target and the finding must not know its sources.
+
+**Mapping, alert → finding.** Natural key `<owner/repo>#code_scanning#<number>` under github_core's
+uuid5 namespace (the source segment is what keeps a Dependabot finding on the same repository from
+colliding); `name` = `"<tool_name> <rule_id>"` (`SonarCloud pythonsecurity:S6350`); `summary` =
+the rule description; `description` = the message plus `path:line`; `status` = `open` when the
+alert's state is `open`, else `resolved` — **dismissed and fixed both map to resolved**, and the true
+lifecycle (`state`, `dismissed_reason`, `dismissed_comment`, `dismissed_by_login`, `fixed_at`,
+`dismissed_at`) lives on the detail node, one hop away. The finding carries compliance_core's
+`compliance: finding` marker and no regime dimension: this collector is not a regime.
+
+| Alert (detail) | Finding (generic) |
+| --- | --- |
+| `full_name` + `number` | key `<owner/repo>#code_scanning#<number>` |
+| `tool_name`, `rule_id` | `name` = `"<tool_name> <rule_id>"` |
+| `rule_description` | `summary` |
+| `message`, `location.path`, `location.start_line` | `description` = message + `path:line` |
+| `state = open` | `status = open` |
+| `state = dismissed` or `fixed` (or `""`) | `status = resolved` |
+| everything else | stays on the detail |
+
+**Asset placement** uses compliance_core's existing wildcard-source edge
+`HAS_COMPLIANCE_FINDING__compliance_core`, never a github_core rival: `github_repository` → finding
+always, and `github_workflow` → finding when the alert's `location.path` is a collected workflow
+file (`githubactions:S6506` and `S8544` on tap are exactly this). One finding, two assets, one verb.
+
+**The analysis** is the record that a scan RAN: `code_scanning_analysis`, one per SARIF upload
+GitHub accepted, keyed `<owner/repo>#<analysis_id>` (GitHub's id, not `sarif_id` — one upload can
+yield several analyses, one per SARIF `run`), carrying tool, version, ref, commit, category,
+`results_count`, `rules_count`, processing `warning` / `error`. `ANALYZES_REPOSITORY` always;
+`ANALYZES_COMMIT` onto `git_core__git_commit` **only when the commit is on the grid** — a
+`refs/pull/N/merge` analysis never is, so most analyses carry no commit edge, and **absence ≠ not
+analysed**: `commit_sha` on the node is the fact, the edge is the join. Zero alerts beside zero
+analyses is unscanned, not clean; that is why the second node exists.
+
+**Four observability states** on the repository, `code_scanning_observability`, because this
+surface has one more way to be empty than the others: `""` (never asked — repos-only scope, or the
+surface not in the run), `observed` (the listings answered 200, zero included), `unobservable` (403:
+the credential lacks `security_events: read`, or it was added after installation and an organisation
+owner has not accepted it — `CODE_SCANNING_UNOBSERVABLE`, per repository), `not_enabled` (GitHub says
+code scanning, or Advanced Security on a private repository, is not enabled — a fact about the
+repository, not the credential; `CODE_SCANNING_NOT_ENABLED`). Folding `not_enabled` into `observed`
+renders an unscanned repository clean; folding it into `unobservable` blames the credential for a
+configuration choice. One field for both listings because they share an endpoint family and a
+permission. Truncation is warned per listing (`CODE_SCANNING_ALERTS_TRUNCATED`,
+`CODE_SCANNING_ANALYSES_TRUNCATED`) and a successful pass records `CODE_SCANNING_COLLECTED` with
+the counts.
+
+**Sources and permission.** `code_scanning_alerts` — `GET /repos/{owner}/{repo}/code-scanning/alerts`,
+all states, paginated to the end; `code_scanning_analyses` — `GET /repos/{owner}/{repo}/code-scanning/analyses`,
+the most recent 100 per repository (GitHub reports no total), truncation warned. Both at
+**`repository:security_events:read`**, a sensitive read; the ledger entry `security_events` moves
+`recommended` → `requested` in this change citing exactly those two sources — the first flip of the
+sensitive-read tier (`req-github-core-app-permissions-recommended-1`). The installed App already held
+it as an exploratory grant, so no re-acceptance on this organisation; an adopter's App minted from
+the manifest gains *Code scanning alerts: Read-only* from the declaration alone.
+
+**Measured 2026-09-09** with the installed App token (`git-serious-exploratory`, installation
+157103378, 33 read permissions): `unified-systems-com/tap` — 9 open alerts, all SonarCloud (2 high,
+7 medium; `pythonsecurity:S6350` ×3, `S2083` ×2, `S6549`, `Web:S5247`, `githubactions:S6506`,
+`S8544`), 0 CodeQL / Trivy / Grype open; analyses in the last 100: CodeQL 72 (`/language:actions`,
+`/language:javascript-typescript`, `/language:python`), SonarCloud 24 (category `""`), Trivy 2
+(`trivy-tap-web`, `trivy-tap-db`), Grype 2 (`grype-declared-tap-web`, `-db`). Alerts are NOT tied to
+analysis ids — the alert carries `analysis_key` + `category`, the analysis the same two, and the
+join is loose (tool + category). `rule.severity` is `note|warning|error`; `security_severity_level`
+may be absent (Sonar sets it, CodeQL sometimes not) and an absent level is `""`, never `low`. A
+dismissed sample: reason `false positive`, 2026-08-31.
+
+**Deliberately NOT built here, so it is not re-litigated:**
+
+- **No `REPORTED_BY` (analysis → finding) edge.** The data does not support it; a loose tool +
+  category match is a field-level join, and an edge would assert a precision GitHub lacks.
+- **No `FLAGS_ACTION` here.** A code-scanning alert names a path and a rule, not a package; the
+  action join is Dependabot's and stays in `req-github-core-dependabot-alerts`.
+- **Secret scanning and Dependabot ride `DETAILS_FINDING` later**, each with its own detail node
+  behind its own `compliance_finding` (the Dependabot block is amended below to say so); this
+  requirement builds the code-scanning detail only and does not pre-declare the others as sources.
+- **The compliance_core extension is a separate issue — the open design, L rule.** A rule that needs
+  severity, rule id or location today must cross `DETAILS_FINDING`; putting a severity, a rule
+  reference and a location ON the generic finding so rules need not cross the edge is a change to
+  compliance_core's model, to be filed against tap-plugin-compliance-core with this requirement as
+  its evidence. It carries an unresolved question (which fields are generic across CodeQL, Sonar,
+  Dependabot, zizmor and a conjunction finding; whether `severity` is one scale or two) and so does
+  not enter a sprint until that is settled. Nothing here is blocked on it: the detail node holds
+  every field either way.
+- **No default-setup / configuration surface.** Whether code scanning is configured, with which
+  languages, is a separate endpoint; `not_enabled` is the only configuration state recorded.
+- **No alert instances.** One `most_recent_instance` per alert; the rest are behind `instances_url`.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-code-scanning-1 | Alert Shape Accepted | In Development | Every alert the listing returns for a repository in scope lands as one `code_scanning_alert` per (repository, number), in every lifecycle state, carrying state, timestamps, dismissal (reason, comment, login), rule (id, name, severity, security severity, description, tags), tool (name, version, guid), the most recent instance's analysis key, category, environment, ref, commit, location, message and classifications, with the raw alert in `configuration`. | A fixed alert is history; an absent `security_severity_level` is `""`, never `low`. |
+| req-github-core-code-scanning-2 | Analysis Shape Accepted | In Development | Every analysis in the most recent page lands as one `code_scanning_analysis` per (repository, GitHub analysis id) carrying ref, commit, analysis key, category, environment, tool, created time, result and rule counts, SARIF id, deletable flag, processing warning and error, with the raw analysis in `configuration`. | Keyed on GitHub's id, not `sarif_id`. |
+| req-github-core-code-scanning-3 | Four Observability States | In Development | `github_repository.code_scanning_observability` is `observed` after a 200 (zero rows included), `unobservable` after a 403 with a per-repository warning and nothing minted, `not_enabled` when GitHub reports code scanning or Advanced Security off for the repository with an information record and nothing minted, and `""` when the surface was not asked; no two of these ever serialize alike. | Never two states where GitHub offers four. |
+| req-github-core-code-scanning-4 | One Finding Per Alert | In Development | Every landed alert mints exactly one `compliance_core__compliance_finding` keyed `<owner/repo>#code_scanning#<number>` with `name = "<tool_name> <rule_id>"`, `summary` = rule description, `description` = message + `path:line`, and `status = open` iff the alert's state is `open`, else `resolved` (dismissed and fixed alike); re-collection updates the same finding, never a second. | The true lifecycle stays on the detail. |
+| req-github-core-code-scanning-5 | Placed On Repository And Workflow | In Development | Every finding carries `HAS_COMPLIANCE_FINDING__compliance_core` from its `github_repository`, and additionally from the `github_workflow` whose path equals the alert's `location.path` when that workflow was collected; no github_core-owned placement edge exists. | compliance_core's wildcard-source edge, reused. |
+| req-github-core-code-scanning-6 | Detail Behind The Finding | In Development | Every finding has exactly one inbound `DETAILS_FINDING__github_core` from its `code_scanning_alert`, property-free; no finding minted by this collector lacks a detail and no detail points at two findings. | 1:1 by construction. |
+| req-github-core-code-scanning-7 | Analyses Land With Their Edges | In Development | Every landed analysis carries `ANALYZES_REPOSITORY__github_core` to its repository, and `ANALYZES_COMMIT__github_core` to `git_core__git_commit` only when that commit is on the grid in the same batch; an analysis whose commit is absent lands with no commit edge and `commit_sha` intact. | Absence ≠ not analysed. |
+| req-github-core-code-scanning-8 | Permission Declared And Derived | In Development | Both sources declare `repository:security_events:read`; the ledger entry `security_events` is `requested` citing exactly `code_scanning_alerts` and `code_scanning_analyses`; the OpenAPI extract carries both paths; the rendered App manifest gains *Code scanning alerts: Read-only* from the declaration alone and the review table marks it sensitive. | The first recommended → requested flip of Tier B. |
+| req-github-core-code-scanning-9 | Truncation Warned | In Development | An alert walk that does not reach the end of the `Link` chain records `CODE_SCANNING_ALERTS_TRUNCATED` with the count landed; an analyses page that is full records `CODE_SCANNING_ANALYSES_TRUNCATED` naming the repository; neither is ever presented as the whole. | GitHub reports no analysis total. |
 
 ### Refs
 ----
@@ -1772,6 +1902,19 @@ receive a new permission silently — an organization owner approves it under th
 settings — and until then the collector reads 403 and reports the surface as not observable.
 Code-scanning alerts (`repository:security_events:read`, also already held) are the same shape one
 step later and are NOT declared here.
+
+**Amended 2026-09-09 under the one-generic-finding ruling (`req-github-core-code-scanning`,
+github-core#89).** The finding is no longer `dependabot_alert` itself: `dependabot_alert` becomes
+the DETAIL node behind a `compliance_core__compliance_finding` (keyed
+`<owner/repo>#dependabot#<number>` under github_core's namespace, `status` open iff the alert is
+`open`, else `resolved`), joined to it by `DETAILS_FINDING`, and the `FLAGS_ACTION` / `FLAGS_WORKFLOW`
+asset edges above become `HAS_COMPLIANCE_FINDING__compliance_core` pairs from the `github_action`
+and the `github_workflow` to that finding — the same joins (package name = action path, manifest
+path = workflow path), through the substrate's verb, so a finding list is one query across code
+scanning, Dependabot and zizmor. The Actions-only join to `github_action` stays as designed, as does
+everything else in this block (all-states collection, the SHA-pin blind spot, the ecosystem enum,
+the fixture); the ACIDs below are read with "the alert's finding" where they say the alert's edges,
+and are rewritten when the block leaves `Proposed`.
 
 #### Acceptance Criteria
 

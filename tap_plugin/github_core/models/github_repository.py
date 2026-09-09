@@ -52,6 +52,10 @@ class GithubRepository(BaseModel):
         },
         "pull_requests_observability": {"type": "string", "enum": ["", "observed", "unobservable"]},
         "pull_requests_total": {"type": ["integer", "null"]},
+        "code_scanning_observability": {
+            "type": "string",
+            "enum": ["", "observed", "unobservable", "not_enabled"],
+        },
         "configuration": {"type": "object"},
         "tags": {"type": "object"},
     }
@@ -94,6 +98,16 @@ class GithubRepository(BaseModel):
         },
         # GitHub's totalCount, so the cap on the collected window is visible beside the rows.
         "pull_requests_total": {"validation": "jsonschema", "schema": {"type": ["integer", "null"]}},
+        # FOUR states for the code scanning surface (github-core#89): `observed` (GitHub answered
+        # 200 — zero alerts is then a fact), `unobservable` (403: the credential or its permissions
+        # could not look), `not_enabled` (GitHub itself says code scanning / Advanced Security is
+        # off for this repository — the 404 "no analysis found" or the 403 whose body names
+        # Advanced Security), `""` (never asked). `not_enabled` is a finding about the repository;
+        # `unobservable` is a finding about us. They must never share a value.
+        "code_scanning_observability": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "enum": ["", "observed", "unobservable", "not_enabled"]},
+        },
         "configuration": {"validation": "jsonschema", "schema": {"type": "object"}},
         "tags": {"validation": "jsonschema", "schema": {"type": "object"}},
     }
@@ -130,6 +144,9 @@ class GithubRepository(BaseModel):
     #: mistaken for all of them (req-github-core-pull-requests).
     pull_requests_observability = models.CharField(max_length=16, blank=True, default="")
     pull_requests_total = models.IntegerField(null=True, blank=True)
+    #: Whether this repository's code scanning alerts were read: `observed` | `unobservable` |
+    #: `not_enabled` (GitHub says the surface is off here) | `""` never asked (req-github-core-code-scanning).
+    code_scanning_observability = models.CharField(max_length=16, blank=True, default="")
     configuration = models.JSONField(default=dict, blank=True)
     tags = models.JSONField(default=dict, blank=True)
 
