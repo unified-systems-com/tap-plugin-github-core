@@ -184,8 +184,8 @@ async function _fetchArtifacts(fullName, path, warn) {
 
 async function _gryphonRows(queryLines, inputs) {
     const headers = {"Content-Type": "application/json"};
-    const csrf = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
-    if (csrf) headers["X-CSRFToken"] = csrf[1];
+    const csrf = document.cookie.split(";").map((c) => c.trim()).find((c) => c.startsWith("csrftoken="));
+    if (csrf) headers["X-CSRFToken"] = csrf.slice("csrftoken=".length);
     const res = await fetch(GRYPHON_URL, {
         method: "POST",
         credentials: "same-origin",
@@ -327,10 +327,23 @@ function _addSteps(cy, wf, jobs, facts) {
 // Piles — declared kinds counted from observed artifacts; three states
 // ---------------------------------------------------------------------------
 
-//: A `with.name` template → a pattern: `${{ … }}` spans match anything, the rest is literal.
-function _templatePattern(template) {
+//: A `with.name` template → a matcher: `${{ … }}` spans match anything, the rest is literal, in
+//: order, anchored at both ends. Plain string scanning — no regular expression is built from data.
+function _templateMatcher(template) {
     const parts = String(template).split(/\$\{\{[^}]*\}\}/);
-    return new RegExp("^" + parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
+    return (name) => {
+        const text = String(name || "");
+        if (parts.length === 1) return text === parts[0];
+        if (!text.startsWith(parts[0])) return false;
+        let at = parts[0].length;
+        for (let i = 1; i < parts.length - 1; i++) {
+            const idx = text.indexOf(parts[i], at);
+            if (idx < 0) return false;
+            at = idx + parts[i].length;
+        }
+        const last = parts[parts.length - 1];
+        return text.length >= at + last.length && text.endsWith(last);
+    };
 }
 
 //: Fold the variable parts of an observed name so undeclared kinds group sensibly.
@@ -339,11 +352,11 @@ function _foldName(name) {
 }
 
 function _addPiles(cy, wf, jobs, declared, observed, facts, warn) {
-    const kinds = declared.map((d) => ({...d, pattern: _templatePattern(d.template), rows: []}));
+    const kinds = declared.map((d) => ({...d, matches: _templateMatcher(d.template), rows: []}));
     const undeclared = new Map(); // folded name → rows
     for (const row of observed) {
         const name = String(row.name || "");
-        const hit = kinds.find((k) => k.pattern.test(name));
+        const hit = kinds.find((k) => k.matches(name));
         if (hit) hit.rows.push(row);
         else {
             const f = _foldName(name);
