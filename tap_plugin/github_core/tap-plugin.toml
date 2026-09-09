@@ -87,3 +87,8 @@ ANALYZES_COMMIT__github_core = "edges/ANALYZES_COMMIT.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"
+
+[[boot.records]]
+name = "ci"
+description = "RESERVED NAME (req-boot-bootstrap-ci-record): the stack this plugin's own tests run in — depends_on closure + self, offline, credential-free. The consumer flips self to editable."
+sha256 = "0de8fe68eb17cb42c1ebf36ace43cc9108fb5a1a18506e9771392c0d067c2047"
