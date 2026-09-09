@@ -329,10 +329,18 @@ _NOT_ENABLED = "not_enabled"
 #: Page size for both code-scanning listings (GitHub's maximum).
 _CODE_SCANNING_PAGE_SIZE = 100
 #: How the 403/404 bodies say "the feature is off" rather than "you may not look" — matched
-#: case-insensitively against the response body. `no analysis found` is the documented 404 for a
-#: repository that never uploaded SARIF (captured verbatim 2026-09-09, tests/fixtures); the
-#: Advanced Security phrasing is GitHub's 403 for a private repository without GHAS.
-_CODE_SCANNING_NOT_ENABLED_MARKERS = ("advanced security", "no analysis found", "not enabled")
+#: case-insensitively against the response body, as GitHub's own sentences rather than loose
+#: words, so a credential refusal whose body happens to contain a word like "enabled" cannot be
+#: misread as the softer state. `no analysis found` is the documented 404 for a repository that
+#: never uploaded SARIF (captured verbatim 2026-09-09, tests/fixtures); "Advanced Security must be
+#: enabled" is GitHub's 403 for a private repository without GHAS; "code scanning is not enabled"
+#: is the 404 GitHub documents for a repository with the feature switched off. A credential
+#: refusal reads "Resource not accessible by integration" and matches none of them.
+_CODE_SCANNING_NOT_ENABLED_MARKERS = (
+    "advanced security must be enabled",
+    "no analysis found",
+    "code scanning is not enabled",
+)
 #: Alert states GitHub publishes; the substrate finding folds `dismissed` and `fixed` to `resolved`.
 _CODE_SCANNING_OPEN = "open"
 
@@ -4079,7 +4087,9 @@ class GithubCollector(CollectorBase):
                 else _UNOBSERVABLE
             )
             return refused_as, [], True, f"{surface} answered {exc.status}: {(exc.body or '')[:120]}"
-        complete = bool(getattr(client, "last_walk_complete", True))
+        # A client that cannot say whether the walk finished has NOT proven completeness —
+        # default to incomplete so the truncation warning fires rather than a silent "all".
+        complete = bool(getattr(client, "last_walk_complete", False))
         return _OBSERVED, [item for item in items if isinstance(item, dict)], complete, ""
 
     @staticmethod
