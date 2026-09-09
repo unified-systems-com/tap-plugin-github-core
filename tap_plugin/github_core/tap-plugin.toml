@@ -31,6 +31,7 @@ github_core__github_package = "tap_plugin.github_core.models.github_package.Gith
 github_core__github_package_version = "tap_plugin.github_core.models.github_package_version.GithubPackageVersion"
 github_core__github_action = "tap_plugin.github_core.models.github_action.GithubAction"
 github_core__actions_artifact = "tap_plugin.github_core.models.actions_artifact.ActionsArtifact"
+github_core__github_custom_property = "tap_plugin.github_core.models.github_custom_property.GithubCustomProperty"
 
 [edges]
 HOSTS_ACCOUNT__github_core = "edges/HOSTS_ACCOUNT.edge.json"

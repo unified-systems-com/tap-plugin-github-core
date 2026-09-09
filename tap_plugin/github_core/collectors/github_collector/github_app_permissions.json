@@ -182,9 +182,13 @@
       "why": "Custom organisation roles, same reasoning."
     },
     "organization_custom_properties": {
-      "state": "recommended",
+      "state": "requested",
       "level": "read",
-      "why": "Custom-property DEFINITIONS at the organisation level (the values ride custom_properties_for_organizations and repository_custom_properties). A definition explains a property a repository has not set yet — the difference between 'unset' and 'no such property'. Granted read 2026-09-02; kept."
+      "why": "Custom-property DEFINITIONS and the organization's per-repository VALUES (`/orgs/{org}/properties/schema` and `/orgs/{org}/properties/values` both read at this key per GitHub's endpoint docs; `custom_properties_for_organizations` and `repository_custom_properties` are the org-level and repository-level value surfaces, not needed by these two sources). A definition explains a property a repository has not set yet — the difference between 'unset' and 'no such property'. Granted read 2026-09-02; requested 2026-09-08 by req-github-core-custom-properties.",
+      "sources": [
+        "custom_property_schema",
+        "custom_property_values"
+      ]
     },
     "organization_custom_roles": {
       "state": "recommended",

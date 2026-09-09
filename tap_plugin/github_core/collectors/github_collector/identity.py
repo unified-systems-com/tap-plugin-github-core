@@ -88,6 +88,20 @@ def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     return _id("github_core__github_ruleset", f"{owner}#{ruleset_id_int}")
 
 
+def custom_property_id(owner: str, property_name: str) -> UUID:
+    """A custom-property DEFINITION, keyed on the owner and the property name.
+
+    Owner-scoped like `ruleset_id`: one organization declares the property once and every
+    repository's value is read against that one declaration. The name is the key because it is
+    the only identity GitHub gives a definition — the schema endpoint returns no numeric id —
+    and it is stored exactly as reported (hyphens, case) because it is also the key of every
+    repository's `custom_properties` map; normalizing it here would break the join by name.
+    An enterprise-sourced definition inherited by the organization keys under the organization
+    that reports it, which is where its values live.
+    """
+    return _id("github_core__github_custom_property", f"{owner}#{property_name}")
+
+
 def status_check_id(owner: str, context: str) -> UUID:
     """A required check context, keyed on the owner and the context string.
 

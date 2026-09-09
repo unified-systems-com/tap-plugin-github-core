@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -149,7 +150,13 @@ def _item_properties(op: dict, spec: dict, item_path: str | None) -> list[str]:
 def _resolve_commit(repo: str, branch: str) -> str:
     """The commit `branch` points at right now, so the fetch below is reproducible."""
     url = f"https://api.github.com/repos/{repo}/commits/{branch}"
-    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github.sha"})
+    headers = {"Accept": "application/vnd.github.sha"}
+    # Optional: the unauthenticated ceiling is 60 calls an hour per address, which a shared
+    # developer network exhausts. A token is used only for this one metadata lookup.
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 — constant https URL
         return response.read().decode("utf-8").strip()
 
