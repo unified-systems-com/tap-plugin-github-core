@@ -26,12 +26,14 @@ class GithubWorkflow(BaseModel):
         "github.surface": "actions",
         "github.observation": "declaration",
     }
-    # Leaf cards inside the repo box — white fill, accent-blue border so they
-    # pop on the deeper-blue repo bed. See github_platform for the family scheme.
+    # Topographic scheme (spec-github-core-machinery-projection, Topography):
+    # the account/repo beds are water-blue; a workflow is a green field laid on
+    # the repo bed, and its jobs sit on that field as paler mint cards. The
+    # machinery module reads these at render — it restates no colour of its own.
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {
         "tap_viz": {
             "shape": "round-rectangle",
-            "colors": {"fill": "#FFFFFF", "border": "#0969DA", "label": "#1F2328"},
+            "colors": {"fill": "#DAFBE1", "border": "#1A7F37", "label": "#0A3622"},
         }
     }
 
