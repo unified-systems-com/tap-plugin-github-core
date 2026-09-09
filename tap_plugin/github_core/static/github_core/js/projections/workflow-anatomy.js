@@ -331,17 +331,19 @@ function _addSteps(cy, wf, jobs, facts) {
 //: order, anchored at both ends. Plain string scanning — no regular expression is built from data.
 function _templateMatcher(template) {
     const parts = String(template).split(/\$\{\{[^}]*\}\}/);
+    const first = parts.at(0) || "";
+    const last = parts.length > 1 ? parts.at(-1) || "" : "";
+    const middle = parts.slice(1, -1);
     return (name) => {
         const text = String(name || "");
-        if (parts.length === 1) return text === parts[0];
-        if (!text.startsWith(parts[0])) return false;
-        let at = parts[0].length;
-        for (let i = 1; i < parts.length - 1; i++) {
-            const idx = text.indexOf(parts[i], at);
+        if (parts.length === 1) return text === first;
+        if (!text.startsWith(first)) return false;
+        let at = first.length;
+        for (const part of middle) {
+            const idx = text.indexOf(part, at);
             if (idx < 0) return false;
-            at = idx + parts[i].length;
+            at = idx + part.length;
         }
-        const last = parts[parts.length - 1];
         return text.length >= at + last.length && text.endsWith(last);
     };
 }
