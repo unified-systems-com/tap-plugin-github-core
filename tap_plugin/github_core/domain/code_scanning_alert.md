@@ -25,7 +25,7 @@ The number is GitHub's own identity for an alert within a repository: it is in t
 
 ## Boundaries
 
-- **Not the finding.** The finding is `compliance_core__compliance_finding`; this node is its detail. Asset placement (`HAS_COMPLIANCE_FINDING` from the repository, and from the workflow when the path is a collected workflow file) hangs off the finding, not off this node. Nothing in TAP should point at this node except `DETAILS_FINDING`.
+- **Not the finding.** The finding is `compliance_core__compliance_finding`; this node is its detail. Asset placement (`CARRIES_COMPLIANCE_FINDING` from the repository, and from the workflow when the path is a collected workflow file) hangs off the finding, not off this node. Nothing in TAP should point at this node except `DETAILS_FINDING`.
 - **Not the analysis.** An alert is not tied to the SARIF upload that produced it: GitHub's alert payload carries `tool` and `most_recent_instance.analysis_key` / `category`, never an analysis id, so [`code_scanning_analysis`](code_scanning_analysis.md) is a separate node and the join between them is loose (tool name + category) and deliberately NOT drawn as an edge.
 - **Not the rule.** `rule_id` / `rule_name` / `rule_description` are copied onto the alert because GitHub returns them inline; a `rule` node earns its place only when something needs to point at it (the corpus's node test), and nothing does yet.
 - **Not every instance.** GitHub keeps one alert per rule-and-location with a `most_recent_instance`; the other instances (other refs, other analyses) are behind `instances_url` and are not collected.
@@ -60,7 +60,7 @@ A repository's alert set is only as complete as the walk: a `Link` chain that st
 ## Prior Art
 
 - Operator ruling, session double-tap-git-serious (2026-09-09; github-core#89) — one generic finding type (compliance_core's), source-specific data behind an edge.
-- `tap-plugin-compliance-core/specs/spec-compliance-core-v0.md` (tag v0.2.2, read 2026-09-09) — `compliance_finding` (name / summary / description / status), `HAS_COMPLIANCE_FINDING` with a wildcard source, "Regime On The Instance", and the honest note that no collector minted a finding until now.
+- `tap-plugin-compliance-core/specs/spec-compliance-core-v0.md` (tag v0.2.2, read 2026-09-09; re-read at v0.3.0, where `HAS_COMPLIANCE_FINDING` became `CARRIES_COMPLIANCE_FINDING`) — `compliance_finding` (name / summary / description / status), `CARRIES_COMPLIANCE_FINDING` with a wildcard source, "Regime On The Instance", and the honest note that no collector minted a finding until now.
 - `zizmor-tap/specs/spec-zizmor-v0.md` `req-zizmor-finding` (2026-09-02) — "a compliance-level node in disguise": the scanner-shaped finding this ruling resolves by putting the scanner's data behind the generic node instead of beside it.
 - OASIS SARIF 2.1.0 (OASIS Standard, 2020-03-27) — `result`, `rule`, `location`, `message`, `partialFingerprints`: the shape every alert here was uploaded in, and the field names kept where GitHub kept them.
 - OCSF Vulnerability Finding (class 2002) and Detection Finding (class 2004), OCSF schema v1.3.0 (2024) — the finding-versus-detail split (a `finding_info` common to every finding class, a class-specific body per source) that the ruling mirrors.

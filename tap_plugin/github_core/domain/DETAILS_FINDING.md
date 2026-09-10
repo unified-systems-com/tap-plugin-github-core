@@ -22,8 +22,8 @@ One edge per (source, target) pair, id minted by `identity.edge_id`; property-fr
 
 ## Boundaries
 
-- **Not the asset link.** Where the finding sits — which repository, which workflow file — is compliance_core's `HAS_COMPLIANCE_FINDING` from the asset to the finding. This edge never carries placement.
-- **Not evidence.** compliance_core's `HAS_COMPLIANCE_EVIDENCE` (finding → evidence) is for artefacts that support or refute a finding; the detail node is the finding's own body, not evidence about it.
+- **Not the asset link.** Where the finding sits — which repository, which workflow file — is compliance_core's `CARRIES_COMPLIANCE_FINDING` from the asset to the finding. This edge never carries placement.
+- **Not evidence.** compliance_core's `CITES_COMPLIANCE_EVIDENCE` (finding → evidence) is for artefacts that support or refute a finding; the detail node is the finding's own body, not evidence about it.
 - **Not `REPORTED_BY`.** No edge from an analysis to a finding is drawn: GitHub does not tie alerts to analysis ids, and this edge is not the place to fake it.
 - **Not a wildcard yet.** v0 registers `code_scanning_alert` as the only source; `dependabot_alert` and the secret-scanning detail are added to the source list when their nodes are built (the amended `req-github-core-dependabot-alerts`), not pre-declared.
 
@@ -37,8 +37,8 @@ Emitted by the collector from the same alert read that minted both endpoints (`r
 
 ## Authoritative Source
 
-- **Source:** the collector's own emission over `GET /repos/{owner}/{repo}/code-scanning/alerts` (`collectors/github_collector/collector.py`), pairing each alert with the `compliance_finding` it mints; `tap-plugin-compliance-core` `HAS_COMPLIANCE_FINDING.edge.json` and `compliance_finding.py` for the target's shape
-- **Version:** compliance_core tag v0.2.2; REST API version `2022-11-28` as pinned in `github_openapi_extract.json`
+- **Source:** the collector's own emission over `GET /repos/{owner}/{repo}/code-scanning/alerts` (`collectors/github_collector/collector.py`), pairing each alert with the `compliance_finding` it mints; `tap-plugin-compliance-core` `CARRIES_COMPLIANCE_FINDING.edge.json` and `compliance_finding.py` for the target's shape
+- **Version:** compliance_core tag v0.3.0 (the edge rename release; the node shape is unchanged since v0.2.2); REST API version `2022-11-28` as pinned in `github_openapi_extract.json`
 - **Retrieved:** 2026-09-09
 
 ## Prior Art

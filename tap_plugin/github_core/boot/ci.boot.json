@@ -29,7 +29,7 @@
         "source": {
           "type": "git",
           "url": "https://github.com/unified-systems-com/tap-plugin-compliance-core",
-          "rev": "v0.2.2"
+          "rev": "v0.3.0"
         },
         "note": "Declared in depends_on. Pinned at v0.2.2, the release current on 2026-09-09. Public repo, no credential (req-tap-plugin-arch-source-secret-5)."
       },

@@ -3947,7 +3947,7 @@ class GithubCollector(CollectorBase):
             )
             edges.append(
                 self._edge(
-                    "HAS_COMPLIANCE_FINDING__compliance_core", repo_uuid, finding_uuid, dims
+                    "CARRIES_COMPLIANCE_FINDING__compliance_core", repo_uuid, finding_uuid, dims
                 )
             )
             edges.append(
@@ -3961,7 +3961,7 @@ class GithubCollector(CollectorBase):
                 workflow_linked += 1
                 edges.append(
                     self._edge(
-                        "HAS_COMPLIANCE_FINDING__compliance_core", wf_uuid, finding_uuid, dims
+                        "CARRIES_COMPLIANCE_FINDING__compliance_core", wf_uuid, finding_uuid, dims
                     )
                 )
             by_state[detail["state"]] = by_state.get(detail["state"], 0) + 1

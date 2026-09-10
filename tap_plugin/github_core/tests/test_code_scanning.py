@@ -59,7 +59,7 @@ _ALL_ALERTS: list[dict[str, Any]] = _ALERTS["open"] + _ALERTS["dismissed"] + _AL
 _FINDING_TYPE = "compliance_core__compliance_finding"
 _ALERT_TYPE = "github_core__code_scanning_alert"
 _ANALYSIS_TYPE = "github_core__code_scanning_analysis"
-_HAS_FINDING = "HAS_COMPLIANCE_FINDING__compliance_core"
+_HAS_FINDING = "CARRIES_COMPLIANCE_FINDING__compliance_core"
 
 #: SYNTHETIC 403 bodies (see module docstring).
 _REFUSED_403 = json.dumps({"message": "Resource not accessible by integration", "status": "403"})
@@ -409,7 +409,7 @@ class TestFindingPerAlert:
 
 
 # ---------------------------------------------------------------------------------------------
-# 5. HAS_COMPLIANCE_FINDING from the repository always; from the workflow when the path matches.
+# 5. CARRIES_COMPLIANCE_FINDING from the repository always; from the workflow when the path matches.
 # ---------------------------------------------------------------------------------------------
 
 

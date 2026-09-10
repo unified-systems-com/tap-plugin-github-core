@@ -8,7 +8,7 @@ description = "GitHub Actions models — the pipeline as declared (workflows, jo
 depends_on = [
     { slug = "git_core", note = "The neutral Git vocabulary (github-core#76): the collector mints git_core__git_repository / git_ref / git_commit through tap_plugin.git_core.identity and targets those types from DECLARES_REF-adjacent edges (PROTECTS, SCOPED_TO_REF, EVALUATED_ON_REF, TARGETS_REF) and from commit_observation." },
     { slug = "identity_core", note = "ENABLED_ON_REPOSITORY sources the identity_core__oidc_issuer type; the collector mints the issuer node via identity_core.issuer (the OIDC vocabulary lives there, not here)." },
-    { slug = "compliance_core", note = "The neutral finding substrate: the collector mints compliance_core__compliance_finding for every scanner alert (code scanning first; Dependabot and secret scanning ride the same shape) and places it with HAS_COMPLIANCE_FINDING; the source-specific detail node (code_scanning_alert) hangs off it via DETAILS_FINDING. Vocabulary + type dependency, downward-only." },
+    { slug = "compliance_core", note = "The neutral finding substrate: the collector mints compliance_core__compliance_finding for every scanner alert (code scanning first; Dependabot and secret scanning ride the same shape) and places it with CARRIES_COMPLIANCE_FINDING; the source-specific detail node (code_scanning_alert) hangs off it via DETAILS_FINDING. Vocabulary + type dependency, downward-only." },
 ]
 
 [models]
@@ -93,4 +93,4 @@ workflow-page = "grift/workflow-page.grift.json"
 [[boot.records]]
 name = "ci"
 description = "RESERVED NAME (req-boot-bootstrap-ci-record): the stack this plugin's own tests run in — depends_on closure + self, offline, credential-free. The consumer flips self to editable."
-sha256 = "0de8fe68eb17cb42c1ebf36ace43cc9108fb5a1a18506e9771392c0d067c2047"
+sha256 = "6578238e0cef77a962a38dd77409b18eae803aec4e54ef6d541fc8d739e72aac"
