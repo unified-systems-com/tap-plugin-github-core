@@ -407,7 +407,7 @@
       ],
       "permission": "repository:security_events:read",
       "permission_failure": "degrade_with_warning",
-      "description": "Every code-scanning alert on the repository in every state (req-github-core-code-scanning): what the scanners (CodeQL, SonarCloud, Trivy, anything that uploads SARIF) found, where, and what became of it. `state` is deliberately OMITTED: without it GitHub returns open, dismissed and fixed alerts together (measured 2026-09-09 on unified-systems-com/tap: 1 open + 2 dismissed + 97 fixed in one listing), so one paginated walk replaces three. Each alert lands twice — as this detail node and as the generic compliance_core__compliance_finding github_core mints for it (DETAILS_FINDING joins them; HAS_COMPLIANCE_FINDING from the repository, and from the workflow when the alert's path is a collected workflow file). Walked to the end of the Link chain; a capped walk is warned as incomplete. EMPTY MEANS: zero alerts is a fact only when the repository node says `code_scanning_observability = observed`; `not_enabled` means nothing scans this repository (GitHub's 404 `no analysis found`, or a 403 naming Advanced Security), and `unobservable` means the credential was refused — neither is a clean bill."
+      "description": "Every code-scanning alert on the repository in every state (req-github-core-code-scanning): what the scanners (CodeQL, SonarCloud, Trivy, anything that uploads SARIF) found, where, and what became of it. `state` is deliberately OMITTED: without it GitHub returns open, dismissed and fixed alerts together (measured 2026-09-09 on unified-systems-com/tap: 1 open + 2 dismissed + 97 fixed in one listing), so one paginated walk replaces three. Each alert lands twice — as this detail node and as the generic compliance_core__compliance_finding github_core mints for it (DETAILS_FINDING joins them; CARRIES_COMPLIANCE_FINDING from the repository, and from the workflow when the alert's path is a collected workflow file). Walked to the end of the Link chain; a capped walk is warned as incomplete. EMPTY MEANS: zero alerts is a fact only when the repository node says `code_scanning_observability = observed`; `not_enabled` means nothing scans this repository (GitHub's 404 `no analysis found`, or a 403 naming Advanced Security), and `unobservable` means the credential was refused — neither is a clean bill."
     },
     {
       "name": "code_scanning_analyses",
@@ -879,13 +879,13 @@
       "target": "git_core__git_commit"
     },
     {
-      "slug": "HAS_COMPLIANCE_FINDING__compliance_core",
+      "slug": "CARRIES_COMPLIANCE_FINDING__compliance_core",
       "source": "github_core__github_repository",
       "target": "compliance_core__compliance_finding",
       "condition": "compliance_core-owned edge type; one per code-scanning alert, always"
     },
     {
-      "slug": "HAS_COMPLIANCE_FINDING__compliance_core",
+      "slug": "CARRIES_COMPLIANCE_FINDING__compliance_core",
       "source": "github_core__github_workflow",
       "target": "compliance_core__compliance_finding",
       "condition": "compliance_core-owned; the alert's most_recent_instance.location.path equals the path of a workflow collected in this run for the same repository"

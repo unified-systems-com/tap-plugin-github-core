@@ -19,9 +19,9 @@
         "source": {
           "type": "git",
           "url": "https://github.com/unified-systems-com/tap-plugin-compliance-core",
-          "rev": "43fda8e08af4f0a9b4ef1d43b67fc6f20722523b"
+          "rev": "10871675ff1c67bfac0ca61d90ee12c507fd76f4"
         },
-        "note": "Package-mode (tap_plugin.compliance_core). The regime-agnostic finding substrate: github_core's collector mints compliance_core__compliance_finding for every scanner alert and DETAILS_FINDING targets its type (github-core#89), so github_core declares it in depends_on and the pre-boot gate checks order. Pinned to the commit v0.2.2 pointed at on 2026-09-09, not the tag, for the same reason identity_core is."
+        "note": "Package-mode (tap_plugin.compliance_core). The regime-agnostic finding substrate: github_core's collector mints compliance_core__compliance_finding for every scanner alert and DETAILS_FINDING targets its type (github-core#89), so github_core declares it in depends_on and the pre-boot gate checks order. Pinned to the commit v0.3.0 pointed at on 2026-09-09 (the release that renamed HAS_COMPLIANCE_FINDING to CARRIES_COMPLIANCE_FINDING and HAS_COMPLIANCE_EVIDENCE to CITES_COMPLIANCE_EVIDENCE, github-core#97), not the tag, for the same reason identity_core is."
       },
       {
         "slug": "identity_core",
