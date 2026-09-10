@@ -1,0 +1,655 @@
+{
+  "metadata": {
+    "grift_version": "0"
+  },
+  "_reserved": {},
+  "batches": [
+    {
+      "batch_entity": {
+        "entity_id": "01a0887c-31bf-7584-9d80-739931d6cba7",
+        "entity_type": "batch",
+        "name": "GitHub Core Workflow Page v0.1.0",
+        "dimensions": {}
+      },
+      "batch_node": {
+        "source": "tap_plugin.github_core.grift.workflow_page",
+        "name": "GitHub Core Workflow Page v0.1.0",
+        "description": "The generic workflow-and-job viewer (spec-github-core-workflow-page-v0.md): /github_core/workflow?repo=owner/name&workflow=<file> — identity, anatomy (jobs ranked over needs with steps inside and artifact piles per declared kind), recent runs. One page node, three panels, four searches, and the anatomy projection with its elevation and layout. Every search takes repo + workflow as required inputs; nothing here names a repository."
+      },
+      "nodes": [
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-739a3ef3e96f",
+            "entity_type": "page",
+            "name": "GitHub workflow",
+            "dimensions": {
+              "tap.graph": "web"
+            }
+          },
+          "node": {
+            "name": "GitHub workflow",
+            "description": "ONE workflow, read top to bottom (req-github-core-workflow-page): who it is (path, state, triggers, permissions), its anatomy — the jobs ranked over `needs:` with their steps inside, and the artifact kinds each job's upload step declares as piles counted from the runs in the collected window — then its recent runs. Generic: ?repo=owner/name&workflow=<file> select the workflow; the page names no repository. Not in the top nav; the machinery view and the repository page are the ways in.",
+            "slug": "/github_core/workflow",
+            "discoverable": false,
+            "layout": {
+              "full_bleed": true,
+              "columns": {
+                "col-1": {
+                  "width": "1fr",
+                  "rows": {
+                    "row-1": {
+                      "panel-id": "identity",
+                      "height": "auto"
+                    },
+                    "row-2": {
+                      "panel-id": "anatomy",
+                      "height": "60vh"
+                    },
+                    "row-3": {
+                      "panel-id": "runs",
+                      "height": "auto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-739e4f9a3170",
+            "entity_type": "search",
+            "name": "github_core — workflow by repository and file",
+            "dimensions": {}
+          },
+          "node": {
+            "name": "github_core — workflow by repository and file",
+            "description": "The workflow the page is about (req-github-core-workflow-page-1). Envelope mode so the identity table receives the node with its typed fields.",
+            "search_type": "gryphon",
+            "root": "node",
+            "definition": {
+              "query": [
+                "MATCH (w:github_core__github_workflow)",
+                "WHERE w.data.full_name = $repo AND w.data.path CONTAINS $workflow",
+                "RETURN w"
+              ]
+            },
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "repo": {
+                  "type": "string",
+                  "description": "The repository's full_name (owner/name), from the page URL ?repo=… — required."
+                },
+                "workflow": {
+                  "type": "string",
+                  "description": "The workflow file, by path or file name (`.github/workflows/product-lines.yml` or `product-lines.yml`), from ?workflow=… — required. Matched by CONTAINS on the collected path, so give the file name with its extension."
+                }
+              },
+              "required": [
+                "repo",
+                "workflow"
+              ]
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-739bbf5509d4",
+            "entity_type": "panel",
+            "name": "Workflow",
+            "dimensions": {
+              "tap.graph": "web"
+            }
+          },
+          "node": {
+            "name": "Workflow",
+            "description": "The workflow's identity row: file, state, what starts it, the permissions its file grants, and the link to GitHub (req-github-core-workflow-page-2).",
+            "slug": "github-workflow-identity",
+            "view": "tap_web/panels/table_panel.html",
+            "config": {
+              "default_page_size": 1,
+              "columns": [
+                {
+                  "field": "data.name",
+                  "title": "Workflow",
+                  "widthGrow": 2,
+                  "formatter": "link",
+                  "formatter_params": {
+                    "href_field": "data.html_url"
+                  },
+                  "header_tooltip": "The workflow's display name. Opens it on GitHub."
+                },
+                {
+                  "field": "data.path",
+                  "title": "File",
+                  "widthGrow": 2,
+                  "header_tooltip": "The workflow file under .github/workflows."
+                },
+                {
+                  "field": "data.state",
+                  "title": "State",
+                  "width": 100,
+                  "header_tooltip": "GitHub's workflow state: active, disabled, or a dynamic workflow GitHub owns."
+                },
+                {
+                  "field": "data.configuration.triggers",
+                  "title": "Starts on",
+                  "widthGrow": 2,
+                  "formatter": "list",
+                  "header_tooltip": "The trigger events declared in the file."
+                },
+                {
+                  "field": "data.configuration.permissions",
+                  "title": "Permissions",
+                  "widthGrow": 2,
+                  "formatter": "json",
+                  "header_tooltip": "The token permissions the file grants at the top level. Jobs may narrow or widen them."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-739f392dfaaf",
+            "entity_type": "search",
+            "name": "github_core — workflow page: anatomy scene (the workflow and its jobs)",
+            "dimensions": {}
+          },
+          "node": {
+            "name": "github_core — workflow page: anatomy scene (the workflow and its jobs)",
+            "description": "The graph panel's seed: the workflow node and every job it defines, with the DEFINES_JOB edges (req-github-core-workflow-anatomy-1).",
+            "search_type": "gryphon",
+            "root": "node",
+            "definition": {
+              "query": [
+                "MATCH (w:github_core__github_workflow)-[:DEFINES_JOB__github_core]->(j:github_core__workflow_job)",
+                "WHERE w.data.full_name = $repo AND w.data.path CONTAINS $workflow",
+                "RETURN w, j"
+              ]
+            },
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "repo": {
+                  "type": "string",
+                  "description": "The repository's full_name (owner/name), from the page URL ?repo=… — required."
+                },
+                "workflow": {
+                  "type": "string",
+                  "description": "The workflow file, by path or file name (`.github/workflows/product-lines.yml` or `product-lines.yml`), from ?workflow=… — required. Matched by CONTAINS on the collected path, so give the file name with its extension."
+                }
+              },
+              "required": [
+                "repo",
+                "workflow"
+              ]
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a0757ca7bc",
+            "entity_type": "search",
+            "name": "github_core — workflow page: job dependencies",
+            "dimensions": {}
+          },
+          "node": {
+            "name": "github_core — workflow page: job dependencies",
+            "description": "The `needs:` edges between this workflow's jobs, so the anatomy module can rank them (req-github-core-workflow-anatomy-2).",
+            "search_type": "gryphon",
+            "root": "node",
+            "definition": {
+              "query": [
+                "MATCH (w:github_core__github_workflow)-[:DEFINES_JOB__github_core]->(j:github_core__workflow_job)-[:DEPENDS_ON_JOB__github_core]->(k:github_core__workflow_job)",
+                "WHERE w.data.full_name = $repo AND w.data.path CONTAINS $workflow",
+                "RETURN j, k"
+              ]
+            },
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "repo": {
+                  "type": "string",
+                  "description": "The repository's full_name (owner/name), from the page URL ?repo=… — required."
+                },
+                "workflow": {
+                  "type": "string",
+                  "description": "The workflow file, by path or file name (`.github/workflows/product-lines.yml` or `product-lines.yml`), from ?workflow=… — required. Matched by CONTAINS on the collected path, so give the file name with its extension."
+                }
+              },
+              "required": [
+                "repo",
+                "workflow"
+              ]
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-739c3b9cc7cb",
+            "entity_type": "panel",
+            "name": "Anatomy",
+            "dimensions": {
+              "tap.graph": "web"
+            }
+          },
+          "node": {
+            "name": "Anatomy",
+            "description": "The workflow as a shape: jobs ranked left to right over `needs:` (a job sits one column after everything it needs), each job's steps listed inside it with the action and its pin, and the artifact kinds a job's upload step declares as piles counted from the collected runs — declared and observed, declared but never observed, observed but undeclared (req-github-core-workflow-anatomy). GitHub nodes open on GitHub in a new tab.",
+            "slug": "github-workflow-anatomy",
+            "view": "tap_viz/panels/graph_panel.html",
+            "config": {
+              "height": "100%",
+              "hide_header": true,
+              "nav_rules": [
+                {
+                  "entity_type": "github_core__github_workflow",
+                  "url_field": "html_url",
+                  "external": true
+                },
+                {
+                  "entity_type": "github_core__workflow_job",
+                  "url_field": "html_url",
+                  "external": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a10dac0879",
+            "entity_type": "search",
+            "name": "github_core — runs of one workflow, newest first",
+            "dimensions": {}
+          },
+          "node": {
+            "name": "github_core — runs of one workflow, newest first",
+            "description": "Every collected run this workflow executed, in the collected window; the table sorts them newest first (a multi-hop match cannot ORDER BY, req-grid-gryphon-order-by-envelope) (req-github-core-workflow-page-3).",
+            "search_type": "gryphon",
+            "root": "node",
+            "definition": {
+              "query": [
+                "MATCH (w:github_core__github_workflow)<-[:EXECUTES_WORKFLOW__github_core]-(r:github_core__github_actions_run)",
+                "WHERE w.data.full_name = $repo AND w.data.path CONTAINS $workflow",
+                "RETURN r"
+              ]
+            },
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "repo": {
+                  "type": "string",
+                  "description": "The repository's full_name (owner/name), from the page URL ?repo=… — required."
+                },
+                "workflow": {
+                  "type": "string",
+                  "description": "The workflow file, by path or file name (`.github/workflows/product-lines.yml` or `product-lines.yml`), from ?workflow=… — required. Matched by CONTAINS on the collected path, so give the file name with its extension."
+                }
+              },
+              "required": [
+                "repo",
+                "workflow"
+              ]
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-739d26baab9f",
+            "entity_type": "panel",
+            "name": "Runs",
+            "dimensions": {
+              "tap.graph": "web"
+            }
+          },
+          "node": {
+            "name": "Runs",
+            "description": "This workflow's runs in the collected window, newest first: what started each, its conclusion, how long it took, when. The workflow's own status wall (req-github-core-workflow-page-3).",
+            "slug": "github-workflow-runs",
+            "view": "tap_web/panels/table_panel.html",
+            "config": {
+              "default_page_size": 50,
+              "quick_filter": true,
+              "refresh_seconds": 300,
+              "columns": [
+                {
+                  "field": "data.event",
+                  "title": "",
+                  "width": 40,
+                  "headerSort": false,
+                  "formatter": "iconMap",
+                  "formatter_params": {
+                    "icons": {
+                      "push": "/static/tap_web/icons/trigger-push.svg",
+                      "pull_request": "/static/tap_web/icons/trigger-pull-request.svg",
+                      "pull_request_target": "/static/tap_web/icons/trigger-pull-request.svg",
+                      "schedule": "/static/tap_web/icons/trigger-schedule.svg",
+                      "workflow_dispatch": "/static/tap_web/icons/trigger-manual.svg",
+                      "workflow_run": "/static/tap_web/icons/trigger-chained.svg",
+                      "workflow_call": "/static/tap_web/icons/trigger-chained.svg",
+                      "dynamic": "/static/tap_web/icons/trigger-platform.svg",
+                      "repository_dispatch": "/static/tap_web/icons/trigger-manual.svg"
+                    },
+                    "labels": {
+                      "push": "push",
+                      "pull_request": "pull request",
+                      "pull_request_target": "pull request target",
+                      "schedule": "schedule",
+                      "workflow_dispatch": "workflow dispatch",
+                      "workflow_run": "workflow run",
+                      "workflow_call": "workflow call",
+                      "dynamic": "dynamic",
+                      "repository_dispatch": "repository dispatch"
+                    }
+                  },
+                  "header_tooltip": "What started the run."
+                },
+                {
+                  "field": "data.run_number",
+                  "title": "Run",
+                  "width": 80,
+                  "formatter": "link",
+                  "formatter_params": {
+                    "href_field": "data.html_url"
+                  },
+                  "header_tooltip": "GitHub's run number. Opens the run on GitHub."
+                },
+                {
+                  "field": "data.head_branch",
+                  "title": "Branch",
+                  "widthGrow": 2,
+                  "tooltip": "full_value",
+                  "header_tooltip": "The branch or ref the run built."
+                },
+                {
+                  "field": "data.conclusion",
+                  "title": "Conclusion",
+                  "formatter": "conclusionBadge",
+                  "width": 120,
+                  "header_tooltip": "GitHub's terminal conclusion; blank while the run is in progress."
+                },
+                {
+                  "field": "data.completed_at",
+                  "title": "Elapsed",
+                  "formatter": "elapsed",
+                  "width": 100,
+                  "formatter_params": {
+                    "start": "data.run_started_at",
+                    "end": "data.completed_at",
+                    "require_field": "data.completed_at"
+                  },
+                  "header_tooltip": "Wall-clock time from start to completion."
+                },
+                {
+                  "field": "data.run_started_at",
+                  "title": "Started",
+                  "formatter": "datetime",
+                  "widthGrow": 1,
+                  "header_tooltip": "When the run started, in your local time. Hover for UTC."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a23b083bb4",
+            "entity_type": "projection",
+            "name": "github_core workflow anatomy projection",
+            "dimensions": {}
+          },
+          "node": {
+            "name": "github_core workflow anatomy projection",
+            "description": "One workflow as a shape: jobs ranked over needs, steps inside jobs, artifact piles on the job that declares them. Configuration under `anatomy`: flow (ltr default — a single workflow reads in execution order), column_gap, row_gap.",
+            "definition": {
+              "min_zoom": "fit",
+              "anatomy": {
+                "flow": "ltr",
+                "column_gap": 40,
+                "row_gap": 10
+              },
+              "elevations": [
+                "01a0887c-31bf-7584-9d80-73a394a4b407"
+              ],
+              "default_elevation_id": "01a0887c-31bf-7584-9d80-73a394a4b407",
+              "node_style": {
+                "mode": "icon-badge"
+              }
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a394a4b407",
+            "entity_type": "elevation",
+            "name": "github_core workflow anatomy elevation",
+            "dimensions": {}
+          },
+          "node": {
+            "name": "github_core workflow anatomy elevation",
+            "description": "The single elevation: the anatomy layout.",
+            "definition": {
+              "zoom": 1.0,
+              "description": "The workflow's anatomy at one elevation.",
+              "layouts": [
+                "01a0887c-31bf-7584-9d80-73a4d32c5455"
+              ],
+              "double_tap_targets": []
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a4d32c5455",
+            "entity_type": "layout",
+            "name": "github_core workflow anatomy layout",
+            "dimensions": {}
+          },
+          "node": {
+            "name": "github_core workflow anatomy layout",
+            "description": "workflow-anatomy.js: ranks the jobs over `needs:`, synthesises step nodes from the collected configuration, derives artifact kinds from upload steps and counts them from the runs' artifacts, nests workflow ⊃ job ⊃ {step, pile} with projectNested.",
+            "definition": {
+              "js_file": "tap_plugin/github_core/static/github_core/js/projections/workflow-anatomy.js",
+              "arrangements": []
+            }
+          }
+        }
+      ],
+      "edges": [
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a525e0ff13",
+            "entity_type": "edge",
+            "name": "workflow page USES_PANEL identity",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-739a3ef3e96f",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-739bbf5509d4",
+            "edge_type": "USES_PANEL",
+            "properties": {
+              "hotlink": {
+                "model": "page",
+                "spec": "page-panels",
+                "value": "identity"
+              }
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a6e51d2c7e",
+            "entity_type": "edge",
+            "name": "workflow page USES_PANEL anatomy",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-739a3ef3e96f",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-739c3b9cc7cb",
+            "edge_type": "USES_PANEL",
+            "properties": {
+              "hotlink": {
+                "model": "page",
+                "spec": "page-panels",
+                "value": "anatomy"
+              }
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a714f2bac4",
+            "entity_type": "edge",
+            "name": "workflow page USES_PANEL runs",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-739a3ef3e96f",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-739d26baab9f",
+            "edge_type": "USES_PANEL",
+            "properties": {
+              "hotlink": {
+                "model": "page",
+                "spec": "page-panels",
+                "value": "runs"
+              }
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a88b7f6e39",
+            "entity_type": "edge",
+            "name": "identity USES_SEARCH workflow by file",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-739bbf5509d4",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-739e4f9a3170",
+            "edge_type": "USES_SEARCH",
+            "properties": {}
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73a9587d47ba",
+            "entity_type": "edge",
+            "name": "anatomy USES_SEARCH scene",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-739c3b9cc7cb",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-739f392dfaaf",
+            "edge_type": "USES_SEARCH",
+            "properties": {}
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73aa1a378b82",
+            "entity_type": "edge",
+            "name": "anatomy USES_SEARCH dependencies",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-739c3b9cc7cb",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-73a0757ca7bc",
+            "edge_type": "USES_SEARCH",
+            "properties": {}
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73ab74951d68",
+            "entity_type": "edge",
+            "name": "runs USES_SEARCH runs of one workflow",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-739d26baab9f",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-73a10dac0879",
+            "edge_type": "USES_SEARCH",
+            "properties": {}
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73ac9e278c0b",
+            "entity_type": "edge",
+            "name": "anatomy USES_PROJECTION workflow anatomy",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-739c3b9cc7cb",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-73a23b083bb4",
+            "edge_type": "USES_PROJECTION",
+            "properties": {}
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73ad0800d7c5",
+            "entity_type": "edge",
+            "name": "projection USES_ELEVATION",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-73a23b083bb4",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-73a394a4b407",
+            "edge_type": "USES_ELEVATION",
+            "properties": {
+              "hotlink": {
+                "model": "projection",
+                "spec": "projection-elevations",
+                "value": "01a0887c-31bf-7584-9d80-73a394a4b407"
+              }
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73ae168463aa",
+            "entity_type": "edge",
+            "name": "projection USES_DEFAULT_ELEVATION",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-73a23b083bb4",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-73a394a4b407",
+            "edge_type": "USES_DEFAULT_ELEVATION",
+            "properties": {
+              "hotlink": {
+                "model": "projection",
+                "spec": "projection-default-elevation",
+                "value": "01a0887c-31bf-7584-9d80-73a394a4b407"
+              }
+            }
+          }
+        },
+        {
+          "entity": {
+            "entity_id": "01a0887c-31bf-7584-9d80-73af66c413e0",
+            "entity_type": "edge",
+            "name": "elevation USES_LAYOUT anatomy",
+            "dimensions": {}
+          },
+          "edge": {
+            "from_entity_id": "01a0887c-31bf-7584-9d80-73a394a4b407",
+            "to_entity_id": "01a0887c-31bf-7584-9d80-73a4d32c5455",
+            "edge_type": "USES_LAYOUT",
+            "properties": {
+              "hotlink": {
+                "model": "elevation",
+                "spec": "elevation-layouts",
+                "value": "01a0887c-31bf-7584-9d80-73a4d32c5455"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
