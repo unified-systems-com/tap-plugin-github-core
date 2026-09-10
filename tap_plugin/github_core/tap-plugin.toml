@@ -87,3 +87,4 @@ ANALYZES_COMMIT__github_core = "edges/ANALYZES_COMMIT.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"
+workflow-page = "grift/workflow-page.grift.json"
