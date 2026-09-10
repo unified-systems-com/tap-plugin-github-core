@@ -6,15 +6,15 @@
   "batches": [
     {
       "batch_entity": {
-        "entity_id": "01a0887c-31bf-7584-9d80-739931d6cba7",
+        "entity_id": "01a08d4a-15f1-747b-ab3f-40c573ab367c",
         "entity_type": "batch",
-        "name": "GitHub Core Workflow Page v0.1.0",
+        "name": "GitHub Core Workflow Page v0.2.0",
         "dimensions": {}
       },
       "batch_node": {
         "source": "tap_plugin.github_core.grift.workflow_page",
-        "name": "GitHub Core Workflow Page v0.1.0",
-        "description": "The generic workflow-and-job viewer (spec-github-core-workflow-page-v0.md): /github_core/workflow?repo=owner/name&workflow=<file> — identity, anatomy (jobs ranked over needs with steps inside and artifact piles per declared kind), recent runs. One page node, three panels, four searches, and the anatomy projection with its elevation and layout. Every search takes repo + workflow as required inputs; nothing here names a repository."
+        "name": "GitHub Core Workflow Page v0.2.0",
+        "description": "The generic workflow-and-job viewer (spec-github-core-workflow-page-v0.md): /github_core/workflow?workflow_id=<GitHub numeric workflow id> — identity, anatomy (jobs ranked over needs with steps inside and artifact piles), and runs, over any collected workflow in any repository. v0.2.0: the page keys on workflow_id instead of ?repo=…&workflow=<file> — a run carries no workflow path, so the status wall could not link here, and CONTAINS on a file name is fuzzy; workflow, job and run nodes all carry GitHub's numeric id. The runs table also carries the reliability columns ported from git-serious's retired page (vs usual, n, Completed). Node upserts only: the four searches' queries and input schemas, the runs panel's columns; every id is stable, only the batch id moved."
       },
       "nodes": [
         {
@@ -28,7 +28,7 @@
           },
           "node": {
             "name": "GitHub workflow",
-            "description": "ONE workflow, read top to bottom (req-github-core-workflow-page): who it is (path, state, triggers, permissions), its anatomy — the jobs ranked over `needs:` with their steps inside, and the artifact kinds each job's upload step declares as piles counted from the runs in the collected window — then its recent runs. Generic: ?repo=owner/name&workflow=<file> select the workflow; the page names no repository. Not in the top nav; the machinery view and the repository page are the ways in.",
+            "description": "ONE workflow, read top to bottom (req-github-core-workflow-page): who it is (path, state, triggers, permissions), its anatomy — the jobs ranked over `needs:` with their steps inside, and the artifact kinds each job's upload step declares as piles counted from the runs in the collected window — then its recent runs. Generic: ?workflow_id=… select the workflow; the page names no repository. Not in the top nav; the machinery view and the repository page are the ways in.",
             "slug": "/github_core/workflow",
             "discoverable": false,
             "layout": {
@@ -59,36 +59,31 @@
           "entity": {
             "entity_id": "01a0887c-31bf-7584-9d80-739e4f9a3170",
             "entity_type": "search",
-            "name": "github_core — workflow by repository and file",
+            "name": "github_core — workflow by id",
             "dimensions": {}
           },
           "node": {
-            "name": "github_core — workflow by repository and file",
+            "name": "github_core — workflow by id",
             "description": "The workflow the page is about (req-github-core-workflow-page-1). Envelope mode so the identity table receives the node with its typed fields.",
             "search_type": "gryphon",
             "root": "node",
             "definition": {
               "query": [
                 "MATCH (w:github_core__github_workflow)",
-                "WHERE w.data.full_name = $repo AND w.data.path CONTAINS $workflow",
+                "WHERE w.data.workflow_id = $workflow_id",
                 "RETURN w"
               ]
             },
             "input_schema": {
               "type": "object",
               "properties": {
-                "repo": {
-                  "type": "string",
-                  "description": "The repository's full_name (owner/name), from the page URL ?repo=… — required."
-                },
-                "workflow": {
-                  "type": "string",
-                  "description": "The workflow file, by path or file name (`.github/workflows/product-lines.yml` or `product-lines.yml`), from ?workflow=… — required. Matched by CONTAINS on the collected path, so give the file name with its extension."
+                "workflow_id": {
+                  "type": "integer",
+                  "description": "GitHub's numeric workflow id (github_workflow.workflow_id; the same value workflow_job.workflow_id and github_actions_run.configuration.workflow_id carry), from the page URL ?workflow_id=… — required. Typed integer so the page's string input is coerced before it meets the integer field."
                 }
               },
               "required": [
-                "repo",
-                "workflow"
+                "workflow_id"
               ]
             }
           }
@@ -165,25 +160,20 @@
             "definition": {
               "query": [
                 "MATCH (w:github_core__github_workflow)-[:DEFINES_JOB__github_core]->(j:github_core__workflow_job)",
-                "WHERE w.data.full_name = $repo AND w.data.path CONTAINS $workflow",
+                "WHERE w.data.workflow_id = $workflow_id",
                 "RETURN w, j"
               ]
             },
             "input_schema": {
               "type": "object",
               "properties": {
-                "repo": {
-                  "type": "string",
-                  "description": "The repository's full_name (owner/name), from the page URL ?repo=… — required."
-                },
-                "workflow": {
-                  "type": "string",
-                  "description": "The workflow file, by path or file name (`.github/workflows/product-lines.yml` or `product-lines.yml`), from ?workflow=… — required. Matched by CONTAINS on the collected path, so give the file name with its extension."
+                "workflow_id": {
+                  "type": "integer",
+                  "description": "GitHub's numeric workflow id (github_workflow.workflow_id; the same value workflow_job.workflow_id and github_actions_run.configuration.workflow_id carry), from the page URL ?workflow_id=… — required. Typed integer so the page's string input is coerced before it meets the integer field."
                 }
               },
               "required": [
-                "repo",
-                "workflow"
+                "workflow_id"
               ]
             }
           }
@@ -203,25 +193,20 @@
             "definition": {
               "query": [
                 "MATCH (w:github_core__github_workflow)-[:DEFINES_JOB__github_core]->(j:github_core__workflow_job)-[:DEPENDS_ON_JOB__github_core]->(k:github_core__workflow_job)",
-                "WHERE w.data.full_name = $repo AND w.data.path CONTAINS $workflow",
+                "WHERE w.data.workflow_id = $workflow_id",
                 "RETURN j, k"
               ]
             },
             "input_schema": {
               "type": "object",
               "properties": {
-                "repo": {
-                  "type": "string",
-                  "description": "The repository's full_name (owner/name), from the page URL ?repo=… — required."
-                },
-                "workflow": {
-                  "type": "string",
-                  "description": "The workflow file, by path or file name (`.github/workflows/product-lines.yml` or `product-lines.yml`), from ?workflow=… — required. Matched by CONTAINS on the collected path, so give the file name with its extension."
+                "workflow_id": {
+                  "type": "integer",
+                  "description": "GitHub's numeric workflow id (github_workflow.workflow_id; the same value workflow_job.workflow_id and github_actions_run.configuration.workflow_id carry), from the page URL ?workflow_id=… — required. Typed integer so the page's string input is coerced before it meets the integer field."
                 }
               },
               "required": [
-                "repo",
-                "workflow"
+                "workflow_id"
               ]
             }
           }
@@ -273,25 +258,20 @@
             "definition": {
               "query": [
                 "MATCH (w:github_core__github_workflow)<-[:EXECUTES_WORKFLOW__github_core]-(r:github_core__github_actions_run)",
-                "WHERE w.data.full_name = $repo AND w.data.path CONTAINS $workflow",
+                "WHERE w.data.workflow_id = $workflow_id",
                 "RETURN r"
               ]
             },
             "input_schema": {
               "type": "object",
               "properties": {
-                "repo": {
-                  "type": "string",
-                  "description": "The repository's full_name (owner/name), from the page URL ?repo=… — required."
-                },
-                "workflow": {
-                  "type": "string",
-                  "description": "The workflow file, by path or file name (`.github/workflows/product-lines.yml` or `product-lines.yml`), from ?workflow=… — required. Matched by CONTAINS on the collected path, so give the file name with its extension."
+                "workflow_id": {
+                  "type": "integer",
+                  "description": "GitHub's numeric workflow id (github_workflow.workflow_id; the same value workflow_job.workflow_id and github_actions_run.configuration.workflow_id carry), from the page URL ?workflow_id=… — required. Typed integer so the page's string input is coerced before it meets the integer field."
                 }
               },
               "required": [
-                "repo",
-                "workflow"
+                "workflow_id"
               ]
             }
           }

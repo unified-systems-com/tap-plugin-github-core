@@ -1,8 +1,9 @@
 """The workflow page bundle is internally consistent (req-github-core-workflow-page).
 
 Structure only — no grid: ids unique, every edge endpoint in the file (the projection's out-of-file
-targets are none), hotlink values equal their edge targets, every search declares both required
-inputs and reads them, the layout's module exists in the package, and no search names a repository.
+targets are none), hotlink values equal their edge targets, every search declares workflow_id as its one
+required integer input and reads it, the layout's module exists in the package, and no search names a
+repository.
 """
 
 from __future__ import annotations
@@ -47,15 +48,19 @@ def test_page_layout_slots_match_uses_panel_edges() -> None:
     assert page["node"]["discoverable"] is False
 
 
-def test_every_search_requires_and_reads_repo_and_workflow() -> None:
+def test_every_search_requires_and_reads_workflow_id_as_an_integer() -> None:
     b = _batch()
     searches = [n for n in b["nodes"] if n["entity"]["entity_type"] == "search"]
     assert len(searches) == 4
     for s in searches:
         schema = s["node"]["input_schema"]
-        assert set(schema["required"]) == {"repo", "workflow"}, s["node"]["name"]
+        assert set(schema["required"]) == {"workflow_id"}, s["node"]["name"]
+        # Page inputs arrive as strings and are coerced by this schema; a string or untyped
+        # declaration silently matches nothing against the integer field.
+        assert schema["properties"]["workflow_id"]["type"] == "integer", s["node"]["name"]
         query = "\n".join(s["node"]["definition"]["query"])
-        assert "$repo" in query and "$workflow" in query, s["node"]["name"]
+        assert "w.data.workflow_id = $workflow_id" in query, s["node"]["name"]
+        assert "$repo" not in query and "CONTAINS" not in query, s["node"]["name"]
         assert "unified-systems-com" not in query and "/tap" not in query
 
 

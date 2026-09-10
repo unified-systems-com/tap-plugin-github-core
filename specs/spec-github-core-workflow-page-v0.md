@@ -16,8 +16,8 @@ the steps inside them, and what each of them leaves behind. It is the level at w
 a slow job or an unexplained artifact is found.
 
 This page is that level, for one workflow, and it is generic: the same page reads any workflow in
-any collected repository. The page names nothing; `?repo=owner/name&workflow=<file>` select the
-workflow, and every search takes both as required inputs.
+any collected repository. The page names nothing; `?workflow_id=<GitHub numeric workflow id>` selects
+the workflow, and every search takes it as its one required input.
 
 Two ideas carry it:
 
@@ -52,7 +52,7 @@ the workflow with the *aggregate* of its runs painted on: what it always is, and
 
 | RID | Name | Status | Summary |
 | --- | --- | :---: | --- |
-| req-github-core-workflow-page | [The Page](#the-page) | Implemented | `/github_core/workflow?repo=…&workflow=…` — identity, anatomy, runs; not in the top nav; every search takes both inputs |
+| req-github-core-workflow-page | [The Page](#the-page) | Implemented | `/github_core/workflow?workflow_id=…` — identity, anatomy, runs; not in the top nav; every search takes the one input |
 | req-github-core-workflow-anatomy | [The Anatomy Module](#the-anatomy-module) | Implemented | `workflow-anatomy.js`: jobs ranked over needs, steps inside jobs, reusable-call jobs marked, unresolved needs to a trailing column |
 | req-github-core-workflow-artifact-kinds | [Artifact Kinds](#artifact-kinds) | Implemented | kinds from upload steps' `with.name` templates, matched to observed artifacts, piles per kind in three states |
 
@@ -64,24 +64,25 @@ RID: `req-github-core-workflow-page`
 Status: `Implemented`
 
 Route `/github_core/workflow`, not discoverable in the top navigation (the machinery view and the
-repository page are the ways in). Inputs on the URL: `repo` (the repository's `full_name`) and
-`workflow` (the workflow file by path or file name — matched by `CONTAINS` on the collected `path`, so
-`product-lines.yml` and `.github/workflows/product-lines.yml` both resolve; a bare `fuzz.yml` would
-match every file ending in it and is the caller's mistake). Three rows, top to bottom:
+repository page are the ways in). One input on the URL: `workflow_id`, GitHub's numeric id for the
+workflow. It is the key because it is the one value every node that should reach this page carries —
+`github_workflow.workflow_id`, `workflow_job.workflow_id` and `github_actions_run.configuration.workflow_id`
+— and it is exact. The v0.1.0 contract, `?repo=<full_name>&workflow=<file>` matched by `CONTAINS`, failed
+on both counts: a run carries no workflow path, so a runs table could not link here, and a bare
+`fuzz.yml` matched every file ending in it. Three rows, top to bottom:
 
 | Slot | Panel | What it answers |
 | --- | --- | --- |
 | `identity` | table panel over the workflow node | which file, its state, what starts it, the permissions it grants, the link to GitHub |
 | `anatomy` | graph panel with the anatomy projection | what the workflow does — see the next requirement |
 | `runs` | table panel over the workflow's runs, newest first | what it lately did — trigger, run number, branch, conclusion, elapsed, started |
-
 The page mounts the panels by `USES_PANEL` edge; a consumer page may instead mount the same panels
 with fixed inputs (tap#359) to pin a workflow.
 
 #### Implementation
 
 `tap_plugin/github_core/grift/workflow-page.grift.json` — one batch: the page node, three panels, four
-searches (the workflow by repository and file; the anatomy scene `workflow —DEFINES_JOB→ job`; the job
+searches (the workflow by id; the anatomy scene `workflow —DEFINES_JOB→ job`; the job
 dependencies `job —DEPENDS_ON_JOB→ job` scoped to the workflow; the runs `run —EXECUTES_WORKFLOW→
 workflow`), and the projection with its elevation and layout. Registered in the manifest's `[grift]`
 table as `workflow-page`. Structural test: `tests/test_workflow_page_bundle.py`.
@@ -90,10 +91,10 @@ table as `workflow-page`. Structural test: `tests/test_workflow_page_bundle.py`.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-workflow-page-1 | Selects One Workflow | Implemented | Every search declares `repo` and `workflow` as required inputs and reads both; with both given, the identity row holds exactly the matching workflow node. | `test_every_search_requires_and_reads_repo_and_workflow` |
+| req-github-core-workflow-page-1 | Selects One Workflow | Implemented | Every search declares `workflow_id` as its one required input, typed `integer`, and reads it; with it given, the identity row holds exactly the matching workflow node. | `test_every_search_requires_and_reads_workflow_id_as_an_integer`. Typed integer because page inputs arrive as strings and are coerced by the search's own schema. |
 | req-github-core-workflow-page-2 | Identity Row | Implemented | Name (linking to GitHub), file, state, triggers, top-level permissions. | |
 | req-github-core-workflow-page-3 | Runs Newest First | In Development | The runs table lists this workflow's collected runs by `run_started_at` descending with trigger icon, run link, branch, conclusion, elapsed, started. | The rows render and sort by header; newest-first on arrival waits on tap#372 (table `initial_sort`) — Gryphon refuses ORDER BY on the multi-hop match and run nodes carry only `workflow_id`. Column config restates git-serious's status wall subset. |
-| req-github-core-workflow-page-4 | Not In The Nav, Reachable By URL | Implemented | `discoverable: false`; `GET /github_core/workflow?repo=<r>&workflow=<f>` returns 200 with the three slots. | *Observed* 2026-09-09 on the 8010 grid for unified-systems-com/tap product-lines.yml. |
+| req-github-core-workflow-page-4 | Not In The Nav, Reachable By URL | Implemented | `discoverable: false`; `GET /github_core/workflow?workflow_id=<n>` returns 200 with the three slots. | *Observed* 2026-09-09 on the 8010 grid under the v0.1.0 contract; re-observation under `workflow_id` pending on the demo-dev grid. |
 
 ### The Anatomy Module
 ----
