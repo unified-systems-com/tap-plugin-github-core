@@ -384,11 +384,64 @@
                   "header_tooltip": "Wall-clock time from start to completion."
                 },
                 {
+                  "field": "data.completed_at",
+                  "title": "vs usual",
+                  "formatter": "baselineRatio",
+                  "width": 90,
+                  "formatter_params": {
+                    "start": "data.run_started_at",
+                    "end": "data.completed_at",
+                    "require_field": "data.conclusion",
+                    "baseline": {
+                      "group_by": [
+                        "data.event"
+                      ],
+                      "where": {
+                        "data.conclusion": "success"
+                      },
+                      "min_n": 3,
+                      "flag_ratio": 1.5,
+                      "mad_k": 3
+                    }
+                  },
+                  "header_tooltip": "This run's elapsed over the median of this workflow's other successful runs with the same trigger. ▲ slower, ▼ faster, plain = within, – = not enough history (see n)."
+                },
+                {
+                  "field": "data.completed_at",
+                  "title": "n",
+                  "formatter": "baselineN",
+                  "width": 55,
+                  "formatter_params": {
+                    "start": "data.run_started_at",
+                    "end": "data.completed_at",
+                    "require_field": "data.conclusion",
+                    "baseline": {
+                      "group_by": [
+                        "data.event"
+                      ],
+                      "where": {
+                        "data.conclusion": "success"
+                      },
+                      "min_n": 3,
+                      "flag_ratio": 1.5,
+                      "mad_k": 3
+                    }
+                  },
+                  "header_tooltip": "Comparable runs (same trigger, successful) loaded on this page to form the baseline; grey below 3."
+                },
+                {
                   "field": "data.run_started_at",
                   "title": "Started",
                   "formatter": "datetime",
                   "widthGrow": 1,
                   "header_tooltip": "When the run started, in your local time. Hover for UTC."
+                },
+                {
+                  "field": "data.completed_at",
+                  "title": "Completed",
+                  "formatter": "datetime",
+                  "widthGrow": 1,
+                  "header_tooltip": "When the run completed, in your local time. Hover for UTC."
                 }
               ]
             }
