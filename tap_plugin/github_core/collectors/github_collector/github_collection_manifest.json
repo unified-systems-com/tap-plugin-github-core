@@ -246,6 +246,58 @@
       "description": "Deployment environments and their protection rules (req-github-core-environments), delivered inside the config-layer query. The REST `/environments` endpoint documents an Environments permission; the GraphQL path returned them under the permissions already in this union, so nothing wider is requested. `deployment_branch_policy` is NOT available here and is left null (unobserved) rather than defaulted."
     },
     {
+      "name": "repository_secrets",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/actions/secrets",
+      "query": {
+        "per_page": "100"
+      },
+      "item_path": "secrets[*]",
+      "target_entity_type": "github_core__actions_secret",
+      "fields": [
+        "name",
+        "created_at",
+        "updated_at"
+      ],
+      "permission": "repository:secrets:read",
+      "description": "Actions secret NAMES for one repository (req-github-core-actions-secrets). GitHub's secrets API returns names and timestamps ONLY — a secret's value is write-only and no credential can read it back — so nothing sensitive crosses this boundary and none is stored. The names are what make the join possible: a workflow's YAML says which secrets it references, this says which exist, and the difference is a reference that resolves to nothing (the job receives an empty string at runtime rather than an error) or a secret nothing consumes. 401/403/404 records a degradation and yields no nodes, so a credential without the permission reads as NOT OBSERVED rather than as a repository with no secrets. Repository scope is one of three: see `organization_secrets` and `environment_secrets`, which must all be read before a reference can honestly be called unresolved."
+    },
+    {
+      "name": "organization_secrets",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}/actions/secrets",
+      "query": {
+        "per_page": "100"
+      },
+      "item_path": "secrets[*]",
+      "target_entity_type": "github_core__actions_secret",
+      "fields": [
+        "name",
+        "visibility",
+        "created_at",
+        "updated_at"
+      ],
+      "permission": "organization:secrets:read",
+      "description": "Actions secret NAMES held at the ACCOUNT, read once per run rather than per repository (req-github-core-actions-secrets). Names and timestamps only, as at repository scope; `visibility` additionally says how widely the organisation shares each one (all / private / selected repositories) and is the blast-radius field. This scope is why the surface cannot be repository-only: measured on this estate, the most-shared referenced names exist at organisation scope and in no repository, so a collector reading repository scope alone would report a dozen workflows as naming secrets that do not exist. A 404 means the owner is a user account, which has no such surface at all — recorded as information, never as a degradation; 401/403 is a degradation and the scope reads as not observed."
+    },
+    {
+      "name": "environment_secrets",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/environments/{environment_name}/secrets",
+      "query": {
+        "per_page": "100"
+      },
+      "item_path": "secrets[*]",
+      "target_entity_type": "github_core__actions_secret",
+      "fields": [
+        "name",
+        "created_at",
+        "updated_at"
+      ],
+      "permission": "repository:secrets:read",
+      "description": "Actions secret NAMES held by one deployment environment (req-github-core-actions-secrets). Names and timestamps only. Collected per environment already observed on the repository, so it costs one call each rather than a discovery walk. Without this scope every secret a deployment job reads from its environment would be reported as naming nothing — a false alarm on precisely the jobs that hold production credentials. The reference join still cannot see WHICH environment a job selects at runtime when the `environment:` key is expression-driven; a resolved name here means the repository holds a secret by that name in some environment, not that this job will receive it."
+    },
+    {
       "name": "caches",
       "kind": "rest_endpoint",
       "path": "/repos/{owner}/{repo}/actions/caches",

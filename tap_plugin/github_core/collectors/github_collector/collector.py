@@ -12,7 +12,7 @@ import fnmatch
 import logging
 import re
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NamedTuple
 from urllib.parse import quote
 
 from tap_plugin.git_core.identity import (
@@ -54,6 +54,7 @@ from .identity import (
     account_id,
     actions_artifact_id,
     actions_cache_id,
+    actions_secret_id,
     app_installation_id,
     code_scanning_alert_id,
     code_scanning_analysis_id,
@@ -90,6 +91,7 @@ from .parser import (
     PIN_UNRESOLVED,
     is_pinned,
     parse_workflow_yaml,
+    secret_names_in,
 )
 from .secret import (
     GITHUB_SECRET_REF,
@@ -133,6 +135,54 @@ _SITE_NO_STABLE_REPO_ID = "9aa2"
 _SITE_RULESET_BYPASS_UNOBSERVABLE = "d75a"
 _SITE_RULESET_DETAIL_DEGRADED = "21d1"
 _SITE_CACHE_DEGRADED = "21fd"
+class SecretListing(NamedTuple):
+    """One secret listing: the rows that came back, and whether that is the whole set.
+
+    Two fields rather than an optional list, because "asked and got a prefix" is a real third
+    answer and it is the one that hides — it returns plausible names and looks like success.
+    Only `complete` may be read as "this scope was enumerated".
+    """
+
+    rows: list[dict[str, Any]]
+    complete: bool
+
+
+class OrgSecretReach(NamedTuple):
+    """Which repositories an organisation secret can actually be read from.
+
+    GitHub's `visibility` is three-valued and only one value is self-explaining. `all` reaches
+    every repository; `private` reaches the private and internal ones, which on an all-public
+    estate is none of them; `selected` names a list, and that list IS readable — measured
+    2026-09-11 with the plugin's own App installation token against a real `selected` secret, so
+    reach is a fact to derive rather than a state to leave uncertain (github-core#107).
+
+    `unknown` is kept for the case that remains genuinely undecidable: the repository list was
+    refused or truncated. Three answers, never two.
+    """
+
+    kind: str  #: "all" | "selected" | "private" | "unknown"
+    repos: frozenset[str]  #: full names; meaningful only when `kind == "selected"`
+
+    def reaches(self, full_name: str, repo_visibility: str) -> bool | None:
+        """True / False / None — None meaning the list could not be read."""
+        if self.kind == "all":
+            return True
+        if self.kind == "selected":
+            return full_name in self.repos
+        if self.kind == "private":
+            # GitHub shares a `private` organisation secret with private AND internal
+            # repositories. A public repository is reached by neither.
+            return repo_visibility.lower() in ("private", "internal")
+        return None
+
+
+#: Secret-scope reads. Each scope gets its own site because "which scope could not be read" is
+#: the whole question a reader of `scopes_read` is asking.
+_SITE_SECRETS_DEGRADED = "9fdd"
+_SITE_ORG_SECRETS_DEGRADED = "8a3a"
+_SITE_ORG_SECRETS_SKIPPED = "7bc8"
+_SITE_ENV_SECRETS_DEGRADED = "bae3"
+_SITE_SECRET_SCOPE_INCOMPLETE = "50f0"
 _SITE_RULE_SUITE_DEGRADED = "3095"
 _SITE_RULE_SUITE_FOUND = "3b60"
 _SITE_CACHES_TRUNCATED = "0f41"
@@ -779,6 +829,18 @@ class GithubCollector(CollectorBase):
         # under each.
         self._pat_ruleset_status: str = "untried"
         self._emitted_installation_ids: set[str] = set()
+        #: Account-scoped Actions secret names, upper-cased, read once per run. Every
+        #: repository's workflow walk resolves `${{ secrets.X }}` against this map merged under
+        #: its own.
+        self._org_secrets: dict[str, list[Any]] = {}
+        #: Each organisation secret's resolved REACH, upper-cased name -> OrgSecretReach. Built
+        #: once per run alongside the listing; consulted per repository during the walk, because
+        #: whether a secret reaches somewhere is a question about a repository, not about the
+        #: secret alone.
+        self._org_secret_reach: dict[str, OrgSecretReach] = {}
+        #: Whether that listing was actually READ. False means the scope is unobserved, and no
+        #: workflow may report a name as naming nothing on the strength of its absence.
+        self._org_secrets_observed: bool = False
         # What `~DEFAULT_BRANCH` resolves to, keyed `owner/repo#refs/heads/x`. Repo-scoped on
         # purpose: one repository's default is `main` and another's is `master`, and a bare ref
         # path would let the first repo's default mark the second repo's same-named branch.
@@ -881,6 +943,13 @@ class GithubCollector(CollectorBase):
 
         # --- installed Apps: an App-only surface (req-github-core-app-installations).
         self._collect_app_installations(client, owner, nodes, edges)
+
+        # --- organisation secret NAMES: an account surface, read once and consulted by every
+        # repository's workflow walk below, so it must land BEFORE the walk rather than after it
+        # like packages and custom properties.
+        self._org_secrets, self._org_secrets_observed = self._collect_org_secrets(
+            client, owner, nodes, edges
+        )
 
         # --- collection phase: per-repo walk ---
         failed: list[str] = []
@@ -1478,6 +1547,23 @@ class GithubCollector(CollectorBase):
         env_uuid_by_name = self._emit_environments(
             full_name, repo_uuid, repo_dims, nodes, edges
         )
+        # Secret NAMES, before the workflow walk, so a workflow's `${{ secrets.X }}` reference can
+        # resolve against something already in hand rather than dangling. Three scopes feed one
+        # lookup: the organisation's (read once per run, before the walk), this repository's, and
+        # each of its environments'.
+        repo_secrets, secret_scopes_read = self._collect_secrets(
+            client, full_name, repo_uuid, repo_dims, env_uuid_by_name, nodes, edges
+        )
+        # Merged by CONCATENATION, not by override. `{**org, **repo}` silently dropped the
+        # organisation secret whenever a repository held the same name, so a workflow naming it
+        # got one edge to whichever scope happened to be written last.
+        secret_uuid_by_name: dict[str, list[Any]] = {
+            name: list(uuids) for name, uuids in self._org_secrets.items()
+        }
+        for name, uuids in repo_secrets.items():
+            secret_uuid_by_name.setdefault(name, []).extend(uuids)
+        if self._org_secrets_observed:
+            secret_scopes_read = ["organization", *secret_scopes_read]
         # Pull requests come from the pull-request layer merged into the same config map; the
         # head/base edges target the neutral refs and commits emitted just above, and dangle (are
         # dropped) when those were not seen.
@@ -1533,6 +1619,72 @@ class GithubCollector(CollectorBase):
                     "DEFINES_WORKFLOW__github_core", repo_uuid, wf_uuid, actions_dims
                 )
             )
+            # Which secrets this file NAMES, and which of those names resolve to a secret that
+            # exists. A reference that resolves to nothing is the interesting case: GitHub hands
+            # the job an empty string rather than failing, so the workflow runs and quietly does
+            # the wrong thing. It is recorded ON the workflow rather than as a node, because
+            # minting a secret node from a reference would assert that a credential exists on the
+            # evidence that somebody typed its name.
+            #
+            # `scopes_read` rides along because "unresolved" is only a claim about the scopes that
+            # were actually readable. Three states, never two: resolved, unresolved, or not
+            # observable — a reader must be able to tell an unset secret from a refused listing.
+            # ONE EDGE PER DEFINING SCOPE. A name held at both organisation and repository
+            # scope is two credentials, and this edge asserts "this file names a secret that
+            # exists HERE" — it is a statement about the file, as its declaration says, not a
+            # prediction of which one a run receives. Resolving by GitHub's precedence instead
+            # would require knowing which environment the job selects, which is chosen at
+            # runtime and is a named blind spot; picking one would manufacture a claim this
+            # collector cannot support.
+            referenced = secret_names_in(raw_yaml)
+            unresolved = []
+            reach_uncertain = []
+            repo_visibility = str(repo_payload.get("visibility", ""))
+            for secret_name in sorted(referenced):
+                key = secret_name.upper()
+                targets = secret_uuid_by_name.get(key) or []
+                if not targets:
+                    unresolved.append(secret_name)
+                    continue
+                # A name held at repository or environment scope is readable here by definition.
+                # One held ONLY by the organisation has to clear its sharing policy first: a
+                # `selected` secret does not reach the rest of the organisation, and a `private`
+                # one reaches no public repository at all.
+                reach: bool | None = True
+                if key not in repo_secrets:
+                    # Defaulting to `unknown` rather than `all`: an organisation secret always
+                    # gets a reach entry written beside it, so a missing one is an internal
+                    # inconsistency, and guessing `all` there would claim reach we never derived.
+                    reach = self._org_secret_reach.get(
+                        key, OrgSecretReach("unknown", frozenset())
+                    ).reaches(full_name, repo_visibility)
+                if reach is False:
+                    # The secret exists and this workflow names it, but this repository cannot
+                    # read it, so at runtime the step receives an empty string — operationally
+                    # identical to the name not existing, which is what `unresolved` means. No
+                    # edge: a credential this workflow cannot read is not one it uses.
+                    unresolved.append(secret_name)
+                    continue
+                if reach is None:
+                    # The repository list was refused or truncated. Not reachable, not
+                    # unreachable — its own answer rather than a rounding to either.
+                    reach_uncertain.append(secret_name)
+                for target in targets:
+                    edges.append(
+                        self._edge("REFERENCES_SECRET__github_core", wf_uuid, target, actions_dims)
+                    )
+            # Written whenever a BODY was read, including when it names no secret — an empty
+            # `referenced` is "read, and it references none", which is a different claim from the
+            # tag being absent ("this file was never read"). Forty of this estate's 117 workflows
+            # carry no body at all, and collapsing the two would let a third of the estate read as
+            # secret-free.
+            if raw_yaml:
+                wf_envelope["node"]["tags"]["secret_refs"] = {
+                    "referenced": sorted(referenced),
+                    "unresolved": unresolved,
+                    "reach_uncertain": reach_uncertain,
+                    "scopes_read": secret_scopes_read,
+                }
             self._register_workflow(
                 full_name,
                 wf.get("path", ""),
@@ -4193,6 +4345,350 @@ class GithubCollector(CollectorBase):
             "configuration": analysis,
             "tags": {},
         }
+
+    def _collect_secrets(
+        self,
+        client: GithubClient,
+        full_name: str,
+        repo_uuid: Any,
+        dims: dict[str, str],
+        env_uuid_by_name: dict[str, Any],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> tuple[dict[str, list[Any]], list[str]]:
+        """Collect this repository's Actions secret NAMES — repository scope and each environment.
+
+        Never a value. GitHub's secrets API is names-and-timestamps only: the value is write-only
+        and no credential can read it back, which is what makes this node safe to hold. The model
+        and both edge declarations say the same thing.
+
+        Returns ``(upper-cased name -> [uuid, ...], scopes fully enumerated)``.
+
+        The value is a LIST because one name can exist at more than one scope, and those are
+        different credentials. Collapsing them to one uuid meant at most one `REFERENCES_SECRET`
+        edge per name and made which scope won depend on dict iteration order.
+
+        The second element is the load-bearing one: a caller deciding that a workflow's
+        `${{ secrets.X }}` reference resolves to nothing may only say so about the scopes it
+        actually enumerated IN FULL. A 403 that silently produced an empty map would turn "the
+        credential was refused" into "this repository has no secrets"; a listing that stopped at
+        the page cap does the same thing more quietly, because the names it did return make it
+        look like it worked.
+        """
+        scopes_read: list[str] = []
+        out: dict[str, list[Any]] = {}
+
+        listing = self._secret_rows(
+            client,
+            f"/repos/{full_name}/actions/secrets",
+            _SITE_SECRETS_DEGRADED,
+            "SECRETS_UNREADABLE",
+            f"Repository secret names inaccessible for {full_name}",
+            {"repo": full_name},
+        )
+        # The rows are emitted whichever way completeness went — a secret we SAW exists, and a
+        # truncated page does not make the names before it imaginary. Only the claim "this scope
+        # was enumerated" is withheld.
+        for item in listing.rows:
+            self._emit_secret(
+                item,
+                scope="repository",
+                key=full_name,
+                owner_login=full_name.split("/")[0],
+                full_name=full_name,
+                environment_name="",
+                source_uuid=repo_uuid,
+                dims=dims,
+                nodes=nodes,
+                edges=edges,
+                out=out,
+            )
+        if listing.complete:
+            scopes_read.append("repository")
+
+        # Environment secrets. Without these, every `${{ secrets.X }}` a deployment job reads from
+        # its environment would be reported as naming nothing — a false alarm on exactly the jobs
+        # that hold the production credentials.
+        env_complete = bool(env_uuid_by_name)
+        for env_name, env_uuid in env_uuid_by_name.items():
+            env_listing = self._secret_rows(
+                client,
+                f"/repos/{full_name}/environments/{quote(env_name, safe='')}/secrets",
+                _SITE_ENV_SECRETS_DEGRADED,
+                "ENVIRONMENT_SECRETS_UNREADABLE",
+                f"Environment secret names inaccessible for {full_name} environment {env_name}",
+                {"repo": full_name, "environment": env_name},
+            )
+            if not env_listing.complete:
+                # One unreadable or truncated environment costs the whole ENVIRONMENT scope its
+                # claim, because a reference resolves against the repository's environments as a
+                # set and we can no longer say we have that set.
+                env_complete = False
+            for item in env_listing.rows:
+                self._emit_secret(
+                    item,
+                    scope="environment",
+                    key=f"{full_name}/{env_name}",
+                    owner_login=full_name.split("/")[0],
+                    full_name=full_name,
+                    environment_name=env_name,
+                    source_uuid=env_uuid,
+                    dims=dims,
+                    nodes=nodes,
+                    edges=edges,
+                    out=out,
+                )
+        if env_complete:
+            scopes_read.append("environment")
+        return out, scopes_read
+
+    def _collect_org_secrets(
+        self,
+        client: GithubClient,
+        owner: str | None,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> tuple[dict[str, list[Any]], bool]:
+        """Collect the ACCOUNT's Actions secret names, once per run.
+
+        An account surface, like packages and custom properties: one organisation secret is
+        readable by every repository it is shared with, and fetching it per repository would be
+        one identical answer repeated twenty-four times.
+
+        This is the scope that matters most for reference resolution. Measured on this estate,
+        the two most-referenced names after the unresolved one (`OPENAI_API_KEY`, `XAI_API_KEY`,
+        six workflows each) live at organisation scope and at NO repository — so a collector that
+        read only repository scope would report twelve workflows as naming a secret that does not
+        exist, and every one of those reports would be wrong.
+
+        Returns ``(upper-cased name -> [uuid, ...], enumerated in full)``. False means the scope
+        was not fully read, and a caller must not conclude anything from a name's absence.
+        """
+        if owner is None:
+            self.record_info(
+                _SITE_ORG_SECRETS_SKIPPED,
+                "ORG_SECRETS_SKIPPED",
+                "Organisation secrets are an account surface; a repos-only scope names no "
+                "account, so they were not collected.",
+            )
+            return {}, False
+        listing = self._secret_rows(
+            client,
+            f"/orgs/{owner}/actions/secrets",
+            _SITE_ORG_SECRETS_DEGRADED,
+            "ORG_SECRETS_UNREADABLE",
+            f"Organisation secret names inaccessible for {owner}",
+            {"owner": owner},
+            # A user account has no organisation secrets endpoint at all. That 404 is "nothing to
+            # ask", not "refused", and it must not be reported as a degradation.
+            absent_statuses=(404,),
+            absent_code="ORG_SECRETS_NOT_AN_ORGANISATION",
+            absent_message=(
+                f"{owner} answered 404 for organisation secrets — a user account has no such "
+                f"surface. No organisation-scoped secret can exist, so references resolve "
+                f"against repository and environment scope alone."
+            ),
+            absent_site=_SITE_ORG_SECRETS_SKIPPED,
+        )
+        account_uuid = account_id(owner)
+        dims = {
+            "github.platform": "github.com",
+            "github.owner": owner,
+            "github.surface": "secrets",
+            "github.observation": "declaration",
+        }
+        out: dict[str, list[Any]] = {}
+        for item in listing.rows:
+            # Reach, derived now rather than left open. An organisation secret shared with
+            # `selected` repositories does not reach the rest of the organisation, and a
+            # workflow elsewhere naming it receives an empty string at runtime — the exact
+            # silent failure this surface exists to catch, which resolution would otherwise
+            # report as a working reference.
+            self._org_secret_reach[str(item.get("name") or "").upper()] = self._reach_of(
+                client, owner, item
+            )
+            self._emit_secret(
+                item,
+                scope="organization",
+                key=owner,
+                owner_login=owner,
+                full_name="",
+                environment_name="",
+                source_uuid=account_uuid,
+                dims=dims,
+                nodes=nodes,
+                edges=edges,
+                out=out,
+            )
+        return out, listing.complete
+
+    def _reach_of(self, client: GithubClient, owner: str, item: dict[str, Any]) -> OrgSecretReach:
+        """Resolve one organisation secret's sharing policy into a concrete reach.
+
+        Only `selected` costs a request, and only one per such secret per RUN — not per
+        repository. Estates that share everything with `all` pay nothing.
+        """
+        name = str(item.get("name") or "")
+        visibility = str(item.get("visibility") or "")
+        if visibility in ("all", "private"):
+            return OrgSecretReach(visibility, frozenset())
+        if visibility != "selected":
+            # A policy GitHub has not documented to us. Say so rather than guess a default;
+            # guessing `all` here would be the reassuring direction.
+            self.record_warn(
+                _SITE_ORG_SECRETS_DEGRADED,
+                "ORG_SECRET_VISIBILITY_UNKNOWN",
+                f"Organisation secret {name} reports visibility {visibility!r}, which this "
+                f"collector does not know how to resolve; its reach is left undecided.",
+                message_data={"owner": owner, "visibility": visibility},
+            )
+            return OrgSecretReach("unknown", frozenset())
+        try:
+            rows = client.get_paginated(
+                f"/orgs/{owner}/actions/secrets/{quote(name, safe='')}/repositories",
+                params={"per_page": "100"},
+                item_path="repositories",
+            )
+        except GithubAPIError as exc:
+            self.record_warn(
+                _SITE_ORG_SECRETS_DEGRADED,
+                f"ORG_SECRET_REPOS_UNREADABLE_{exc.status}",
+                f"Selected-repository list for organisation secret {name} unreadable "
+                f"({exc.status}); its reach is NOT observed, which is not the same as reaching "
+                f"nothing.",
+                message_data={"owner": owner, "secret": name, "status": exc.status},
+            )
+            return OrgSecretReach("unknown", frozenset())
+        if not client.last_walk_complete:
+            self.record_warn(
+                _SITE_SECRET_SCOPE_INCOMPLETE,
+                "ORG_SECRET_REPOS_INCOMPLETE",
+                f"Selected-repository list for organisation secret {name} stopped at the page "
+                f"cap; a repository missing from a PREFIX is not a repository out of reach.",
+                message_data={"owner": owner, "secret": name},
+            )
+            return OrgSecretReach("unknown", frozenset())
+        return OrgSecretReach(
+            "selected",
+            frozenset(str(r.get("full_name") or "") for r in rows if isinstance(r, dict)),
+        )
+
+    def _secret_rows(
+        self,
+        client: GithubClient,
+        path: str,
+        site: str,
+        code: str,
+        message: str,
+        message_data: dict[str, Any],
+        *,
+        absent_statuses: tuple[int, ...] = (),
+        absent_code: str = "",
+        absent_message: str = "",
+        absent_site: str = "",
+    ) -> SecretListing:
+        """Paginated secret listing as ``(rows, complete)``.
+
+        THREE states, not two, which is the whole discipline of this surface:
+
+        * ``([...], True)``  — asked, and this is the set. Only this may be called a read scope.
+        * ``([], False)``    — could not ask (refused, or no such surface). Nothing is known.
+        * ``([...], False)`` — asked and got a PREFIX: the walk hit the page cap with a `next`
+          link still pending. The names returned are real, but their absence proves nothing.
+
+        The third state is the one that hides. A refusal is loud and returns nothing; a truncated
+        walk returns plausible names and looks like success, so a caller that only checked for
+        emptiness would list the scope as read and then report every name on an unfetched page as
+        naming nothing at all.
+
+        A status in `absent_statuses` means the surface does not exist for this target rather
+        than that it was refused — recorded as information rather than as a degradation, and
+        still incomplete, so no caller treats a nonexistent scope as an observed-empty one.
+        """
+        try:
+            rows = client.get_paginated(path, params={"per_page": "100"}, item_path="secrets")
+        except GithubAPIError as exc:
+            if exc.status in absent_statuses:
+                self.record_info(absent_site or site, absent_code or code, absent_message or message)
+                return SecretListing([], False)
+            if exc.status in (401, 403, 404):
+                self.record_warn(
+                    site,
+                    f"{code}_{exc.status}",
+                    f"{message}: {exc.body[:120]}",
+                    message_data={**message_data, "status": exc.status},
+                )
+                return SecretListing([], False)
+            raise
+        complete = bool(client.last_walk_complete)
+        if not complete:
+            self.record_warn(
+                _SITE_SECRET_SCOPE_INCOMPLETE,
+                "SECRET_LISTING_INCOMPLETE",
+                f"Secret listing for {path} stopped before the end of the Link chain; the names "
+                f"collected are a prefix, not the set, so this scope is NOT reported as read and "
+                f"no reference may be called unresolved against it.",
+                message_data=message_data,
+            )
+        return SecretListing([r for r in rows if isinstance(r, dict)], complete)
+
+    def _emit_secret(
+        self,
+        item: dict[str, Any],
+        *,
+        scope: str,
+        key: str,
+        owner_login: str,
+        full_name: str,
+        environment_name: str,
+        source_uuid: Any,
+        dims: dict[str, str],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        out: dict[str, list[Any]],
+    ) -> None:
+        """One secret node plus the DEFINES_SECRET edge from whatever holds it.
+
+        The node carries the name as GitHub returned it; the returned map is keyed upper-case,
+        because that is the only form a reference can be matched on (GitHub secret names are not
+        case-sensitive). It APPENDS rather than assigns: the same name at two scopes is two
+        credentials and both belong in the resolution.
+        """
+        name = str(item.get("name") or "")
+        if not name:
+            return
+        uuid_ = actions_secret_id(scope, key, name)
+        out.setdefault(name.upper(), []).append(uuid_)
+        nodes.append(
+            node_envelope(
+                entity_id=uuid_,
+                entity_type="github_core__actions_secret",
+                name=name,
+                dimensions={**dims, "github.surface": "secrets"},
+                fields={
+                    "scope": scope,
+                    "owner_login": owner_login,
+                    "full_name": full_name,
+                    "environment_name": environment_name,
+                    "name": name,
+                    # Organisation secrets carry a sharing policy; repository and environment
+                    # secrets have none, and "" says so rather than implying a default.
+                    "visibility": str(item.get("visibility") or ""),
+                    "created_at": item.get("created_at"),
+                    "updated_at": item.get("updated_at"),
+                    "configuration": {},
+                    "tags": {},
+                },
+            )
+        )
+        edges.append(
+            self._edge(
+                "DEFINES_SECRET__github_core",
+                source_uuid,
+                uuid_,
+                {**dims, "github.surface": "secrets"},
+            )
+        )
 
     def _collect_caches(
         self,

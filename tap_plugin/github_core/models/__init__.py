@@ -2,6 +2,7 @@
 
 from tap_plugin.github_core.models.actions_artifact import ActionsArtifact
 from tap_plugin.github_core.models.actions_cache import ActionsCache
+from tap_plugin.github_core.models.actions_secret import ActionsSecret
 from tap_plugin.github_core.models.app_installation import AppInstallation
 from tap_plugin.github_core.models.code_scanning_alert import CodeScanningAlert
 from tap_plugin.github_core.models.code_scanning_analysis import CodeScanningAnalysis
@@ -29,6 +30,7 @@ from tap_plugin.github_core.models.workflow_job import WorkflowJob
 __all__ = [
     "ActionsArtifact",
     "ActionsCache",
+    "ActionsSecret",
     "CommitObservation",
     "AppInstallation",
     "CodeScanningAlert",

@@ -170,6 +170,22 @@ def environment_id(full_name: str, name: str) -> UUID:
     return _id("github_core__github_environment", f"{full_name}#{name}")
 
 
+def actions_secret_id(scope: str, owner_or_repo: str, name: str) -> UUID:
+    """One id per (scope, owner-or-repo, name), with the name case-folded.
+
+    Scope is in the key because an organisation secret and a repository secret can share a name
+    and are different credentials — collapsing them would make an org secret look like it lives
+    in whichever repository was collected last. For an environment secret, `owner_or_repo` is
+    `owner/repo/environment`, so two environments of one repository stay distinct.
+
+    The name is upper-cased because GitHub secret names are NOT case-sensitive: a workflow
+    writing `${{ secrets.harness_pat }}` and one writing `${{ secrets.HARNESS_PAT }}` read the
+    same credential, and two nodes here would say they are two. Observed on this estate — two of
+    the nine referenced names are written lower-case.
+    """
+    return _id("github_core__actions_secret", f"{scope}#{owner_or_repo}#{name.upper()}")
+
+
 def actions_cache_id(full_name: str, cache_id_int: int | str) -> UUID:
     return _id("github_core__actions_cache", f"{full_name}#{cache_id_int}")
 

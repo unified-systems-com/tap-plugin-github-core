@@ -556,3 +556,46 @@ def _string_values(obj: Any) -> list[str]:
         elif isinstance(node, list):
             stack.extend(node)
     return out
+
+
+#: A `${{ ... }}` expression. Everything the `secrets` context can legally appear in is one of
+#: these: GitHub rejects the context in an `if:` condition outright, so there is no bare form to
+#: also match.
+_EXPRESSION_RE = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
+#: A secret reference INSIDE such an expression.
+_SECRET_REF_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def secret_names_in(raw_yaml: str) -> set[str]:
+    """Every secret NAME a workflow file references, as written.
+
+    Textual on purpose, but scoped to `${{ ... }}` spans. The alternative is walking the parsed
+    tree, and a secret can be referenced from anywhere an expression is allowed — `env:`, `with:`,
+    a `run:` body, a job-level `secrets:` mapping — so a structural walk would have to enumerate
+    those positions and would silently miss the next one GitHub adds.
+
+    Scoping to the expression matters because the bare pattern also fires on PROSE. A comment
+    explaining why `secrets.FOO` is handled a certain way, or a `run:` line echoing the string,
+    would each mint a reference to a secret the file never reads — a manufactured finding, which
+    on this surface is worse than a missed one.
+
+    `GITHUB_TOKEN` is excluded case-INSENSITIVELY, because GitHub secret names are not
+    case-sensitive and `secrets.github_token` is the same injected per-run token. It exists in no
+    listing at any scope, so counting it would manufacture an unresolved reference on a large
+    share of every estate's workflows.
+
+    What this does NOT see, and what callers must not read as absence:
+
+    * `secrets: inherit` on a reusable-workflow call — the caller passes everything it holds and
+      no name appears anywhere in the file;
+    * a job-level `environment:` — those secrets are named in the environment, not in the YAML.
+
+    Both are wildcards, not emptiness. A caller that needs to distinguish them should test for
+    them directly rather than inferring from an empty set.
+    """
+    if not raw_yaml:
+        return set()
+    names: set[str] = set()
+    for expression in _EXPRESSION_RE.findall(raw_yaml):
+        names.update(_SECRET_REF_RE.findall(expression))
+    return {name for name in names if name.upper() != "GITHUB_TOKEN"}
