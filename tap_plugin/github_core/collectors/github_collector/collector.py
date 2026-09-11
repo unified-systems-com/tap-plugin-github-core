@@ -3053,6 +3053,14 @@ class GithubCollector(CollectorBase):
                     },
                 )
             )
+            edges.append(
+                self._edge(
+                    "DECLARES_ENVIRONMENT__github_core",
+                    repo_uuid,
+                    env_uuid,
+                    deploy_dims,
+                )
+            )
         if refused:
             self.record_warn(
                 _SITE_ENVIRONMENT_DETAIL_UNOBSERVABLE,
@@ -3062,14 +3070,6 @@ class GithubCollector(CollectorBase):
                 f"branch policy are NOT observed there, which is not the same as none being set. "
                 f"The credential needs repository environments read.",
                 message_data={"repo": full_name, "environments": refused},
-            )
-            edges.append(
-                self._edge(
-                    "DECLARES_ENVIRONMENT__github_core",
-                    repo_uuid,
-                    env_uuid,
-                    deploy_dims,
-                )
             )
         return uuid_by_name
 
@@ -5996,7 +5996,12 @@ class GithubCollector(CollectorBase):
         refusal is recorded, never read as "all actions allowed"."""
         if owner is None or client is None:
             return None, ""
-        if self._account_type and self._account_type != "Organization":
+        if not self._account_type:
+            # This runs before the repository walk mints the account, so the kind is not yet known;
+            # a user account has no organization Actions policy and must not be asked for one (a 404
+            # would otherwise be recorded as a refusal).
+            self._account_type = str(self._fetch_account(client, owner).get("type") or "")
+        if self._account_type != "Organization":
             return None, _NOT_APPLICABLE
         try:
             policy = client.get(f"/orgs/{owner}/actions/permissions")

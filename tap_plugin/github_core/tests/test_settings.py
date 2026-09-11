@@ -190,6 +190,16 @@ def test_actions_policy_not_asked_of_a_user_account() -> None:
     assert client.calls == []
 
 
+def test_actions_policy_resolves_the_account_kind_when_not_yet_known() -> None:
+    """The policy is read before the repository walk mints the account: an unknown kind is looked up,
+    and a user owner is not asked for an organization policy (its 404 must not read as a refusal)."""
+    c = _collector(account_type="")
+    client = _Client({"/users/someone": {"login": "someone", "type": "User"}})
+    assert c._collect_org_actions_policy(client, "someone") == (None, "not_applicable")
+    assert client.calls == ["/users/someone"]
+    assert _codes(c, "warn") == []
+
+
 # ---------------------------------------------------------------------------------------------
 # Repository settings
 # ---------------------------------------------------------------------------------------------
@@ -294,3 +304,66 @@ def test_refused_environment_detail_returns_the_status_and_reads_as_unobservable
 def test_environment_detail_without_a_client_is_never_looked_not_refused() -> None:
     assert GithubCollector._fetch_environment_detail(None, f"{_ORG}/widget", "production") is None
     assert GithubCollector._environment_configuration(None, None) == {"detail_observability": ""}
+
+
+# ---------------------------------------------------------------------------------------------
+# The environment emitter keeps its containment edge on every path (unified review on PR# 113)
+# ---------------------------------------------------------------------------------------------
+
+
+def _gql_with_environments(*names: str) -> dict[str, Any]:
+    return {
+        "environments": {
+            "nodes": [{"databaseId": 100 + i, "name": n, "protectionRules": {"nodes": []}} for i, n in enumerate(names)]
+        }
+    }
+
+
+def _emit(c: GithubCollector, client: Any, full_name: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    from tap_plugin.github_core.collectors.github_collector.identity import repository_id
+
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    c._emit_environments(
+        full_name,
+        repository_id(full_name),
+        {"github.platform": "github.com", "github.owner": _ORG, "github.repo": "widget"},
+        nodes,
+        edges,
+        client=client,
+    )
+    return nodes, edges
+
+
+def test_every_environment_gets_its_containment_edge_when_every_detail_succeeds() -> None:
+    c = _collector()
+    c._config = {f"{_ORG}/widget": _gql_with_environments("production", "staging")}  # type: ignore[assignment]
+    client = _Client(
+        {
+            f"/repos/{_ORG}/widget/environments/production": _ENV_DETAIL,
+            f"/repos/{_ORG}/widget/environments/staging": {"name": "staging", "protection_rules": []},
+        }
+    )
+    nodes, edges = _emit(c, client, f"{_ORG}/widget")
+    assert [n["node"]["name"] for n in nodes] == ["production", "staging"]
+    declares = [e for e in edges if e["edge"]["edge_type"] == "DECLARES_ENVIRONMENT__github_core"]
+    assert len(declares) == 2, "one containment edge per environment, refusal or not"
+    assert {e["edge"]["to_entity_id"] for e in declares} == {n["entity"]["entity_id"] for n in nodes}
+    assert _codes(c, "warn") == []
+    assert nodes[0]["node"]["can_admins_bypass"] is False and nodes[1]["node"]["can_admins_bypass"] is None
+
+
+def test_a_refused_detail_keeps_the_edge_and_warns_once_per_repository() -> None:
+    c = _collector()
+    c._config = {f"{_ORG}/widget": _gql_with_environments("production", "staging")}  # type: ignore[assignment]
+    client = _Client(
+        {f"/repos/{_ORG}/widget/environments/production": _ENV_DETAIL},
+        statuses={f"/repos/{_ORG}/widget/environments/staging": 403},
+    )
+    nodes, edges = _emit(c, client, f"{_ORG}/widget")
+    declares = [e for e in edges if e["edge"]["edge_type"] == "DECLARES_ENVIRONMENT__github_core"]
+    assert len(declares) == 2
+    assert _codes(c, "warn") == ["ENVIRONMENT_DETAIL_UNOBSERVABLE"]
+    staging = next(n for n in nodes if n["node"]["name"] == "staging")
+    assert staging["node"]["deployment_branch_policy"] is None
+    assert staging["node"]["configuration"] == {"detail_observability": "unobservable"}
