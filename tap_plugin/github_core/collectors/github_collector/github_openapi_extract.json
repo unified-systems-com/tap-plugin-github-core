@@ -1467,6 +1467,17 @@
       "present": true,
       "source": "app_installation_self"
     },
+    "/orgs/{owner}/actions/secrets": {
+      "item_properties": [
+        "created_at",
+        "name",
+        "selected_repositories_url",
+        "updated_at",
+        "visibility"
+      ],
+      "present": true,
+      "source": "organization_secrets"
+    },
     "/orgs/{owner}/installations": {
       "item_properties": [
         "access_tokens_url",
@@ -1878,6 +1889,15 @@
       "present": true,
       "source": "jobs"
     },
+    "/repos/{owner}/{repo}/actions/secrets": {
+      "item_properties": [
+        "created_at",
+        "name",
+        "updated_at"
+      ],
+      "present": true,
+      "source": "repository_secrets"
+    },
     "/repos/{owner}/{repo}/actions/workflows": {
       "item_properties": [
         "badge_url",
@@ -1938,6 +1958,15 @@
       ],
       "present": true,
       "source": "code_scanning_analyses"
+    },
+    "/repos/{owner}/{repo}/environments/{environment_name}/secrets": {
+      "item_properties": [
+        "created_at",
+        "name",
+        "updated_at"
+      ],
+      "present": true,
+      "source": "environment_secrets"
     },
     "/repos/{owner}/{repo}/git/ref/{ref}": {
       "item_properties": [
@@ -2061,8 +2090,8 @@
       "source": "account"
     }
   },
-  "spec_commit": "3cef12e8a02d612ad032473d4fb87266f2befeae",
-  "spec_sha256": "531b05749a9f86c7be01330e6d89d052fd3102ff31df4e0c765d9550b11bbad8",
-  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/3cef12e8a02d612ad032473d4fb87266f2befeae/descriptions/api.github.com/api.github.com.json",
+  "spec_commit": "0a144e030abbe358000f0d32874e197b59a8f7ed",
+  "spec_sha256": "7c3a4bfa71e850a32992882392db3cf315dcdeca46ba5a62da963dbea6a589a2",
+  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/0a144e030abbe358000f0d32874e197b59a8f7ed/descriptions/api.github.com/api.github.com.json",
   "spec_version": "1.1.4"
 }

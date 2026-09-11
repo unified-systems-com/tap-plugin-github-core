@@ -13,6 +13,7 @@ that cannot see one — each is a blank that reads as reassurance and must not.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 import tap_plugin.github_core.models as github  # noqa: F401 — trigger model registration
@@ -30,6 +31,7 @@ from tap_plugin.github_core.collectors.github_collector.graphql_client import (
     GithubGraphQLClient,
 )
 from tap_plugin.github_core.collectors.github_collector.identity import (
+    actions_secret_id,
     ruleset_id,
     workflow_job_id,
 )
@@ -1098,11 +1100,16 @@ class TestVocabularyIsDeclared:
         # three were already granted on the product App as recommended reads. `security_events`
         # arrived with code scanning (github-core#89): the alert and analysis listings, each alert
         # minted as a compliance_core finding. A sensitive read, recommended before it was derived.
+        # `secrets` arrived with the secret-name surface (github-core#104) and covers both the
+        # repository and the environment listings. Names only — GitHub's API returns no value
+        # field at any scope — which is the fact that makes a read-only credential asking for it
+        # proportionate.
         assert repo_perms == {
             "metadata": "read",
             "actions": "read",
             "contents": "read",
             "administration": "read",
+            "secrets": "read",
             "pull_requests": "read",
             "checks": "read",
             "statuses": "read",
@@ -1112,7 +1119,15 @@ class TestVocabularyIsDeclared:
         # existing installation must re-accept; `custom_properties` (github-core#77) was already
         # granted on the product App as an exploratory read and is now derived from its two
         # sources; every other surface reads under the prior set.
-        assert org_perms == {"administration": "read", "packages": "read", "custom_properties": "read"}
+        # Organisation `secrets` is NOT optional alongside the repository key: the estate's
+        # most-shared referenced names live at organisation scope and in no repository, so
+        # resolving references without it reports working references as broken (github-core#104).
+        assert org_perms == {
+            "administration": "read",
+            "secrets": "read",
+            "packages": "read",
+            "custom_properties": "read",
+        }
         assert all(
             level == "read" for level in {**repo_perms, **org_perms}.values()
         ), "the collector never asks for write"
@@ -1145,6 +1160,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: ./ship.sh
+        env:
+          # Three references in one file, each exercising a different resolution outcome: the
+          # injected token (never a stored secret), a name written in the case the organisation
+          # did not use, and a name that exists nowhere.
+          GH: ${{ secrets.GITHUB_TOKEN }}
+          KEY: ${{ secrets.shared_api_key }}
+          MISSING: ${{ secrets.NOT_ANYWHERE }}
 """
 
 #: A GraphQL config-layer node shaped exactly as the live API returns it (verified 2026-08-27
@@ -1204,6 +1226,11 @@ _CONFIG_NODE = {
 
 class _StubClient:
     """A REST client that answers the endpoints the per-repo walk actually calls, and counts them."""
+
+    # Mirrors the real client's class-attribute default. The secret listings read it to tell a
+    # complete enumeration from one that stopped at the page cap, and a double that omitted it
+    # would fail on the interface rather than on the behaviour under test.
+    last_walk_complete = True
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -1282,12 +1309,21 @@ class _StubClient:
 
 
 def _walk_one_repo(
-    monkeypatch, runs: list[dict] | None = None
+    monkeypatch,
+    runs: list[dict] | None = None,
+    org_secrets: dict[str, Any] | None = None,
 ) -> tuple[list[dict], list[dict], _StubClient, list[tuple]]:
-    """Run `_collect_repo` against the stubs and return (nodes, edges, client, warnings)."""
+    """Run `_collect_repo` against the stubs and return (nodes, edges, client, warnings).
+
+    `org_secrets` stands in for the account-scope listing the real run reads once before the
+    walk. Default empty AND unobserved, which is the honest default for a harness that never
+    asked: `scopes_read` must then omit `organization`.
+    """
     collector = GithubCollector.__new__(GithubCollector)
     collector._config = {"acme/widget": _CONFIG_NODE}
     collector._emitted_app_ids = set()
+    collector._org_secrets = dict(org_secrets or {})
+    collector._org_secrets_observed = org_secrets is not None
     collector._emitted_installation_ids = set()
     collector._ruleset_details = {}
     collector._default_refs = set()
@@ -1419,6 +1455,46 @@ class TestPerRepoWalk:
         assert types.count("DEPENDS_ON_JOB__github_core") == 1
         assert types.count("USES_ENVIRONMENT__github_core") == 1
         assert types.count("DEFINES_JOB__github_core") == 2
+
+    def test_a_secret_reference_resolves_across_scopes_and_ignores_case(self, monkeypatch) -> None:
+        """The walk resolves `${{ secrets.shared_api_key }}` to an ORGANISATION secret named
+        `SHARED_API_KEY`, and reports the one name that exists nowhere.
+
+        Both halves matter and both were wrong in the first cut. Repository-only resolution made
+        the estate's most-shared credentials look nonexistent; case-sensitive matching did the
+        same to two of nine referenced names. `GITHUB_TOKEN` is absent from every listing by
+        design and must not appear as unresolved.
+        """
+        org_secret = actions_secret_id("organization", "acme", "SHARED_API_KEY")
+        nodes, edges, _client, _warns = _walk_one_repo(monkeypatch, org_secrets={"SHARED_API_KEY": org_secret})
+
+        workflow = next(n["node"] for n in nodes if n["entity"]["entity_type"] == "github_core__github_workflow")
+        refs = workflow["tags"]["secret_refs"]
+        assert refs["referenced"] == ["NOT_ANYWHERE", "shared_api_key"]
+        assert refs["unresolved"] == ["NOT_ANYWHERE"]
+        # The harness repo declares `production`, so its environment listing is read too.
+        assert refs["scopes_read"] == ["organization", "repository", "environment"]
+
+        # Exactly one edge, to the organisation secret — never to the unresolved name, which has
+        # no node and must not acquire one on the evidence that somebody typed it.
+        targets = [
+            str(e["edge"]["to_entity_id"]) for e in edges if e["edge"]["edge_type"] == "REFERENCES_SECRET__github_core"
+        ]
+        assert targets == [str(org_secret)]
+
+    def test_an_unread_organisation_scope_is_absent_from_scopes_read(self, monkeypatch) -> None:
+        """Default harness: no organisation listing was read, so the tag may not claim one.
+
+        This is what stops "unresolved" being read as "does not exist" after a run whose
+        credential simply could not see the account's secrets.
+        """
+        nodes, _edges, _client, _warns = _walk_one_repo(monkeypatch)
+        workflow = next(n["node"] for n in nodes if n["entity"]["entity_type"] == "github_core__github_workflow")
+        assert workflow["tags"]["secret_refs"]["scopes_read"] == [
+            "repository",
+            "environment",
+        ]
+        assert "organization" not in workflow["tags"]["secret_refs"]["scopes_read"]
 
     def test_each_run_is_fetched_for_jobs_once(self, monkeypatch) -> None:
         """The EXECUTED_ON_RUNNER pass reuses the job payloads instead of walking every run a second

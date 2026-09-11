@@ -79,8 +79,8 @@
     "dependabot_secrets": {
       "state": "deferred",
       "level": "read",
-      "why": "Dependabot secret names; lower value than the two above.",
-      "until": "REFERENCES_SECRET lands"
+      "why": "Dependabot secret names. A SEPARATE store from Actions secrets: a workflow's `${{ secrets.X }}` never reads one, so it cannot resolve an Actions reference and the reference join does not need it. Its own value is the Dependabot side of the same question — which credentials the update bot holds — and that needs a source of its own.",
+      "until": "a Dependabot-secrets source lands"
     },
     "deployments": {
       "state": "recommended",
@@ -240,10 +240,12 @@
       "why": "Same."
     },
     "organization_secrets": {
-      "state": "deferred",
+      "state": "requested",
       "level": "read",
-      "why": "Organisation secret names, same reasoning.",
-      "until": "REFERENCES_SECRET lands"
+      "why": "Organisation secret NAMES and each one's sharing `visibility` — names only, same names-never-values fact as the repository key. Not optional alongside it: the estate's most-shared referenced names live at organisation scope and in no repository, so without this key a dozen workflows would be reported as naming secrets that do not exist. `visibility` is the blast-radius field — how many repositories a single credential reaches.",
+      "sources": [
+        "organization_secrets"
+      ]
     },
     "organization_self_hosted_runners": {
       "state": "recommended",
@@ -307,10 +309,13 @@
       "why": "Secret-scanning alerts: the secret-in-code-detection feature (table stakes, security axis). Sensitive read."
     },
     "secrets": {
-      "state": "deferred",
+      "state": "requested",
       "level": "read",
-      "why": "Lists secret NAMES only, never values — resolves `${{ secrets.X }}` references (REFERENCES_SECRET). Reads as sensitive to reviewers; add with the secret-reference edge, with the names-only fact stated.",
-      "until": "REFERENCES_SECRET lands"
+      "why": "Lists secret NAMES only, never values — GitHub's API cannot return a value and TAP stores none. Resolves `${{ secrets.X }}` references to the secret that exists (REFERENCES_SECRET), which is what surfaces a reference pointing at nothing and a credential nothing consumes. Covers both repository and environment secrets. Requested 2026-09-10 (github-core#104), as the deferred entry it replaces said it should be.",
+      "sources": [
+        "repository_secrets",
+        "environment_secrets"
+      ]
     },
     "security_events": {
       "state": "requested",

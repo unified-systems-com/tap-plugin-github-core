@@ -556,3 +556,28 @@ def _string_values(obj: Any) -> list[str]:
         elif isinstance(node, list):
             stack.extend(node)
     return out
+
+
+_SECRET_REF_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def secret_names_in(raw_yaml: str) -> set[str]:
+    """Every secret NAME a workflow file references.
+
+    Textual on purpose. The alternative is walking the parsed tree, and a secret can be referenced
+    from anywhere an expression is allowed — `env:`, `with:`, `if:`, a `run:` body, a job-level
+    `secrets:` mapping — so a structural walk would have to enumerate those positions and would
+    silently miss the next one GitHub adds.
+
+    What this does NOT see, and what callers must not read as absence:
+
+    * `secrets: inherit` on a reusable-workflow call — the caller passes everything it holds and
+      no name appears anywhere in the file;
+    * a job-level `environment:` — those secrets are named in the environment, not in the YAML.
+
+    Both are wildcards, not emptiness. A caller that needs to distinguish them should test for
+    them directly rather than inferring from an empty set.
+    """
+    if not raw_yaml:
+        return set()
+    return {name for name in _SECRET_REF_RE.findall(raw_yaml) if name != "GITHUB_TOKEN"}
