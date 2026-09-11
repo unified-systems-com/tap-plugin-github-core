@@ -36,7 +36,7 @@ Two decisions are load-bearing:
 Deliberately **not** covered:
 
 - **The value.** Not withheld by policy — unobtainable. GitHub's secrets API returns `name`, `created_at`, `updated_at` and (organisation only) `visibility`. There is no value field to omit. See Observability.
-- **Which repositories a `selected`-visibility organisation secret reaches.** GitHub offers `selected_repositories_url` for that. Not followed: both organisation secrets on this estate are `visibility: all`, so the branch is unexercised, and a field written from documentation rather than an executed call is the kind of declaration this codebase treats as worse than a missing one.
+- **Which repositories a `selected`-visibility organisation secret reaches.** GitHub offers `selected_repositories_url` for that. Not followed: both organisation secrets on this estate are `visibility: all`, so the branch is unexercised, and a field written from documentation rather than an executed call is the kind of declaration this codebase treats as worse than a missing one. The consequence is named rather than hidden — a reference resolved only by a non-`all` organisation secret lands in `tags.secret_refs.reach_uncertain`, never in the resolved set.
 - **Dependabot secrets.** A separate store an Actions workflow never reads, so it can never resolve an Actions reference. Deferred in the permission ledger with that reason.
 - **Variables.** `vars.X` is a sibling surface and a different (non-sensitive) object. Not modelled here.
 - **What a run actually consumed.** This node and its reference edge are facts about FILES. GitHub publishes no record of which secrets a run read.
@@ -63,7 +63,7 @@ Permissions: repository and environment scope read at `secrets: read`; organisat
 
 **The 404 control matters.** A user account has no organisation-secrets endpoint at all, and answers 404. That is *nothing to ask*, not *refused* — recorded as information, never as a degradation. 401 and 403 are degradations, and the scope then reads as not observed.
 
-**Three states, carried on the workflow.** `github_workflow.tags.secret_refs` holds `referenced`, `unresolved` and **`scopes_read`**. A name is unresolved only with respect to the scopes that were actually readable, and a refused listing must never render as a scope holding nothing. The tag is written whenever a workflow BODY was read, including when it names no secret — an empty `referenced` says "read, references none", where an absent tag says "never read". Forty of this estate's 119 workflows carry no body, and collapsing those two states would let a third of the estate read as secret-free.
+**Three states, carried on the workflow.** `github_workflow.tags.secret_refs` holds `referenced`, `unresolved`, `reach_uncertain` and **`scopes_read`**. A name is unresolved only with respect to the scopes that were enumerated IN FULL — a refused listing and a listing truncated at the page cap both disqualify a scope, and the second is the dangerous one because it returns plausible names and looks like success. The tag is written whenever a workflow BODY was read, including when it names no secret — an empty `referenced` says "read, references none", where an absent tag says "never read". Forty of this estate's 119 workflows carry no body, and collapsing those two states would let a third of the estate read as secret-free.
 
 Observed distribution 2026-09-10: 41 workflows carry the tag, 35 with `scopes_read: [organization, repository, environment]` and 6 with `[organization, repository]` (their repositories declare no environments).
 

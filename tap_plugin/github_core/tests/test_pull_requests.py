@@ -62,6 +62,7 @@ def _collector(config: dict[str, Any] | None = None):
     collector._emitted_app_ids = set()
     collector._org_secrets = {}
     collector._org_secrets_observed = False
+    collector._org_secret_visibility = {}
     warns: list[tuple[Any, ...]] = []
     infos: list[tuple[Any, ...]] = []
     collector.record_warn = lambda *a, **k: warns.append((a, k))  # type: ignore[method-assign]

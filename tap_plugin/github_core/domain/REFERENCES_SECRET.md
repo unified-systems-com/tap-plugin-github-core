@@ -12,10 +12,10 @@ The edge going the other way is the blast-radius question: a secret with no `REF
 
 ## Goals
 
-1. Join a workflow to each secret it names that actually exists.
+1. Join a workflow to each secret it names that actually exists — **one edge per defining scope**.
 2. Leave a name that resolves to nothing WITHOUT an edge, and record it on the workflow instead.
 3. Never mint a secret node from a reference — a name somebody typed is not evidence a credential exists.
-4. Keep the claim honest about scope: unresolved means unresolved *in the scopes this run could read*.
+4. Keep the claim honest about scope: unresolved means unresolved *in the scopes this run enumerated in full*.
 
 ## Identity
 
@@ -50,7 +50,13 @@ Observed 2026-09-10 across `unified-systems-com` (119 workflows, 79 carrying a b
 
 `TAP_CORE_RO_PAT` is referenced by 33 workflows across 17 repositories and exists in **no** organisation, repository or environment scope that the credential read — and every one of those listings answered 200, so this is an observed absence rather than an unread scope. That single finding is the edge earning its place.
 
-**The three-states record** lives on the workflow, not here: `github_workflow.tags.secret_refs` carries `referenced`, `unresolved` and `scopes_read`. Written whenever a body was READ — an empty `referenced` means "read, names none", where an absent tag means "never read". Forty of the 119 workflows carry no body at all.
+**One edge per defining scope.** A name held at both organisation and repository scope is two credentials, and both get an edge. Resolving to the single one a run would actually receive means applying GitHub's precedence (environment, then repository, then organisation) — which requires knowing *which environment the job selects*, and that is chosen at runtime and is a named blind spot above. Picking one would manufacture a claim this collector cannot support, so it states the weaker thing it can prove: this file names a secret that exists here.
+
+**The three-states record** lives on the workflow, not here: `github_workflow.tags.secret_refs` carries `referenced`, `unresolved`, `reach_uncertain` and `scopes_read`. Written whenever a body was READ — an empty `referenced` means "read, names none", where an absent tag means "never read". Forty of the 119 workflows carry no body at all.
+
+Two ways a scope loses its place in `scopes_read`, and the second is the one that hides. A **refused** listing is loud: it returns nothing, and nothing is obviously nothing. A listing **truncated at the page cap** returns plausible names and looks like success — so a secret on an unfetched page would make every workflow naming it read as unresolved *under a scope the tag claimed was read*. Both disqualify the scope; the names that did come back are still real and still resolve.
+
+**`reach_uncertain`** is the third answer for reach rather than existence. An organisation secret with `visibility: selected` names a repository list this collector does not fetch, and `private` excludes public repositories outright. A name resolved only by such a secret exists, but whether it reaches *this* repository is unknown — neither resolved nor unresolved, and it must not be rounded to either.
 
 **Absence of this edge is ambiguous on its own** and resolves in the reassuring direction, which is the failure mode this plugin is built to refuse. Read `scopes_read` before concluding anything from a missing edge.
 

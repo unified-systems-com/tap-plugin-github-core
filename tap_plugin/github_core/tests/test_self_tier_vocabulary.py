@@ -1311,7 +1311,7 @@ class _StubClient:
 def _walk_one_repo(
     monkeypatch,
     runs: list[dict] | None = None,
-    org_secrets: dict[str, Any] | None = None,
+    org_secrets: dict[str, list[Any]] | None = None,
 ) -> tuple[list[dict], list[dict], _StubClient, list[tuple]]:
     """Run `_collect_repo` against the stubs and return (nodes, edges, client, warnings).
 
@@ -1324,6 +1324,7 @@ def _walk_one_repo(
     collector._emitted_app_ids = set()
     collector._org_secrets = dict(org_secrets or {})
     collector._org_secrets_observed = org_secrets is not None
+    collector._org_secret_visibility = {}
     collector._emitted_installation_ids = set()
     collector._ruleset_details = {}
     collector._default_refs = set()
@@ -1466,7 +1467,7 @@ class TestPerRepoWalk:
         design and must not appear as unresolved.
         """
         org_secret = actions_secret_id("organization", "acme", "SHARED_API_KEY")
-        nodes, edges, _client, _warns = _walk_one_repo(monkeypatch, org_secrets={"SHARED_API_KEY": org_secret})
+        nodes, edges, _client, _warns = _walk_one_repo(monkeypatch, org_secrets={"SHARED_API_KEY": [org_secret]})
 
         workflow = next(n["node"] for n in nodes if n["entity"]["entity_type"] == "github_core__github_workflow")
         refs = workflow["tags"]["secret_refs"]

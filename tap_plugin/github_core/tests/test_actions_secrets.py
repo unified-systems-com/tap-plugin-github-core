@@ -48,10 +48,13 @@ class _SecretsClient:
         self,
         rows: dict[str, list[dict[str, Any]]],
         statuses: dict[str, int] | None = None,
+        *,
+        complete: bool = True,
     ) -> None:
         self.rows = rows
         self.statuses = statuses or {}
         self.calls: list[str] = []
+        self.last_walk_complete = complete
 
     def get_paginated(self, path: str, **_: Any) -> list[Any]:
         self.calls.append(path)
@@ -63,6 +66,7 @@ class _SecretsClient:
 
 def _collector() -> GithubCollector:
     c = GithubCollector.__new__(GithubCollector)
+    c._org_secret_visibility = {}
     c.records: list[tuple[str, str, str]] = []  # type: ignore[attr-defined]
     c.record_warn = lambda site, code, message, **kw: c.records.append(("warn", code, message))  # type: ignore[method-assign]
     c.record_info = lambda site, code, message, **kw: c.records.append(("info", code, message))  # type: ignore[method-assign]
@@ -171,14 +175,15 @@ def test_repository_and_environment_secrets_land_with_their_holders() -> None:
 
     assert scopes == ["repository", "environment"]
     assert set(found) == {"DEPLOY_KEY", "PROD_TOKEN"}
+    assert all(len(v) == 1 for v in found.values())
     by_name = {n["node"]["name"]: n["node"] for n in nodes}
     assert by_name["DEPLOY_KEY"]["scope"] == "repository"
     assert by_name["PROD_TOKEN"]["scope"] == "environment"
     assert by_name["PROD_TOKEN"]["environment_name"] == "production"
     # The holder of each is the object the listing belonged to, not the repository for both.
     holders = {(e["edge"]["from_entity_id"], e["edge"]["to_entity_id"]) for e in edges}
-    assert (str(repository_id(_REPO)), str(found["DEPLOY_KEY"])) in {(str(a), str(b)) for a, b in holders}
-    assert (str(env_uuid), str(found["PROD_TOKEN"])) in {(str(a), str(b)) for a, b in holders}
+    assert (str(repository_id(_REPO)), str(found["DEPLOY_KEY"][0])) in {(str(a), str(b)) for a, b in holders}
+    assert (str(env_uuid), str(found["PROD_TOKEN"][0])) in {(str(a), str(b)) for a, b in holders}
 
 
 def test_no_field_on_a_secret_node_can_carry_a_value() -> None:
@@ -306,3 +311,95 @@ def test_a_non_permission_error_still_raises() -> None:
     client = _SecretsClient({}, statuses={f"/repos/{_REPO}/actions/secrets": 500})
     with pytest.raises(GithubAPIError):
         _collector()._collect_secrets(client, _REPO, repository_id(_REPO), _DIMS, {}, [], [])
+
+
+# ---------------------------------------------------------------------------------------------
+# Regressions found by the unified review on PR# 105. Both sat in the honesty logic, which is the
+# only thing this surface exists for.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_truncated_listing_does_not_count_as_a_read_scope() -> None:
+    """The failure that hides: a walk stopping at the page cap returns plausible names.
+
+    The scope was then listed in `scopes_read`, so a secret sitting on an unfetched page made
+    every workflow naming it report `unresolved` *under a scope the tag claimed was read* — the
+    reassuring direction, reached from a listing that looked like it had worked.
+    """
+    client = _SecretsClient({f"/repos/{_REPO}/actions/secrets": [{"name": "PAGE_ONE"}]}, complete=False)
+    c = _collector()
+    found, scopes = c._collect_secrets(client, _REPO, repository_id(_REPO), _DIMS, {}, [], [])
+
+    assert set(found) == {"PAGE_ONE"}, "the names we DID see are real and still resolve"
+    assert scopes == [], "but the scope was not enumerated, so it is not a read scope"
+    assert "SECRET_LISTING_INCOMPLETE" in _codes(c, "warn")
+
+
+def test_one_truncated_environment_costs_the_environment_scope_its_claim() -> None:
+    """A reference resolves against the repository's environments as a SET.
+
+    Lose one and we no longer hold the set, so the scope cannot be claimed even though the other
+    environment answered in full.
+    """
+    envs = {
+        "production": environment_id(_REPO, "production"),
+        "staging": environment_id(_REPO, "staging"),
+    }
+
+    class _PartialClient(_SecretsClient):
+        def get_paginated(self, path: str, **kw: Any) -> list[Any]:
+            rows = super().get_paginated(path, **kw)
+            self.last_walk_complete = "staging" not in path
+            return rows
+
+    client = _PartialClient(
+        {
+            f"/repos/{_REPO}/actions/secrets": [],
+            f"/repos/{_REPO}/environments/production/secrets": [{"name": "PROD"}],
+            f"/repos/{_REPO}/environments/staging/secrets": [{"name": "STAGE"}],
+        }
+    )
+    c = _collector()
+    found, scopes = c._collect_secrets(client, _REPO, repository_id(_REPO), _DIMS, envs, [], [])
+
+    assert set(found) == {"PROD", "STAGE"}
+    assert "environment" not in scopes
+    assert "repository" in scopes, "the repository listing was complete and keeps its claim"
+
+
+def test_one_name_at_two_scopes_keeps_both_credentials() -> None:
+    """`AWS_ROLE` held by the organisation AND by the repository is two credentials.
+
+    The first cut wrote both into one slot, so the map carried whichever was collected last and
+    a workflow naming it got a single edge — attribution decided by dict iteration order.
+    """
+    org_client = _SecretsClient({f"/orgs/{_OWNER}/actions/secrets": [{"name": "AWS_ROLE", "visibility": "all"}]})
+    repo_client = _SecretsClient({f"/repos/{_REPO}/actions/secrets": [{"name": "AWS_ROLE"}]})
+    c = _collector()
+    org_found, _ = c._collect_org_secrets(org_client, _OWNER, [], [])
+    repo_found, _ = c._collect_secrets(repo_client, _REPO, repository_id(_REPO), _DIMS, {}, [], [])
+
+    merged: dict[str, list[Any]] = {k: list(v) for k, v in org_found.items()}
+    for k, v in repo_found.items():
+        merged.setdefault(k, []).extend(v)
+
+    assert len(merged["AWS_ROLE"]) == 2, "both defining scopes survive the merge"
+    assert merged["AWS_ROLE"][0] == actions_secret_id("organization", _OWNER, "AWS_ROLE")
+    assert merged["AWS_ROLE"][1] == actions_secret_id("repository", _REPO, "AWS_ROLE")
+
+
+def test_a_selected_visibility_org_secret_is_not_claimed_to_reach_this_repository() -> None:
+    """`visibility: selected` names a repository list this collector does not fetch.
+
+    So a name resolved ONLY by such a secret is neither resolved nor unresolved for this
+    repository, and gets its own answer rather than being rounded to the reassuring one.
+    """
+    client = _SecretsClient(
+        {f"/orgs/{_OWNER}/actions/secrets": [{"name": "SHARED", "visibility": "selected"}]}
+    )
+    c = _collector()
+    found, observed = c._collect_org_secrets(client, _OWNER, [], [])
+
+    assert observed is True
+    assert set(found) == {"SHARED"}
+    assert c._org_secret_visibility["SHARED"] == "selected"
