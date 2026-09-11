@@ -66,7 +66,7 @@ class _SecretsClient:
 
 def _collector() -> GithubCollector:
     c = GithubCollector.__new__(GithubCollector)
-    c._org_secret_visibility = {}
+    c._org_secret_reach = {}
     c.records: list[tuple[str, str, str]] = []  # type: ignore[attr-defined]
     c.record_warn = lambda site, code, message, **kw: c.records.append(("warn", code, message))  # type: ignore[method-assign]
     c.record_info = lambda site, code, message, **kw: c.records.append(("info", code, message))  # type: ignore[method-assign]
@@ -388,18 +388,69 @@ def test_one_name_at_two_scopes_keeps_both_credentials() -> None:
     assert merged["AWS_ROLE"][1] == actions_secret_id("repository", _REPO, "AWS_ROLE")
 
 
-def test_a_selected_visibility_org_secret_is_not_claimed_to_reach_this_repository() -> None:
-    """`visibility: selected` names a repository list this collector does not fetch.
+def test_a_selected_visibility_org_secret_resolves_to_the_repositories_it_names() -> None:
+    """`visibility: selected` names a repository list, and the App can read it.
 
-    So a name resolved ONLY by such a secret is neither resolved nor unresolved for this
-    repository, and gets its own answer rather than being rounded to the reassuring one.
+    Measured 2026-09-11 against a real one (github-core#107), which is why reach is derived here
+    rather than left open. One request per such secret per RUN, not per repository.
     """
     client = _SecretsClient(
-        {f"/orgs/{_OWNER}/actions/secrets": [{"name": "SHARED", "visibility": "selected"}]}
+        {
+            f"/orgs/{_OWNER}/actions/secrets": [{"name": "SHARED", "visibility": "selected"}],
+            f"/orgs/{_OWNER}/actions/secrets/SHARED/repositories": [
+                {"full_name": "acme/widget"},
+                {"full_name": "acme/other"},
+            ],
+        }
     )
     c = _collector()
     found, observed = c._collect_org_secrets(client, _OWNER, [], [])
 
     assert observed is True
     assert set(found) == {"SHARED"}
-    assert c._org_secret_visibility["SHARED"] == "selected"
+    reach = c._org_secret_reach["SHARED"]
+    assert reach.kind == "selected"
+    assert reach.reaches("acme/widget", "public") is True
+    assert reach.reaches("acme/elsewhere", "public") is False
+
+
+def test_an_all_visibility_org_secret_costs_no_extra_request() -> None:
+    """The common case must not pay for the rare one."""
+    client = _SecretsClient({f"/orgs/{_OWNER}/actions/secrets": [{"name": "S", "visibility": "all"}]})
+    c = _collector()
+    c._collect_org_secrets(client, _OWNER, [], [])
+
+    assert client.calls == [f"/orgs/{_OWNER}/actions/secrets"], "no repository-list call"
+    assert c._org_secret_reach["S"].reaches("acme/anything", "public") is True
+
+
+def test_a_private_visibility_org_secret_reaches_no_public_repository() -> None:
+    """`private` shares with private AND internal repositories. A public one is neither.
+
+    On an all-public estate such a secret reaches nothing, so a workflow naming it receives an
+    empty string — the silent failure this whole surface exists to catch.
+    """
+    client = _SecretsClient({f"/orgs/{_OWNER}/actions/secrets": [{"name": "S", "visibility": "private"}]})
+    c = _collector()
+    c._collect_org_secrets(client, _OWNER, [], [])
+    reach = c._org_secret_reach["S"]
+
+    assert reach.reaches("acme/widget", "public") is False
+    assert reach.reaches("acme/widget", "private") is True
+    assert reach.reaches("acme/widget", "internal") is True
+    assert client.calls == [f"/orgs/{_OWNER}/actions/secrets"], "no repository-list call"
+
+
+def test_an_unreadable_repository_list_is_undecided_not_unreachable() -> None:
+    """A refused list must not render as "reaches nothing" — the reassuring direction."""
+    client = _SecretsClient(
+        {f"/orgs/{_OWNER}/actions/secrets": [{"name": "S", "visibility": "selected"}]},
+        statuses={f"/orgs/{_OWNER}/actions/secrets/S/repositories": 403},
+    )
+    c = _collector()
+    c._collect_org_secrets(client, _OWNER, [], [])
+    reach = c._org_secret_reach["S"]
+
+    assert reach.kind == "unknown"
+    assert reach.reaches("acme/widget", "public") is None
+    assert any(code.startswith("ORG_SECRET_REPOS_UNREADABLE") for code in _codes(c, "warn"))

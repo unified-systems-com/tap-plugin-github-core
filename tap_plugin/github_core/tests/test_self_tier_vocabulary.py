@@ -26,7 +26,7 @@ from tap_plugin.github_core.collectors.github_collector.auth import (
     PREFER_PAT,
     GithubAuth,
 )
-from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector, OrgSecretReach
 from tap_plugin.github_core.collectors.github_collector.graphql_client import (
     GithubGraphQLClient,
 )
@@ -1324,7 +1324,9 @@ def _walk_one_repo(
     collector._emitted_app_ids = set()
     collector._org_secrets = dict(org_secrets or {})
     collector._org_secrets_observed = org_secrets is not None
-    collector._org_secret_visibility = {}
+    # Production writes a reach beside every organisation secret, so the harness does too —
+    # `all` being the ordinary case (github-core#107).
+    collector._org_secret_reach = {k: OrgSecretReach("all", frozenset()) for k in (org_secrets or {})}
     collector._emitted_installation_ids = set()
     collector._ruleset_details = {}
     collector._default_refs = set()

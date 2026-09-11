@@ -147,6 +147,35 @@ class SecretListing(NamedTuple):
     complete: bool
 
 
+class OrgSecretReach(NamedTuple):
+    """Which repositories an organisation secret can actually be read from.
+
+    GitHub's `visibility` is three-valued and only one value is self-explaining. `all` reaches
+    every repository; `private` reaches the private and internal ones, which on an all-public
+    estate is none of them; `selected` names a list, and that list IS readable — measured
+    2026-09-11 with the plugin's own App installation token against a real `selected` secret, so
+    reach is a fact to derive rather than a state to leave uncertain (github-core#107).
+
+    `unknown` is kept for the case that remains genuinely undecidable: the repository list was
+    refused or truncated. Three answers, never two.
+    """
+
+    kind: str  #: "all" | "selected" | "private" | "unknown"
+    repos: frozenset[str]  #: full names; meaningful only when `kind == "selected"`
+
+    def reaches(self, full_name: str, repo_visibility: str) -> bool | None:
+        """True / False / None — None meaning the list could not be read."""
+        if self.kind == "all":
+            return True
+        if self.kind == "selected":
+            return full_name in self.repos
+        if self.kind == "private":
+            # GitHub shares a `private` organisation secret with private AND internal
+            # repositories. A public repository is reached by neither.
+            return repo_visibility.lower() in ("private", "internal")
+        return None
+
+
 #: Secret-scope reads. Each scope gets its own site because "which scope could not be read" is
 #: the whole question a reader of `scopes_read` is asking.
 _SITE_SECRETS_DEGRADED = "9fdd"
@@ -804,10 +833,11 @@ class GithubCollector(CollectorBase):
         #: repository's workflow walk resolves `${{ secrets.X }}` against this map merged under
         #: its own.
         self._org_secrets: dict[str, list[Any]] = {}
-        #: Each organisation secret's sharing `visibility`, upper-cased name -> policy. Only
-        #: `all` reaches every repository; `selected` names a list this collector does not fetch
-        #: and `private` excludes public repositories, so neither can be called reachable here.
-        self._org_secret_visibility: dict[str, str] = {}
+        #: Each organisation secret's resolved REACH, upper-cased name -> OrgSecretReach. Built
+        #: once per run alongside the listing; consulted per repository during the walk, because
+        #: whether a secret reaches somewhere is a question about a repository, not about the
+        #: secret alone.
+        self._org_secret_reach: dict[str, OrgSecretReach] = {}
         #: Whether that listing was actually READ. False means the scope is unobserved, and no
         #: workflow may report a name as naming nothing on the strength of its absence.
         self._org_secrets_observed: bool = False
@@ -1609,18 +1639,35 @@ class GithubCollector(CollectorBase):
             referenced = secret_names_in(raw_yaml)
             unresolved = []
             reach_uncertain = []
+            repo_visibility = str(repo_payload.get("visibility", ""))
             for secret_name in sorted(referenced):
                 key = secret_name.upper()
                 targets = secret_uuid_by_name.get(key) or []
                 if not targets:
                     unresolved.append(secret_name)
                     continue
-                # Resolved ONLY by an organisation secret that is not shared with everything.
-                # The name exists, but whether it reaches THIS repository depends on a selected
-                # -repositories list this collector does not fetch (and `private` excludes public
-                # repositories outright). Neither "resolved" nor "unresolved" is true, so it gets
-                # its own answer rather than being rounded to the reassuring one.
-                if key not in repo_secrets and self._org_secret_visibility.get(key, "all") != "all":
+                # A name held at repository or environment scope is readable here by definition.
+                # One held ONLY by the organisation has to clear its sharing policy first: a
+                # `selected` secret does not reach the rest of the organisation, and a `private`
+                # one reaches no public repository at all.
+                reach: bool | None = True
+                if key not in repo_secrets:
+                    # Defaulting to `unknown` rather than `all`: an organisation secret always
+                    # gets a reach entry written beside it, so a missing one is an internal
+                    # inconsistency, and guessing `all` there would claim reach we never derived.
+                    reach = self._org_secret_reach.get(
+                        key, OrgSecretReach("unknown", frozenset())
+                    ).reaches(full_name, repo_visibility)
+                if reach is False:
+                    # The secret exists and this workflow names it, but this repository cannot
+                    # read it, so at runtime the step receives an empty string — operationally
+                    # identical to the name not existing, which is what `unresolved` means. No
+                    # edge: a credential this workflow cannot read is not one it uses.
+                    unresolved.append(secret_name)
+                    continue
+                if reach is None:
+                    # The repository list was refused or truncated. Not reachable, not
+                    # unreachable — its own answer rather than a rounding to either.
                     reach_uncertain.append(secret_name)
                 for target in targets:
                     edges.append(
@@ -4452,12 +4499,13 @@ class GithubCollector(CollectorBase):
         }
         out: dict[str, list[Any]] = {}
         for item in listing.rows:
-            # Sharing policy, kept beside the map: an organisation secret shared with `selected`
-            # repositories (or `private` ones, on an all-public estate) does not necessarily
-            # reach the repository whose workflow names it, and resolution must not pretend it
-            # does. See `_org_secret_visibility`.
-            self._org_secret_visibility[str(item.get("name") or "").upper()] = str(
-                item.get("visibility") or ""
+            # Reach, derived now rather than left open. An organisation secret shared with
+            # `selected` repositories does not reach the rest of the organisation, and a
+            # workflow elsewhere naming it receives an empty string at runtime — the exact
+            # silent failure this surface exists to catch, which resolution would otherwise
+            # report as a working reference.
+            self._org_secret_reach[str(item.get("name") or "").upper()] = self._reach_of(
+                client, owner, item
             )
             self._emit_secret(
                 item,
@@ -4473,6 +4521,57 @@ class GithubCollector(CollectorBase):
                 out=out,
             )
         return out, listing.complete
+
+    def _reach_of(self, client: GithubClient, owner: str, item: dict[str, Any]) -> OrgSecretReach:
+        """Resolve one organisation secret's sharing policy into a concrete reach.
+
+        Only `selected` costs a request, and only one per such secret per RUN — not per
+        repository. Estates that share everything with `all` pay nothing.
+        """
+        name = str(item.get("name") or "")
+        visibility = str(item.get("visibility") or "")
+        if visibility in ("all", "private"):
+            return OrgSecretReach(visibility, frozenset())
+        if visibility != "selected":
+            # A policy GitHub has not documented to us. Say so rather than guess a default;
+            # guessing `all` here would be the reassuring direction.
+            self.record_warn(
+                _SITE_ORG_SECRETS_DEGRADED,
+                "ORG_SECRET_VISIBILITY_UNKNOWN",
+                f"Organisation secret {name} reports visibility {visibility!r}, which this "
+                f"collector does not know how to resolve; its reach is left undecided.",
+                message_data={"owner": owner, "visibility": visibility},
+            )
+            return OrgSecretReach("unknown", frozenset())
+        try:
+            rows = client.get_paginated(
+                f"/orgs/{owner}/actions/secrets/{quote(name, safe='')}/repositories",
+                params={"per_page": "100"},
+                item_path="repositories",
+            )
+        except GithubAPIError as exc:
+            self.record_warn(
+                _SITE_ORG_SECRETS_DEGRADED,
+                f"ORG_SECRET_REPOS_UNREADABLE_{exc.status}",
+                f"Selected-repository list for organisation secret {name} unreadable "
+                f"({exc.status}); its reach is NOT observed, which is not the same as reaching "
+                f"nothing.",
+                message_data={"owner": owner, "secret": name, "status": exc.status},
+            )
+            return OrgSecretReach("unknown", frozenset())
+        if not client.last_walk_complete:
+            self.record_warn(
+                _SITE_SECRET_SCOPE_INCOMPLETE,
+                "ORG_SECRET_REPOS_INCOMPLETE",
+                f"Selected-repository list for organisation secret {name} stopped at the page "
+                f"cap; a repository missing from a PREFIX is not a repository out of reach.",
+                message_data={"owner": owner, "secret": name},
+            )
+            return OrgSecretReach("unknown", frozenset())
+        return OrgSecretReach(
+            "selected",
+            frozenset(str(r.get("full_name") or "") for r in rows if isinstance(r, dict)),
+        )
 
     def _secret_rows(
         self,
