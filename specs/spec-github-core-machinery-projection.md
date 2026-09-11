@@ -80,6 +80,7 @@ prose (`git-serious-tap/docs/doc-git-serious-shape-of-a-pipeline.md`).
 | req-github-core-machinery-stages | [Stage Ranking](#stage-ranking) | In Development | sources → pipelines → outputs; job rank = longest path over `DEPENDS_ON_JOB`; unresolved is a state |
 | req-github-core-machinery-flow | [Direction](#direction) | In Development | `flow: "rtl"` (default) or `"ltr"` — a sign on the stage axis |
 | req-github-core-machinery-tiers | [Tiers Outside The Repository](#tiers-outside-the-repository) | In Development | third parties top-centre; outputs to humans bottom-centre (reserved) |
+| req-github-core-machinery-credentials | [Credentials In The Picture](#credentials-in-the-picture) | Implemented | 2026-09-11 (#116): `actions_secret` nodes nest in the account, repository or environment that DEFINES them; REFERENCES_SECRET edges from the naming workflows; unattached secrets hidden; names no scope defines are never nodes |
 | req-github-core-machinery-honesty | [Unknowns Render As Unknowns](#unknowns-render-as-unknowns) | In Development | unresolved ranks; "not yet collected" output placeholder |
 | req-github-core-machinery-consumer | [Consumer Contract](#consumer-contract) | In Development | what the consuming plugin's searches must put in the scene; git-serious is the first consumer |
 | req-github-core-machinery-live | [The Live Layer](#the-live-layer) | Proposed | runs and executed jobs painted onto the machinery; needs `INSTANCE_OF_JOB` (#30) |
@@ -373,6 +374,49 @@ Runs and executed jobs painted onto the static machinery: per-job status badge s
 conclusion; green / red / *not observed*), a run selector that replays one run over the same
 projection, and cascade reveal walking the run through the ranks. Requires `INSTANCE_OF_JOB` (#30)
 so the join from executed job to declaration is a fact on the grid, not a name match in a layout.
+
+### Credentials In The Picture
+----
+RID: `req-github-core-machinery-credentials`
+Status: `Implemented`
+
+An Actions secret is an input a pipeline reads, and since github-core#105 it is a node on the grid
+(`actions_secret`, held by an account, a repository or an environment through `DEFINES_SECRET`, named by
+workflows through `REFERENCES_SECRET`). The picture draws it where it is held — the first "net-new box"
+of the 2026-09-11 machinery pass, nodes and edges before badges (George: "get the net-new boxes on the
+board and deal with the badging later").
+
+#### Implementation
+
+- `T.secret = github_core__actions_secret`; three containment relationships, one per holder kind:
+  `(account)-[:DEFINES_SECRET]->(secret)`, `(repository)-[:DEFINES_SECRET]->(secret)`,
+  `(environment)-[:DEFINES_SECRET]->(secret)`. An environment holding a secret becomes a container for
+  it (a padding and a short flow layout are declared); one without stays the leaf it was.
+- Inside the repository a secret is **sources** stage, ordered after the rulesets. Inside the account
+  the box lays out as two tiers — repositories, then credentials — so an organisation secret reads as
+  the account's, beneath the repositories it reaches.
+- `REFERENCES_SECRET` (workflow → secret) draws thin, dotted, in the palette's amber, no arrowhead:
+  plumbing, not flow. `DEFINES_SECRET` is consumed as containment and hidden by the nesting runtime.
+- The orphan rule keeps a secret only when its holder is in the picture: a repository in scope, an
+  environment that survived the environment rule, or the account that owns a repository in scope.
+- The secret's fill and border are `ActionsSecret.DEFAULT_DISPLAY` (round-tag, amber); the module
+  restates no colour for the node.
+- **Not drawn:** a name a workflow uses that no readable scope defines. It is recorded on the workflow
+  (`tags.secret_refs.unresolved`), never minted as a node (a reference is not evidence a credential
+  exists), so it cannot be a box; it is the badging pass's to show.
+- Consumers: git-serious's shared scene searches carry the type and both edges (git-serious-tap#82);
+  git-serious-double-tap's lanes layout restates the three relationships (git-serious-double-tap#39,
+  the #91 drift risk).
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-machinery-credentials-1 | Held Where It Is Defined | Implemented | An organisation secret renders inside the account box, a repository secret inside the repository box in the sources column, an environment secret inside its environment. | Observed 2026-09-11 on the demo grid: 3 org + 3 repo secrets of unified-systems-com/tap. |
+| req-github-core-machinery-credentials-2 | Named By Its Workflows | Implemented | Every `REFERENCES_SECRET` edge in the scene draws from the workflow to the secret, dotted and unarrowed. | 15 edges on the demo grid. |
+| req-github-core-machinery-credentials-3 | Unattached Secrets Hidden | Implemented | A secret whose holder is not in the picture is hidden and counted in the `machinery_hidden_unowned` warning, never a root. | Same rule as environments and rulesets. |
+| req-github-core-machinery-credentials-4 | Absence Is Of Instances | Implemented | A repository with no secrets shows no secret and no placeholder — the type is collected; there are none. | Contrast the output placeholders, which mark an uncollected TYPE. |
+| req-github-core-machinery-credentials-5 | Unfound Names Are Not Boxes | Implemented | Names in `tags.secret_refs.unresolved` are never rendered as nodes by this module. | Badging pass. |
 
 ## Out Of Scope (v0)
 

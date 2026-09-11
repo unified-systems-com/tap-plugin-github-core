@@ -56,6 +56,9 @@ const T = {
     app: "github_core__github_app",
     runner: "github_core__github_runner",
     issuer: "identity_core__oidc_issuer",
+    // A credential the holder defines (req-github-core-machinery-credentials): nests in the
+    // account, repository or environment that DEFINES it; the workflows that name it point at it.
+    secret: "github_core__actions_secret",
     placeholder: "_machinery_placeholder",
 };
 
@@ -70,6 +73,8 @@ const E = {
     protects: "PROTECTS_REPOSITORY__github_core",
     hasEnvironment: "DECLARES_ENVIRONMENT__github_core",
     enabledOn: "ENABLED_ON_REPOSITORY__github_core",
+    definesSecret: "DEFINES_SECRET__github_core",
+    referencesSecret: "REFERENCES_SECRET__github_core",
 };
 
 // Scene-local synthetic edges so nesting can be declared for things the
@@ -121,6 +126,7 @@ const BASE_SIZES = {
     [T.app]: {width: 180, height: 40},
     [T.runner]: {width: 180, height: 40},
     [T.issuer]: {width: 200, height: 40},
+    [T.secret]: {width: 150, height: 30},
     [T.placeholder]: {width: 190, height: 30},
 };
 
@@ -201,6 +207,12 @@ export async function execute(context) {
         rs.data("_stage", STAGE.sources);
         rs.data("_order", 3);
     });
+    // Secrets are inputs a pipeline reads: sources stage, after the gates. Inside an account or
+    // an environment the holder's own layout places them; the marks are harmless there.
+    cy.nodes(`[entity_type = "${T.secret}"]`).forEach((sec) => {
+        sec.data("_stage", STAGE.sources);
+        sec.data("_order", 4);
+    });
 
     // ---- Outputs: environments now; placeholders for what is not collected
     cy.nodes(`[entity_type = "${T.environment}"]`).forEach((env) => {
@@ -221,11 +233,15 @@ export async function execute(context) {
     // Label sizing and container chrome are the shared conventions
     // (tap_viz runtime/chrome.js — the org view's numbers), not restated here.
     const chrome = applyStandardChrome(cy, {
-        leafTypes: [T.job, T.ref, T.ruleset, T.environment, T.app, T.runner, T.issuer, T.workflow],
+        leafTypes: [T.job, T.ref, T.ruleset, T.environment, T.app, T.runner, T.issuer, T.workflow, T.secret],
         leafMaxWidth: 170,
     });
     const labelInset = parentLabelInset(chrome);
     cy.style()
+        // A workflow naming a secret: plumbing, not flow — thin, dotted, the gate amber already used here,
+        // no arrowhead. Which pipelines can read this credential is the question it answers.
+        .selector(edgeSel(E.referencesSecret))
+        .style({"line-color": "#b45309", "line-style": "dotted", "width": 1, "curve-style": "bezier", "target-arrow-shape": "none", "opacity": 0.75})
         .selector(".machinery-dynamic")
         .style({"border-style": "dashed", "border-color": "#94a3b8", "color": "#64748b", "font-style": "italic"})
         .selector(`node[entity_type = "${T.placeholder}"]`)
@@ -259,6 +275,12 @@ export async function execute(context) {
             {name: "ruleset-protects-repository", gryphon: `(parent:${T.repository})<-[:${E.protects}]-(child:${T.ruleset})`},
             {name: "repository-has-placeholder", gryphon: `(parent:${T.repository})-[:${SYN.hasPlaceholder}]->(child:${T.placeholder})`},
             {name: "workflow-defines-job", gryphon: `(parent:${T.workflow})-[:${E.definesJob}]->(child:${T.job})`},
+            // Credentials nest in whatever DEFINES them (req-github-core-machinery-credentials):
+            // an organisation secret in the account box, a repository secret in the repository
+            // box, an environment secret in its environment — which becomes a container for it.
+            {name: "account-defines-secret", gryphon: `(parent:${T.account})-[:${E.definesSecret}]->(child:${T.secret})`},
+            {name: "repository-defines-secret", gryphon: `(parent:${T.repository})-[:${E.definesSecret}]->(child:${T.secret})`},
+            {name: "environment-defines-secret", gryphon: `(parent:${T.environment})-[:${E.definesSecret}]->(child:${T.secret})`},
         ],
         baseSizes: BASE_SIZES,
         padding: 14,
@@ -269,6 +291,7 @@ export async function execute(context) {
             [T.account]: {top: 24 + labelInset, right: 34, bottom: 34, left: 34},
             [T.repository]: {top: 18 + labelInset, right: 28, bottom: 28, left: 28},
             [T.workflow]: {top: 6 + labelInset, right: 14, bottom: 14, left: 14},
+            [T.environment]: {top: 6 + labelInset, right: 10, bottom: 10, left: 10},
         },
         // github.com is the one root. Third parties on top, the account below;
         // the bottom tier (outputs to humans) is reserved and empty in v0.
@@ -282,11 +305,22 @@ export async function execute(context) {
             ],
         },
         innerLayouts: {
-            [T.account]: {name: "flow", aspect: 2.0, gap: 24, sort: "area-desc"},
+            // The account: its repositories, then a row of the credentials it defines — an
+            // organisation secret reads as "the account's, beneath the repositories it reaches".
+            [T.account]: {
+                name: "tiered-rows", rowGap: 20, itemGap: 18,
+                tiers: [
+                    {name: "repositories", entityTypes: [T.repository]},
+                    {name: "credentials", entityTypes: [T.secret]},
+                ],
+            },
             // The pipelines stage holds every workflow; flowed columns keep it a
             // block (rows in trigger-class order) instead of a seventeen-box tower.
             [T.repository]: {...ranked("order"), columnLayout: "flow", flowAspect: 1.1},
             [T.workflow]: ranked("label"),
+            // An environment holding secrets lays them in a short row; without children it
+            // stays the leaf it was.
+            [T.environment]: {name: "flow", aspect: 3.0, gap: 8},
         },
     });
     warnings.push(...(result.warnings || []));
@@ -588,6 +622,23 @@ function _hideOrphans(cy, repos, warn) {
     cy.nodes(`[entity_type = "${T.ruleset}"]`).forEach((n) => { if (!attachedTo(n, E.protects, "out")) hidden.push(n); });
     cy.nodes(`[entity_type = "${T.app}"]`).forEach((n) => { if (!attachedTo(n, E.enabledOn, "out")) hidden.push(n); });
     cy.nodes(`[entity_type = "${T.environment}"]`).forEach((n) => { if (!attachedTo(n, E.hasEnvironment, "in")) hidden.push(n); });
+    // A secret stays when the thing that DEFINES it is in the picture: a repository in scope, an
+    // environment that survived above, or the account that owns a repository in scope.
+    const hiddenSoFar = new Set(hidden.map((n) => n.id()));
+    const accountIds = new Set();
+    repos.forEach((r) => r.incomers(edgeSel(E.ownsRepo)).sources().forEach((a) => accountIds.add(a.id())));
+    cy.nodes(`[entity_type = "${T.secret}"]`).forEach((n) => {
+        const holders = n.incomers(edgeSel(E.definesSecret)).sources();
+        const kept = holders.some((h) => {
+            if (hiddenSoFar.has(h.id())) return false;
+            const t = h.data("entity_type");
+            if (t === T.repository) return repoIds.has(h.id());
+            if (t === T.account) return accountIds.has(h.id());
+            if (t === T.environment) return true; // an unattached environment is already hidden above
+            return false;
+        });
+        if (!kept) hidden.push(n);
+    });
     cy.nodes(`[entity_type = "${T.workflow}"], [entity_type = "${T.ref}"]`).forEach((n) => {
         const et = n.data("entity_type") === T.workflow ? E.definesWorkflow : SYN.hasRef;
         if (!attachedTo(n, et, "in")) hidden.push(n);

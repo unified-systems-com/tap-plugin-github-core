@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from importlib import resources
 
+from tap_plugin.github_core.models.actions_secret import ActionsSecret
 from tap_plugin.github_core.models.github_workflow import GithubWorkflow
 from tap_plugin.github_core.models.workflow_job import WorkflowJob
 
@@ -53,6 +54,22 @@ def test_module_restates_no_palette() -> None:
     )
     fills = re.findall(r'"background-color":\s*"(#[0-9A-Fa-f]{6})"', source)
     assert fills == ["#f8fafc"], fills
-    for model_cls in (GithubWorkflow, WorkflowJob):
+    # The secret joined the picture 2026-09-11 (req-github-core-machinery-credentials); its round-tag
+    # amber is model metadata too and must not be restated by the module.
+    for model_cls in (GithubWorkflow, WorkflowJob, ActionsSecret):
         for hex_colour in _colours(model_cls).values():
             assert hex_colour.lower() not in source.lower(), hex_colour
+
+
+def test_module_knows_the_secret_type_and_its_edges() -> None:
+    """req-github-core-machinery-credentials-1/-2: the type and both edge kinds are declared, not guessed."""
+    source = (
+        resources.files("tap_plugin.github_core")
+        .joinpath("static/github_core/js/projections/machinery.js")
+        .read_text(encoding="utf-8")
+    )
+    assert 'secret: "github_core__actions_secret"' in source
+    assert 'definesSecret: "DEFINES_SECRET__github_core"' in source
+    assert 'referencesSecret: "REFERENCES_SECRET__github_core"' in source
+    for holder in ("account", "repository", "environment"):
+        assert f'name: "{holder}-defines-secret"' in source, holder
