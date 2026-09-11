@@ -5952,6 +5952,15 @@ class GithubCollector(CollectorBase):
             if key in detail:
                 configuration[key] = detail[key]
         configuration["settings_observability"] = self._org_detail_state
+        # GitHub has TWO organization 2FA settings: "require two-factor for everyone" (the boolean
+        # above) and "only allow secure two-factor methods" (blocks SMS for members and outside
+        # collaborators). The second has no REST or GraphQL field at any tier (measured 2026-09-11:
+        # 68 keys on /orgs/{org} with an owner App token, none about methods; tap#157 holds the full
+        # measurement). It is written here as an explicit ceiling so no view can render the
+        # requirement boolean as if it answered the method question: an organization can require
+        # 2FA, permit SMS, and read `two_factor_requirement_enabled: true`.
+        configuration["two_factor_secure_methods_required"] = None
+        configuration["two_factor_methods_observability"] = _UNOBSERVABLE
         if self._org_actions_policy is not None:
             configuration["actions_policy"] = self._org_actions_policy
         configuration["actions_policy_observability"] = self._org_actions_policy_state

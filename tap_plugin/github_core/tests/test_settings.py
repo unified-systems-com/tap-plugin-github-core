@@ -89,6 +89,10 @@ def test_policy_keys_are_copied_verbatim_and_marked_observed() -> None:
     assert configuration["default_repository_permission"] == "none"
     assert configuration["plan"] == {"name": "team", "seats": 3, "filled_seats": 2}
     assert configuration["settings_observability"] == "observed"
+    # The method restriction ("only secure two-factor methods") has no API field at any tier: it is
+    # written as an explicit ceiling, never inferred from the requirement boolean.
+    assert configuration["two_factor_secure_methods_required"] is None
+    assert configuration["two_factor_methods_observability"] == "unobservable"
     assert "billing_email" not in configuration, "only settings keys travel; contact data does not"
     assert _codes(c, "warn") == [] and _codes(c, "info") == []
 
@@ -109,7 +113,12 @@ def test_refused_org_detail_is_unobservable_with_no_keys() -> None:
     client = _Client({}, statuses={f"/orgs/{_ORG}": 403})
     configuration = c._account_configuration(client, {"login": _ORG, "type": "Organization"})
     assert configuration["settings_observability"] == "unobservable"
-    assert set(configuration) <= {"settings_observability", "actions_policy_observability"}
+    assert set(configuration) <= {
+        "settings_observability",
+        "actions_policy_observability",
+        "two_factor_secure_methods_required",
+        "two_factor_methods_observability",
+    }
     assert "ORG_SETTINGS_UNOBSERVABLE_403" in _codes(c, "warn")
 
 

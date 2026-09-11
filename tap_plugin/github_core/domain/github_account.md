@@ -50,6 +50,8 @@ Also unobservable: OAuth applications authorised for the organization have **no 
 
 **The policy block is a credential ceiling, not a refusal.** `GET /orgs/{org}` answers every caller; only an owner or an `organization:administration:read` App gets the policy keys back, and a member token gets the public half with no error. The collector reads the absence of every policy key as `settings_observability: public_only` (measured 2026-09-11: the owner payload carries 67 keys, the member payload the public subset). `GET /orgs/{org}/actions/permissions` is the one that refuses outright (403, "You must be an org admin or have the actions policies fine-grained permission").
 
+**Two 2FA settings, one field.** GitHub separates "require two-factor authentication for everyone" from "only allow secure two-factor methods" (which blocks SMS for members and outside collaborators). Only the first has an API field. The node therefore carries `two_factor_secure_methods_required: null` with `two_factor_methods_observability: unobservable` beside the boolean — an organization can require 2FA, permit SMS, and read `two_factor_requirement_enabled: true`, so the boolean must never be rendered as "2FA is handled". Per-member factor type is not published at any tier either (tap#157).
+
 ## Authoritative Source
 
 - **Source:** GitHub REST API — Users (`GET /users/{username}`), Organizations (`GET /orgs/{org}`), and the fine-grained personal-access-token permissions reference
