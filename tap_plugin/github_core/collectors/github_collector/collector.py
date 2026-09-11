@@ -52,9 +52,9 @@ from .enrichment import resolve_links
 from .graphql_client import GithubGraphQLClient, GithubGraphQLError
 from .identity import (
     account_id,
-    actions_secret_id,
     actions_artifact_id,
     actions_cache_id,
+    actions_secret_id,
     app_installation_id,
     code_scanning_alert_id,
     code_scanning_analysis_id,
