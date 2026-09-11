@@ -1467,6 +1467,90 @@
       "present": true,
       "source": "app_installation_self"
     },
+    "/orgs/{owner}": {
+      "item_properties": [
+        "advanced_security_enabled_for_new_repositories",
+        "archived_at",
+        "avatar_url",
+        "billing_email",
+        "blog",
+        "collaborators",
+        "company",
+        "created_at",
+        "default_repository_branch",
+        "default_repository_permission",
+        "dependabot_alerts_enabled_for_new_repositories",
+        "dependabot_security_updates_enabled_for_new_repositories",
+        "dependency_graph_enabled_for_new_repositories",
+        "deploy_keys_enabled_for_repositories",
+        "description",
+        "disk_usage",
+        "display_commenter_full_name_setting_enabled",
+        "email",
+        "events_url",
+        "followers",
+        "following",
+        "has_organization_projects",
+        "has_repository_projects",
+        "hooks_url",
+        "html_url",
+        "id",
+        "is_verified",
+        "issues_url",
+        "location",
+        "login",
+        "members_allowed_repository_creation_type",
+        "members_can_change_repo_visibility",
+        "members_can_create_internal_repositories",
+        "members_can_create_pages",
+        "members_can_create_private_pages",
+        "members_can_create_private_repositories",
+        "members_can_create_public_pages",
+        "members_can_create_public_repositories",
+        "members_can_create_repositories",
+        "members_can_create_teams",
+        "members_can_delete_issues",
+        "members_can_delete_repositories",
+        "members_can_fork_private_repositories",
+        "members_can_invite_outside_collaborators",
+        "members_can_view_dependency_insights",
+        "members_url",
+        "name",
+        "node_id",
+        "owned_private_repos",
+        "plan",
+        "private_gists",
+        "public_gists",
+        "public_members_url",
+        "public_repos",
+        "readers_can_create_discussions",
+        "repos_url",
+        "secret_scanning_enabled_for_new_repositories",
+        "secret_scanning_push_protection_custom_link",
+        "secret_scanning_push_protection_custom_link_enabled",
+        "secret_scanning_push_protection_enabled_for_new_repositories",
+        "total_private_repos",
+        "twitter_username",
+        "two_factor_requirement_enabled",
+        "type",
+        "updated_at",
+        "url",
+        "web_commit_signoff_required"
+      ],
+      "present": true,
+      "source": "org_settings"
+    },
+    "/orgs/{owner}/actions/permissions": {
+      "item_properties": [
+        "allowed_actions",
+        "enabled_repositories",
+        "selected_actions_url",
+        "selected_repositories_url",
+        "sha_pinning_required"
+      ],
+      "present": true,
+      "source": "org_actions_permissions"
+    },
     "/orgs/{owner}/actions/secrets": {
       "item_properties": [
         "created_at",
@@ -1959,6 +2043,21 @@
       "present": true,
       "source": "code_scanning_analyses"
     },
+    "/repos/{owner}/{repo}/environments/{environment_name}": {
+      "item_properties": [
+        "created_at",
+        "deployment_branch_policy",
+        "html_url",
+        "id",
+        "name",
+        "node_id",
+        "protection_rules",
+        "updated_at",
+        "url"
+      ],
+      "present": true,
+      "source": "environment_detail"
+    },
     "/repos/{owner}/{repo}/environments/{environment_name}/secrets": {
       "item_properties": [
         "created_at",
@@ -2090,8 +2189,8 @@
       "source": "account"
     }
   },
-  "spec_commit": "0a144e030abbe358000f0d32874e197b59a8f7ed",
-  "spec_sha256": "7c3a4bfa71e850a32992882392db3cf315dcdeca46ba5a62da963dbea6a589a2",
-  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/0a144e030abbe358000f0d32874e197b59a8f7ed/descriptions/api.github.com/api.github.com.json",
+  "spec_commit": "3fbd6205b5531b994b348ce3f89c6abbd524a4b8",
+  "spec_sha256": "44f6788ecdee60fb40f8f7cbb10a97c5f57ab423748353da1da3480321484705",
+  "spec_url": "https://raw.githubusercontent.com/github/rest-api-description/3fbd6205b5531b994b348ce3f89c6abbd524a4b8/descriptions/api.github.com/api.github.com.json",
   "spec_version": "1.1.4"
 }

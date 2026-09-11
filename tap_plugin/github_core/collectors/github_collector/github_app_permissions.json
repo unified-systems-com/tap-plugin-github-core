@@ -40,7 +40,7 @@
     "checks": {
       "state": "requested",
       "level": "read",
-      "why": "Check runs and suites: what the gate required and what answered \u2014 the required-checks half of why-isn't-this-merging. Requested 2026-09-08 (github-core#82): the head commit's `statusCheckRollup` CheckRun contexts on every collected pull request.",
+      "why": "Check runs and suites: what the gate required and what answered — the required-checks half of why-isn't-this-merging. Requested 2026-09-08 (github-core#82): the head commit's `statusCheckRollup` CheckRun contexts on every collected pull request.",
       "sources": [
         "pull_request_checks"
       ]
@@ -103,9 +103,12 @@
       "why": "Enterprise-scoped; no enterprise."
     },
     "environments": {
-      "state": "recommended",
+      "state": "requested",
       "level": "read",
-      "why": "Environment protection rules, reviewers and deployment branch policy — the fields the environment node holds as null today for want of a transport (req-github-core-environments-3)."
+      "why": "Environment protection rules, reviewers and deployment branch policy — the fields the environment node held as null until req-github-core-settings-4 read them from the REST environment. Read-only: who approves a deployment and which branches may deploy.",
+      "sources": [
+        "environment_detail"
+      ]
     },
     "followers": {
       "state": "not_applicable",
@@ -159,9 +162,11 @@
     "organization_administration": {
       "state": "requested",
       "level": "read",
-      "why": "App installations on the organisation — the robots with commit rights.",
+      "why": "App installations on the organisation — the robots with commit rights — and, since req-github-core-settings, the organization's policy block and Actions policy: 2FA requirement, default repository permission, member privileges, security defaults for new repositories, which actions workflows may use.",
       "sources": [
-        "app_installations"
+        "app_installations",
+        "org_actions_permissions",
+        "org_settings"
       ]
     },
     "organization_announcement_banners": {

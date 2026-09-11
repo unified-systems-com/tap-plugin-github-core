@@ -46,6 +46,8 @@ The slug stays `github_core__github_repository` until then, because slugs are id
 
 Populated from `GET /repos/{owner}/{repo}` at **`repository:metadata:read`** — the cheapest permission GitHub offers, which is worth knowing: the core of the inventory is reachable by a credential that can see almost nothing else.
 
+The same payload's **settings** — forking, archive and template state, merge policy, features, topics — land in `configuration` under GitHub's key names since `req-github-core-settings-3`, with one exception marked separately: `security_and_analysis` (secret scanning, push protection, Dependabot updates) is returned only to an administrator, and GitHub *omits the key* rather than refusing, so its absence is stamped `security_settings_observability: unobservable` and never read as scanning being off.
+
 Under account scope the repository list comes from `GET /orgs/{owner}/repos` (user fallback), same permission, paginated to the end of the `Link` chain with walk completeness recorded.
 
 **What a read-only credential cannot see about a repository**, from the verified API-surface pass:

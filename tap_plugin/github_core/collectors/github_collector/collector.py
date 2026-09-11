@@ -229,6 +229,13 @@ _SITE_CODE_SCANNING_NOT_ENABLED = "8cab"
 _SITE_CODE_SCANNING_ALERTS_TRUNCATED = "5a88"
 _SITE_CODE_SCANNING_ANALYSES_TRUNCATED = "5314"
 _SITE_CODE_SCANNING_COLLECTED = "5c6f"
+# settings surfaces (req-github-core-settings)
+_SITE_ORG_SETTINGS_PUBLIC_ONLY = "89ed"
+_SITE_ORG_SETTINGS_UNOBSERVABLE = "3abc"
+_SITE_ACTIONS_POLICY_UNOBSERVABLE = "2f13"
+_SITE_REPO_SETTINGS_UNOBSERVABLE = "28ca"
+_SITE_ENVIRONMENT_DETAIL_UNOBSERVABLE = "700b"
+_SITE_ORG_SETTINGS_SKIPPED = "f8f9"
 
 #: Distinct (action repository, declared ref) pairs looked up over REST per run. Each costs one to
 #: three calls against a repository that is NOT in scope; past the cap an edge lands as
@@ -371,6 +378,86 @@ _CONTAINER_TAG_SHA_MIN_HEX = 7
 _OUTPUT_SURFACES: tuple[str, ...] = ("releases", "artifacts", "packages")
 _OBSERVED = "observed"
 _UNOBSERVABLE = "unobservable"
+#: A settings surface that exists only on organizations, asked of a user account.
+_NOT_APPLICABLE = "not_applicable"
+#: `GET /orgs/{org}` answered, but only with the half every credential sees — none of the
+#: policy keys below arrived, so the credential is not an owner / organization-administration
+#: reader. Distinct from `unobservable` (refused) and from `observed` (the policy is on the node).
+_PUBLIC_ONLY = "public_only"
+
+# ---------- settings surfaces (req-github-core-settings) ----------
+#: Keys of `GET /orgs/{org}` copied VERBATIM onto `github_account.configuration`. GitHub's own
+#: names, unrenamed, so a reader can hold the node against the API reference and the conformance
+#: lane can hold the manifest against GitHub's published schema without a rename table.
+#: The public half arrives for any caller; the policy half arrives only for an owner or an
+#: `organization:administration:read` App — and its ABSENCE is how the collector learns which
+#: credential it holds (`settings_observability`), never a default.
+_ORG_SETTING_KEYS_PUBLIC: tuple[str, ...] = (
+    "is_verified",
+    "has_organization_projects",
+    "has_repository_projects",
+    "public_repos",
+)
+_ORG_SETTING_KEYS_POLICY: tuple[str, ...] = (
+    "two_factor_requirement_enabled",
+    "default_repository_permission",
+    "default_repository_branch",
+    "members_allowed_repository_creation_type",
+    "members_can_create_repositories",
+    "members_can_create_public_repositories",
+    "members_can_create_private_repositories",
+    "members_can_create_internal_repositories",
+    "members_can_create_pages",
+    "members_can_create_public_pages",
+    "members_can_create_private_pages",
+    "members_can_fork_private_repositories",
+    "members_can_change_repo_visibility",
+    "members_can_delete_repositories",
+    "members_can_delete_issues",
+    "members_can_invite_outside_collaborators",
+    "members_can_create_teams",
+    "members_can_view_dependency_insights",
+    "readers_can_create_discussions",
+    "web_commit_signoff_required",
+    "advanced_security_enabled_for_new_repositories",
+    "dependabot_alerts_enabled_for_new_repositories",
+    "dependabot_security_updates_enabled_for_new_repositories",
+    "dependency_graph_enabled_for_new_repositories",
+    "secret_scanning_enabled_for_new_repositories",
+    "secret_scanning_push_protection_enabled_for_new_repositories",
+    "secret_scanning_push_protection_custom_link_enabled",
+    "deploy_keys_enabled_for_repositories",
+    "display_commenter_full_name_setting_enabled",
+    "total_private_repos",
+    "owned_private_repos",
+    "plan",
+)
+#: Keys of `GET /repos/{owner}/{repo}` copied verbatim onto `github_repository.configuration`.
+#: `security_and_analysis` is the admin-only one: GitHub omits the key for a non-admin caller, and
+#: that omission is recorded as `security_settings_observability`, not read as "off".
+_REPO_SETTING_KEYS: tuple[str, ...] = (
+    "private",
+    "fork",
+    "archived",
+    "disabled",
+    "is_template",
+    "allow_forking",
+    "allow_auto_merge",
+    "allow_merge_commit",
+    "allow_rebase_merge",
+    "allow_squash_merge",
+    "allow_update_branch",
+    "delete_branch_on_merge",
+    "web_commit_signoff_required",
+    "has_issues",
+    "has_projects",
+    "has_wiki",
+    "has_pages",
+    "has_discussions",
+    "has_downloads",
+    "topics",
+    "security_and_analysis",
+)
 #: Third state for the code-scanning surface (req-github-core-code-scanning): GitHub said the
 #: feature is off for this repository — a 404 `no analysis found`, or a 403 naming Advanced
 #: Security on a private repository without it. Distinct from `unobservable`, which is the
@@ -470,6 +557,12 @@ class GithubCollector(CollectorBase):
     # Config layer keyed by `owner/repo`, populated in run(); empty for a repos-only scope and on
     # any path that does not go through run(), so every reader must treat it as optional.
     _config: ClassVar[dict[str, Any]] = {}
+    # Settings surfaces (req-github-core-settings): class-level defaults so a collector built
+    # without its constructor — the seeded tests do this — still reads "not yet asked".
+    _org_detail: dict[str, Any] | None = None
+    _org_detail_state: str = ""
+    _org_actions_policy: dict[str, Any] | None = None
+    _org_actions_policy_state: str = ""
 
     @classmethod
     def self_test(cls) -> CollectorSelfTestResult:
@@ -748,6 +841,13 @@ class GithubCollector(CollectorBase):
         # Account type of the observed owner ("Organization" | "User"), learned when
         # the account node is emitted; steers owner-scoped app URLs.
         self._account_type: str = ""
+        # Settings surfaces are ACCOUNT facts read once and stamped on every mint of the account
+        # node (which happens per repository): the org detail payload, the Actions policy, and
+        # their observability states (req-github-core-settings).
+        self._org_detail: dict[str, Any] | None = None
+        self._org_detail_state: str = ""
+        self._org_actions_policy: dict[str, Any] | None = None
+        self._org_actions_policy_state: str = ""
         #: Actor logins already emitted as accounts this run. One person bypassing in
         #: nineteen repositories is ONE account node, not nineteen.
         self._emitted_actor_logins: set[str] = set()
@@ -943,6 +1043,12 @@ class GithubCollector(CollectorBase):
 
         # --- installed Apps: an App-only surface (req-github-core-app-installations).
         self._collect_app_installations(client, owner, nodes, edges)
+
+        # --- Actions policy: an account surface (req-github-core-settings-2), read once here and
+        # stamped onto the account node each time a repository mints it below.
+        self._org_actions_policy, self._org_actions_policy_state = (
+            self._collect_org_actions_policy(client, owner)
+        )
 
         # --- organisation secret NAMES: an account surface, read once and consulted by every
         # repository's workflow walk below, so it must land BEFORE the walk rather than after it
@@ -1409,7 +1515,7 @@ class GithubCollector(CollectorBase):
                     "github_id": account_payload.get("id"),
                     "account_type": account_payload.get("type", ""),
                     "html_url": account_payload.get("html_url", ""),
-                    "configuration": {},
+                    "configuration": self._account_configuration(client, account_payload),
                     "tags": {},
                 },
             )
@@ -1432,6 +1538,13 @@ class GithubCollector(CollectorBase):
             self._repo_payload_from_config(gql)
             if gql
             else client.get(f"/repos/{full_name}")
+        )
+        # The settings half of the repository (forking, archive state, merge policy, the
+        # admin-only security_and_analysis block) is REST-only; when the config layer supplied
+        # the identity half this is the one extra call per repository, and a refusal is
+        # recorded rather than read as defaults (req-github-core-settings-3).
+        settings_payload = (
+            self._fetch_repository_settings(client, full_name) if gql else repo_payload
         )
         repo_uuid = repository_id(full_name)
         repo_envelope = node_envelope(
@@ -1463,7 +1576,7 @@ class GithubCollector(CollectorBase):
                 # `""` is "never asked" (req-github-core-code-scanning). Four states, because
                 # "the feature is off" and "we were refused" are different facts.
                 "code_scanning_observability": "",
-                "configuration": {},
+                "configuration": self._repository_configuration(settings_payload),
                 "tags": {},
             },
         )
@@ -1545,7 +1658,7 @@ class GithubCollector(CollectorBase):
             client, full_name, repo_uuid, repo_dims, ref_uuid_by_ref, nodes, edges
         )
         env_uuid_by_name = self._emit_environments(
-            full_name, repo_uuid, repo_dims, nodes, edges
+            full_name, repo_uuid, repo_dims, nodes, edges, client=client
         )
         # Secret NAMES, before the workflow walk, so a workflow's `${{ secrets.X }}` reference can
         # resolve against something already in hand rather than dangling. Three scopes feed one
@@ -2892,19 +3005,31 @@ class GithubCollector(CollectorBase):
         repo_dims: dict[str, str],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
+        client: GithubClient | None = None,
     ) -> dict[str, Any]:
-        """Emit deployment environments, returning ``{name: uuid}`` for the declared jobs to use."""
+        """Emit deployment environments, returning ``{name: uuid}`` for the declared jobs to use.
+
+        The config layer names the environment and its protection-rule TYPES; the REST detail
+        (`GET /repos/{r}/environments/{name}`, req-github-core-settings-4) adds who the required
+        reviewers are, whether admins may bypass, and the deployment branch policy. One call per
+        environment; a refusal leaves the three fields null and says so on the node.
+        """
         gql = self._config.get(full_name)
         if not gql:
             return {}
         deploy_dims = {**repo_dims, "github.surface": "deployments"}
         uuid_by_name: dict[str, Any] = {}
+        refused: list[tuple[str, int]] = []
         for env in GithubGraphQLClient.environments(gql):
             name = env["name"]
             if not name:
                 continue
             env_uuid = environment_id(full_name, name)
             uuid_by_name[name] = env_uuid
+            detail = self._fetch_environment_detail(client, full_name, name)
+            if isinstance(detail, int):
+                refused.append((name, detail))
+                detail = None
             nodes.append(
                 node_envelope(
                     entity_id=env_uuid,
@@ -2916,16 +3041,27 @@ class GithubCollector(CollectorBase):
                         "environment_id": env["environment_id"],
                         "name": name,
                         "protection_rules": env["protection_rules"],
-                        # The GraphQL environment carries no branch policy; the REST environments
-                        # endpoint does. Left null (unobserved) rather than defaulted to "none",
-                        # which would assert an absence this transport never looked for.
-                        "deployment_branch_policy": None,
-                        "can_admins_bypass": None,
-                        "html_url": "",
-                        "configuration": {},
+                        # Null (unobserved) unless the REST detail answered — never defaulted to
+                        # "none", which would assert an absence this transport never looked for.
+                        "deployment_branch_policy": (
+                            detail.get("deployment_branch_policy") if detail else None
+                        ),
+                        "can_admins_bypass": detail.get("can_admins_bypass") if detail else None,
+                        "html_url": str(detail.get("html_url") or "") if detail else "",
+                        "configuration": self._environment_configuration(detail, client),
                         "tags": {},
                     },
                 )
+            )
+        if refused:
+            self.record_warn(
+                _SITE_ENVIRONMENT_DETAIL_UNOBSERVABLE,
+                "ENVIRONMENT_DETAIL_UNOBSERVABLE",
+                f"{len(refused)} environment(s) on {full_name} refused the REST detail "
+                f"({', '.join(f'{n}:{st}' for n, st in refused)}) — reviewers, admin bypass and "
+                f"branch policy are NOT observed there, which is not the same as none being set. "
+                f"The credential needs repository environments read.",
+                message_data={"repo": full_name, "environments": refused},
             )
             edges.append(
                 self._edge(
@@ -5787,6 +5923,197 @@ class GithubCollector(CollectorBase):
                 # Maybe it's an org; let /orgs handle it (rare for user-owned repos).
                 return client.get(f"/orgs/{owner}")
             raise
+
+    # ---------- settings surfaces (req-github-core-settings) ----------
+
+    def _account_configuration(
+        self, client: GithubClient | None, account_payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The organization's policy block, verbatim, plus how much of it the credential could see.
+
+        `/users/{login}` answers for an organization too, but with the user-shaped public half
+        only; the policy keys (2FA requirement, default repository permission, member privileges,
+        security defaults for new repositories) live on `/orgs/{login}` and arrive only for an
+        owner or an `organization:administration:read` App. So an organization gets one extra
+        call, cached for the run, and `settings_observability` records which half came back:
+        `observed` (policy present), `public_only` (answered, no policy key — the credential is
+        not an administrator), `unobservable` (refused), `not_applicable` (a user account has
+        no organization policy). Values are copied under GitHub's own key names, unrenamed.
+        """
+        login = str(account_payload.get("login") or "")
+        account_type = str(account_payload.get("type") or "")
+        if account_type != "Organization":
+            return {"settings_observability": _NOT_APPLICABLE}
+        if self._org_detail_state == "":
+            self._org_detail, self._org_detail_state = self._fetch_org_detail(client, login)
+        configuration: dict[str, Any] = {}
+        detail = self._org_detail or {}
+        for key in (*_ORG_SETTING_KEYS_PUBLIC, *_ORG_SETTING_KEYS_POLICY):
+            if key in detail:
+                configuration[key] = detail[key]
+        configuration["settings_observability"] = self._org_detail_state
+        if self._org_actions_policy is not None:
+            configuration["actions_policy"] = self._org_actions_policy
+        configuration["actions_policy_observability"] = self._org_actions_policy_state
+        return configuration
+
+    def _fetch_org_detail(
+        self, client: GithubClient | None, login: str
+    ) -> tuple[dict[str, Any] | None, str]:
+        if client is None or not login:
+            return None, _UNOBSERVABLE
+        try:
+            detail = client.get(f"/orgs/{login}")
+        except GithubAPIError as exc:
+            self.record_warn(
+                _SITE_ORG_SETTINGS_UNOBSERVABLE,
+                f"ORG_SETTINGS_UNOBSERVABLE_{exc.status}",
+                f"Organization settings for {login} unreadable ({exc.status}) — 2FA requirement, "
+                f"default repository permission and member privileges are NOT observed, which is "
+                f"not the same as any of them being off.",
+                message_data={"owner": login, "status": exc.status},
+            )
+            return None, _UNOBSERVABLE
+        if not any(key in detail for key in _ORG_SETTING_KEYS_POLICY):
+            self.record_info(
+                _SITE_ORG_SETTINGS_PUBLIC_ONLY,
+                "ORG_SETTINGS_PUBLIC_ONLY",
+                f"Organization settings for {login} answered without a single policy key: this "
+                f"credential is not an owner and holds no organization administration read, so "
+                f"2FA requirement, default repository permission and member privileges are NOT "
+                f"observed. The public keys are recorded; nothing is defaulted.",
+                message_data={"owner": login},
+            )
+            return detail, _PUBLIC_ONLY
+        return detail, _OBSERVED
+
+    def _collect_org_actions_policy(
+        self, client: GithubClient | None, owner: str | None
+    ) -> tuple[dict[str, Any] | None, str]:
+        """`GET /orgs/{org}/actions/permissions` (+ `/selected-actions` when the policy is
+        `selected`): which repositories may run Actions, which actions they may use, and whether
+        SHA pinning is required. Admin-only — a member token is refused with 403, and that
+        refusal is recorded, never read as "all actions allowed"."""
+        if owner is None or client is None:
+            return None, ""
+        if self._account_type and self._account_type != "Organization":
+            return None, _NOT_APPLICABLE
+        try:
+            policy = client.get(f"/orgs/{owner}/actions/permissions")
+        except GithubAPIError as exc:
+            self.record_warn(
+                _SITE_ACTIONS_POLICY_UNOBSERVABLE,
+                f"ACTIONS_POLICY_UNOBSERVABLE_{exc.status}",
+                f"The Actions policy for {owner} is unreadable ({exc.status}) — which repositories "
+                f"may run workflows, which actions are allowed and whether SHA pinning is required "
+                f"are NOT observed. The credential needs organization administration read.",
+                message_data={"owner": owner, "status": exc.status},
+            )
+            return None, _UNOBSERVABLE
+        result: dict[str, Any] = {
+            "enabled_repositories": policy.get("enabled_repositories"),
+            "allowed_actions": policy.get("allowed_actions"),
+            "sha_pinning_required": policy.get("sha_pinning_required"),
+            "selected_actions": None,
+        }
+        if policy.get("allowed_actions") == "selected":
+            try:
+                result["selected_actions"] = client.get(
+                    f"/orgs/{owner}/actions/permissions/selected-actions"
+                )
+            except GithubAPIError as exc:
+                self.record_warn(
+                    _SITE_ACTIONS_POLICY_UNOBSERVABLE,
+                    f"ACTIONS_POLICY_SELECTED_UNOBSERVABLE_{exc.status}",
+                    f"The Actions allow-list for {owner} is unreadable ({exc.status}) while the "
+                    f"policy itself was; `selected_actions` stays null.",
+                    message_data={"owner": owner, "status": exc.status},
+                )
+        return result, _OBSERVED
+
+    def _fetch_repository_settings(
+        self, client: GithubClient, full_name: str
+    ) -> dict[str, Any] | None:
+        try:
+            return client.get(f"/repos/{full_name}")
+        except GithubAPIError as exc:
+            self.record_warn(
+                _SITE_REPO_SETTINGS_UNOBSERVABLE,
+                f"REPO_SETTINGS_UNOBSERVABLE_{exc.status}",
+                f"Repository settings for {full_name} unreadable ({exc.status}) — forking, archive "
+                f"state, merge policy and security settings are NOT observed for it.",
+                message_data={"repo": full_name, "status": exc.status},
+            )
+            return None
+
+    @staticmethod
+    def _repository_configuration(payload: dict[str, Any] | None) -> dict[str, Any]:
+        """Verbatim copy of the repository's settings keys, with two observability markers.
+
+        `settings_observability` says whether the REST payload was read at all; the separate
+        `security_settings_observability` exists because `security_and_analysis` is the one key
+        GitHub omits for a non-admin caller — its absence from an otherwise complete payload
+        means "not allowed to look", never "secret scanning is off".
+        """
+        if payload is None:
+            return {"settings_observability": _UNOBSERVABLE}
+        configuration: dict[str, Any] = {
+            key: payload[key] for key in _REPO_SETTING_KEYS if key in payload
+        }
+        configuration["settings_observability"] = _OBSERVED
+        configuration["security_settings_observability"] = (
+            _OBSERVED if "security_and_analysis" in payload else _UNOBSERVABLE
+        )
+        return configuration
+
+    @staticmethod
+    def _fetch_environment_detail(
+        client: GithubClient | None, full_name: str, name: str
+    ) -> dict[str, Any] | int | None:
+        """The REST environment: a payload, an HTTP status when refused, or None when no client."""
+        if client is None:
+            return None
+        try:
+            return client.get(f"/repos/{full_name}/environments/{quote(name, safe='')}")
+        except GithubAPIError as exc:
+            return exc.status
+
+    @staticmethod
+    def _environment_configuration(
+        detail: dict[str, Any] | None, client: GithubClient | None
+    ) -> dict[str, Any]:
+        """Who gates the environment, lifted out of the REST protection rules.
+
+        `required_reviewers` carries the principals (users and teams) and `prevent_self_review`;
+        they are recorded here as data — the `GATED_BY` edges the vocabulary names for them wait
+        for the people graph, which is what gives them a node to point at.
+        """
+        if detail is None:
+            return {"detail_observability": _UNOBSERVABLE if client is not None else ""}
+        reviewers: list[dict[str, Any]] = []
+        prevent_self_review: bool | None = None
+        wait_timer: int | None = None
+        for rule in detail.get("protection_rules") or []:
+            kind = rule.get("type")
+            if kind == "required_reviewers":
+                prevent_self_review = rule.get("prevent_self_review")
+                for entry in rule.get("reviewers") or []:
+                    principal = entry.get("reviewer") or {}
+                    reviewers.append(
+                        {
+                            "type": entry.get("type"),
+                            "login": principal.get("login") or principal.get("slug"),
+                            "id": principal.get("id"),
+                        }
+                    )
+            elif kind == "wait_timer":
+                wait_timer = rule.get("wait_timer")
+        return {
+            "detail_observability": _OBSERVED,
+            "required_reviewers": reviewers,
+            "prevent_self_review": prevent_self_review,
+            "wait_timer": wait_timer,
+        }
 
     def _fetch_run_window(
         self, client: GithubClient, full_name: str, run_limit: int

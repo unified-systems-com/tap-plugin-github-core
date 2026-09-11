@@ -1114,6 +1114,10 @@ class TestVocabularyIsDeclared:
             "checks": "read",
             "statuses": "read",
             "security_events": "read",
+            # `environments` arrived with the settings surfaces (github-core#110): the REST
+            # environment detail is the only transport for required reviewers, admin bypass and
+            # the deployment branch policy. Recommended on the product App before it was derived.
+            "environments": "read",
         }
         # `packages` arrived with the outputs (github-core#31) and is the one permission an
         # existing installation must re-accept; `custom_properties` (github-core#77) was already
