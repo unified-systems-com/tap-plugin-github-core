@@ -86,6 +86,7 @@ surface and takes only the Actions plumbing path needed for samsite.
 | req-github-core-custom-properties | [Custom Properties](#custom-properties) | Implemented | 2026-09-08 (github-core#77; live-verified the same day with the App credential alone): `github_custom_property` keyed `<owner>#<property_name>` from the organization's schema endpoint; every repository's values stamped as `github_repository.custom_properties` built over the declared names (null = observed-unset) with a three-state `custom_properties_observability`. No edge — the value lives once, on the repository. Adds nothing to the App: `organization:custom_properties:read` was already granted, now derived. |
 | req-github-core-pull-requests | [Pull Requests](#pull-requests) | In Development | 2026-09-08 (github-core#82): `pull_request` keyed `<owner/repo>#<number>` from the config-layer `pullRequests` field, joined to git_core's neutral head/base ref and head commit (`PROPOSES_REF`, `TARGETS_BASE_REF`, `PROPOSES_COMMIT`) and to its author (`OPENS_PULL_REQUEST`); build status = the head commit's check rollup flattened onto the node, App-produced checks included. Lives in github_core, not git_core: a forge object, ruled 2026-09-08. |
 | req-github-core-code-scanning | [Code Scanning Alerts](#code-scanning-alerts) | In Development | 2026-09-09 (github-core#89): the first security-axis surface, under the ruling **one generic finding type, source-specific data behind an edge**. The generic type is compliance_core's existing `compliance_finding` (v0.2.2; its placement edge is `CARRIES_COMPLIANCE_FINDING` since v0.3.0, github-core#97), which this collector MINTS one-per-alert and places with compliance_core's `CARRIES_COMPLIANCE_FINDING` (repository always, workflow when the path is one); `code_scanning_alert` is the DETAIL behind it via `DETAILS_FINDING`; `code_scanning_analysis` is the record that a scan RAN (`ANALYZES_REPOSITORY`, conditional `ANALYZES_COMMIT`). Four observability states on the repository. `security_events` recommended → requested. |
+| req-github-core-settings | [Settings — Organization, Repository, Environment](#settings--organization-repository-environment) | Implemented | 2026-09-11 (github-core#110, the BloodHound parity pass): the policy blocks GitHub already returns — org 2FA / default permission / member privileges / security defaults / Actions policy, repository forking / archive / merge / security settings, environment reviewers / admin bypass / branch policy — copied verbatim into `configuration` with a three-state observability marker beside each surface. No new types; 20 of the 87 BloodHound saved queries become field filters. Live done-test 2026-09-11 on the demo grid: org `observed` (39 keys, 2FA on, default permission none, Actions policy `selected`), 25/25 repositories and 18/18 environments `observed` |
 | req-github-core-app | [GitHub Apps](#github-apps) | Implemented | Generic `github_app` type + `ENABLED_ON_REPOSITORY` edge; Dependabot detected from the synthetic Actions entry and reclassified at collection time |
 | req-github-core-dimensions | [Dimension Strategy](#dimension-strategy) | Implemented | All four dimensions emitted: platform on every node/edge, repo on collector envelopes, surface on Actions models, observation on runs/jobs |
 | req-github-core-secret | [Collector Secret Kinds](#collector-secret-kinds) | Implemented | One `github` envelope carrying an App and/or a read-only token, additionalProperties: false; legacy kinds fold forward |
@@ -1112,7 +1113,56 @@ policy; that field is left `null` (unobserved) rather than defaulted, because de
 | --- | --- | :---: | --- | --- |
 | req-github-core-environments-1 | Environments Collected | Implemented | Each repository's environments land as `github_environment` joined by `DECLARES_ENVIRONMENT`, with their protection rules. | Free from the config layer. |
 | req-github-core-environments-2 | Declared Jobs Link To Them | Implemented | A job declaring `environment:` (in either written form) gets a `USES_ENVIRONMENT` edge to that environment. | |
-| req-github-core-environments-3 | Unobserved Fields Stay Null | Implemented | `deployment_branch_policy` and `can_admins_bypass` are null until a transport that reads them is added. | Null is unobserved; a default would be a claim. |
+| req-github-core-environments-3 | Unobserved Fields Stay Null | Implemented | `deployment_branch_policy` and `can_admins_bypass` are null until a transport that reads them is added. | Null is unobserved; a default would be a claim. The transport arrived with `req-github-core-settings-4` (REST environment detail); null now means that call was refused or not made, and `configuration.detail_observability` says which. |
+
+### Settings — Organization, Repository, Environment
+----
+RID: `req-github-core-settings`
+
+Status: `Implemented`
+
+Most of what a posture scanner asks about a GitHub organization is not a graph question at all. It
+is a checkbox: is two-factor required, what is the default repository permission, may members
+create public repositories or fork private ones, are secret scanning and Dependabot on for new
+repositories, which actions may workflows use, may this repository be forked, is it archived, who
+must approve a deployment to production. The 2026-08-27 audit of the BloodHound GitHub corpus found
+that **17 of its saved queries are exactly such filters on the organization node and 3 more on the
+repository and environment** — and that this collector fetched every one of those payloads and
+copied only the identity fields out of them, writing `configuration: {}` at every mint site.
+
+This requirement closes that with **no new types**. The settings land on the `configuration` JSON
+the three models already carry, under **GitHub's own key names, unrenamed**, so a reader can hold a
+node against the API reference and the conformance lane can hold the manifest against GitHub's
+published schema without a rename table. Copying is by allow-list (`_ORG_SETTING_KEYS_*`,
+`_REPO_SETTING_KEYS`), so contact and billing data never travel.
+
+**The observability marker is the point, not a nicety.** Each surface has a credential ceiling
+below which GitHub does not refuse — it answers with fewer keys. `/orgs/{org}` returns the public
+half to anyone and the policy half only to an owner or an organization-administration reader;
+`/repos/{r}` omits `security_and_analysis` for a non-admin; `/orgs/{org}/actions/permissions` is
+refused outright with 403. Each is recorded beside the values it governs — `settings_observability`
+∈ `observed | public_only | unobservable | not_applicable`, `security_settings_observability`,
+`actions_policy_observability`, `configuration.detail_observability` on the environment — so a
+node without `two_factor_requirement_enabled` reads as *not allowed to look*, never as *2FA off*.
+Nothing is defaulted; an absent key stays absent.
+
+Costs: one `/orgs/{owner}` and one `/actions/permissions` call per run (cached across the
+per-repository account mints), one `/repos/{r}` call per repository when the config layer supplied
+the identity half, one `/environments/{name}` call per environment. The Actions policy and the
+environment detail widen the derived permission set — `organization:administration:read` was
+already requested for installations; `repository:environments:read` is new, and moves from
+*recommended* to *requested* in the App-permission ledger because it is now used.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-settings-1 | Organization Policy Block Verbatim | Implemented | An organization's `github_account.configuration` carries the `/orgs/{org}` policy keys under GitHub's names; `settings_observability` is `observed` when a policy key arrived, `public_only` when the payload answered with none, `unobservable` when refused, `not_applicable` for a user account. The org detail is fetched once per run, not once per repository. | `GithubCollector._account_configuration`, `_fetch_org_detail`; manifest source `org_settings`. |
+| req-github-core-settings-2 | Actions Policy Recorded Or Refused | Implemented | `configuration.actions_policy` holds `enabled_repositories`, `allowed_actions`, `sha_pinning_required` and, for a `selected` policy, the allow-list; a 403 leaves no policy and stamps `actions_policy_observability: unobservable`. | `_collect_org_actions_policy`; source `org_actions_permissions`. A refused policy must never render as "all actions allowed". |
+| req-github-core-settings-3 | Repository Settings With The Admin Block Marked | Implemented | `github_repository.configuration` carries the `/repos/{r}` settings keys verbatim; `security_settings_observability` is `observed` only when `security_and_analysis` was in the payload, `unobservable` when GitHub omitted it; a refused payload records only `settings_observability: unobservable`. | `_repository_configuration`, `_fetch_repository_settings`; `repository` source fields extended. |
+| req-github-core-settings-4 | Environment Gatekeepers From The REST Detail | Implemented | `deployment_branch_policy`, `can_admins_bypass` and `html_url` are filled from `/repos/{r}/environments/{name}`; required reviewers (users and teams), `prevent_self_review` and `wait_timer` land in `configuration`; a refusal keeps the fields null and stamps `configuration.detail_observability: unobservable`, one warning per repository naming the environments. | `_fetch_environment_detail`, `_environment_configuration`; source `environment_detail`. Supersedes `req-github-core-environments-3`'s "until a transport is added". Reviewers stay data until the people graph (github-core#111) gives `GATED_BY` a node to point at. |
+| req-github-core-settings-6 | The Method Question Is Not Answered By The Requirement Boolean | Implemented | An organization's configuration carries `two_factor_secure_methods_required: null` and `two_factor_methods_observability: unobservable` beside `two_factor_requirement_enabled`: GitHub's "only allow secure two-factor methods" setting has no API field at any tier (tap#157), and an organization can require 2FA while permitting SMS. | Peer measurement 2026-09-11: 68 keys on `/orgs/{org}` with an owner App token, none about methods; enterprise consumed-licenses returns the same boolean; per-member factor type is never published. |
+| req-github-core-settings-5 | Nothing Defaulted, Nothing Extra | Implemented | Only allow-listed keys are copied (no billing or contact data); an absent key is absent on the node; the seeded tests assert the refused branch of every surface writes the marker and no value. | `tests/test_settings.py`. |
 
 ### Caches
 ----

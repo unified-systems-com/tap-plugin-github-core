@@ -28,7 +28,7 @@ Deliberately **not** covered:
 
 - **The user/organization split.** One type, one table. GitHub's API returns the same shape from `/users/{login}` and `/orgs/{login}` (the collector falls back from one to the other), and 14 of the surveyed sources model them together. `account_type` carries the difference. The corpus marks this merge as deliberate.
 - **Membership and teams.** `github_team` and `MEMBER_OF_ORG` are named in the corpus at the *friends* tier and are not built here. An account's members are not a field on the account.
-- **Organization security settings** — 2FA requirement, default repository permission, member repository-creation policy. Real and useful, but they are org-level *policy*, and the corpus's rejected-candidates table rules policy objects to be fields rather than nodes because nothing points at them. They belong in `configuration` when collected, not in a new type.
+- **Organization security settings as a type.** 2FA requirement, default repository permission, member privileges, security defaults for new repositories, the Actions policy — org-level *policy*, and the corpus's rejected-candidates table rules policy objects to be fields rather than nodes because nothing points at them. Since `req-github-core-settings` (2026-09-11) they ARE collected, into `configuration` under GitHub's own key names, with `settings_observability` and `actions_policy_observability` saying how much of the block the credential could see (`observed` / `public_only` / `unobservable` / `not_applicable`). A node without `two_factor_requirement_enabled` is a node whose collector could not look, never an organization with 2FA off.
 - **Non-human actors.** A bot or App acting on the platform is not this type; `identity_core__principal` is the corpus's home for that, at the *later* tier.
 
 ## Neutrality
@@ -47,6 +47,10 @@ Populated from `GET /users/{owner}`, falling back to `GET /orgs/{owner}` on 404,
 The reverse also holds — an owner-minted PAT sees ruleset `bypass_actors` and a read-only App does not (the corpus's open question 3, settled empirically on the same date: `specs/spec-github-core-vocabulary.md`). **Neither credential dominates.** Do not tell an adopter the App is strictly better; a complete account picture needs both, or accepts a named gap.
 
 Also unobservable: OAuth applications authorised for the organization have **no REST or GraphQL endpoint at all** — UI only. Members lacking 2FA and full organization security detail require organization-owner access.
+
+**The policy block is a credential ceiling, not a refusal.** `GET /orgs/{org}` answers every caller; only an owner or an `organization:administration:read` App gets the policy keys back, and a member token gets the public half with no error. The collector reads the absence of every policy key as `settings_observability: public_only` (measured 2026-09-11: the owner payload carries 67 keys, the member payload the public subset). `GET /orgs/{org}/actions/permissions` is the one that refuses outright (403, "You must be an org admin or have the actions policies fine-grained permission").
+
+**Two 2FA settings, one field.** GitHub separates "require two-factor authentication for everyone" from "only allow secure two-factor methods" (which blocks SMS for members and outside collaborators). Only the first has an API field. The node therefore carries `two_factor_secure_methods_required: null` with `two_factor_methods_observability: unobservable` beside the boolean — an organization can require 2FA, permit SMS, and read `two_factor_requirement_enabled: true`, so the boolean must never be rendered as "2FA is handled". Per-member factor type is not published at any tier either (tap#157).
 
 ## Authoritative Source
 

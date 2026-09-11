@@ -35,6 +35,67 @@
       "permission": "repository:metadata:read"
     },
     {
+      "name": "org_settings",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}",
+      "target_entity_type": "github_core__github_account",
+      "fields": [
+        "is_verified",
+        "has_organization_projects",
+        "has_repository_projects",
+        "public_repos",
+        "two_factor_requirement_enabled",
+        "default_repository_permission",
+        "default_repository_branch",
+        "members_allowed_repository_creation_type",
+        "members_can_create_repositories",
+        "members_can_create_public_repositories",
+        "members_can_create_private_repositories",
+        "members_can_create_internal_repositories",
+        "members_can_create_pages",
+        "members_can_create_public_pages",
+        "members_can_create_private_pages",
+        "members_can_fork_private_repositories",
+        "members_can_change_repo_visibility",
+        "members_can_delete_repositories",
+        "members_can_delete_issues",
+        "members_can_invite_outside_collaborators",
+        "members_can_create_teams",
+        "members_can_view_dependency_insights",
+        "readers_can_create_discussions",
+        "web_commit_signoff_required",
+        "advanced_security_enabled_for_new_repositories",
+        "dependabot_alerts_enabled_for_new_repositories",
+        "dependabot_security_updates_enabled_for_new_repositories",
+        "dependency_graph_enabled_for_new_repositories",
+        "secret_scanning_enabled_for_new_repositories",
+        "secret_scanning_push_protection_enabled_for_new_repositories",
+        "secret_scanning_push_protection_custom_link_enabled",
+        "deploy_keys_enabled_for_repositories",
+        "display_commenter_full_name_setting_enabled",
+        "total_private_repos",
+        "owned_private_repos",
+        "plan"
+      ],
+      "permission": "organization:administration:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "The organization's policy block (req-github-core-settings-1), copied VERBATIM under GitHub's key names onto `github_account.configuration`: 2FA requirement, default repository permission, the members_can_* privileges, the security defaults every new repository inherits, web-commit signoff, the plan. `/users/{owner}` answers for an organization with the public half only; the policy half is on `/orgs/{owner}` and arrives only for an owner or an organization-administration reader — so a payload WITHOUT a single policy key is recorded as `settings_observability: public_only`, a refusal as `unobservable`, and nothing is ever defaulted. This is the cheapest third of the BloodHound GitHub corpus: 17 of its 87 saved queries are filters on exactly these keys."
+    },
+    {
+      "name": "org_actions_permissions",
+      "kind": "rest_endpoint",
+      "path": "/orgs/{owner}/actions/permissions",
+      "target_entity_type": "github_core__github_account",
+      "fields": [
+        "enabled_repositories",
+        "allowed_actions",
+        "sha_pinning_required"
+      ],
+      "permission": "organization:administration:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "Which repositories may run Actions, which actions they may use (all / local only / selected) and whether SHA pinning is required (req-github-core-settings-2) — the organization-level ceiling on every workflow's `uses:`. Admin-only: a member token is refused with 403 (\"You must be an org admin or have the actions policies fine-grained permission\", measured 2026-09-11), and the refusal lands as `actions_policy_observability: unobservable`, never as \"all actions allowed\". When the policy is `selected`, `/selected-actions` is read for the allow-list; its refusal alone leaves `selected_actions` null."
+    },
+    {
       "name": "repository",
       "kind": "rest_endpoint",
       "path": "/repos/{owner}/{repo}",
@@ -46,9 +107,31 @@
         "github_id",
         "default_branch",
         "visibility",
-        "html_url"
+        "html_url",
+        "private",
+        "fork",
+        "archived",
+        "disabled",
+        "is_template",
+        "allow_forking",
+        "allow_auto_merge",
+        "allow_merge_commit",
+        "allow_rebase_merge",
+        "allow_squash_merge",
+        "allow_update_branch",
+        "delete_branch_on_merge",
+        "web_commit_signoff_required",
+        "has_issues",
+        "has_projects",
+        "has_wiki",
+        "has_pages",
+        "has_discussions",
+        "has_downloads",
+        "topics",
+        "security_and_analysis"
       ],
-      "permission": "repository:metadata:read"
+      "permission": "repository:metadata:read",
+      "description": "Since req-github-core-settings-3 the same payload also fills `configuration` with the repository's settings under GitHub's own key names — forking, archive state, template flag, merge policy, features, topics — and `security_and_analysis`, the admin-only block GitHub OMITS for a non-admin caller: its absence is recorded as `security_settings_observability: unobservable`, never read as scanning being off. When the config layer supplied the identity half, this is the one extra REST call per repository."
     },
     {
       "name": "workflows",
@@ -244,6 +327,20 @@
       ],
       "permission": "repository:metadata:read",
       "description": "Deployment environments and their protection rules (req-github-core-environments), delivered inside the config-layer query. The REST `/environments` endpoint documents an Environments permission; the GraphQL path returned them under the permissions already in this union, so nothing wider is requested. `deployment_branch_policy` is NOT available here and is left null (unobserved) rather than defaulted."
+    },
+    {
+      "name": "environment_detail",
+      "kind": "rest_endpoint",
+      "path": "/repos/{owner}/{repo}/environments/{environment_name}",
+      "target_entity_type": "github_core__github_environment",
+      "fields": [
+        "deployment_branch_policy",
+        "html_url",
+        "protection_rules"
+      ],
+      "permission": "repository:environments:read",
+      "permission_failure": "degrade_with_warning",
+      "description": "The REST environment behind the config-layer one (req-github-core-settings-4): WHO the required reviewers are (users and teams, with `prevent_self_review`), whether administrators may bypass the protection rules, and the deployment branch policy — the three fields the node has carried as null for want of a transport. One call per environment already observed; a refusal leaves the fields null and stamps `configuration.detail_observability: unobservable`. Reviewers land as data here; the GATED_BY edges the vocabulary names for them wait for the people graph (github-core#111) to give them a node to point at. `can_admins_bypass` is also copied when present but is not declared here: GitHub's published description of this response omits the key while the live API returns it (measured 2026-09-11), so declaring it would fail the conformance lane against a schema that is behind the service."
     },
     {
       "name": "repository_secrets",
