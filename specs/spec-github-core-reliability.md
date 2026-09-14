@@ -64,6 +64,8 @@ Rules:
 2. A **terminal** failure is never retried. It is recorded with its status and body, and the surface it refused lands as `unobservable` with the status in its note — the existing three-state discipline (`spec-github-core-v0.md`, refused is not empty).
 3. A **partial** answer lands what arrived; the degraded paths are pruned (never left as `null`) and recorded as notes, exactly as `graphql_client.prune_errored_paths` does today; a capped walk is reported as incomplete with the count left behind.
 4. The classification lives in one function in the client seam and nowhere else. A caller that inspects a status code to decide whether to retry is a defect.
+5. **The table is closed by defaults, not by omission.** Anything not listed maps as follows: an unlisted HTTP status is **terminal** (asking again is not known to help); an unlisted transport exception is **transient** once and then terminal (one retry proves it is not a blip); an unlisted GraphQL error type is **partial** when `data` is present and **terminal** when it is not; an exception the seam did not anticipate at all is neither — it propagates and fails the run closed (`req-github-core-reliability-outcome`), and the run record names the exception type so the table can grow.
+6. **GraphQL error types, mapped.** `RATE_LIMITED` → transient (rate-limit path); "couldn't respond to your request in time", `MAX_NODE_LIMIT_EXCEEDED`, `EXCESSIVE_PAGINATION` → transient with page reduction (`req-github-core-reliability-adaptive-pages`); `FORBIDDEN`, `NOT_FOUND`, `INSUFFICIENT_SCOPES`, `UNPROCESSABLE` on a path → partial when `data` is present (the path is pruned and noted), terminal when the whole response has no `data`. **Precedence:** a 200 with `data` and `errors[]` is partial regardless of the error types, except that a `RATE_LIMITED` entry makes the *next* request subject to the rate-limit rule.
 
 #### Acceptance Criteria
 
@@ -72,6 +74,8 @@ Rules:
 | req-github-core-reliability-taxonomy-1 | One Classifier | Proposed | A single function maps any exception or response the client can produce to `transient` / `terminal` / `partial`; every signal in the table has a unit test. | |
 | req-github-core-reliability-taxonomy-2 | Empty-404 Folded In | Proposed | The empty-body 404 is one row of the transient class, retried by the general policy; the bespoke `_EMPTY_404_*` loop in `api_client.py:36–143` is removed. | Its detection rule (empty body vs `{"message"}` body) survives as the classifier's rule. |
 | req-github-core-reliability-taxonomy-3 | Terminal Never Retried | Proposed | A 401, a bodied 404, a 422 and a permission 403 each produce exactly one request in the proof harness. | |
+| req-github-core-reliability-taxonomy-4 | Closed By Defaults | Proposed | An unlisted status (e.g. 418), an unlisted transport exception and an unanticipated exception each take the default path in rule 5, and the run record names the unmapped signal. | |
+| req-github-core-reliability-taxonomy-5 | GraphQL Types Mapped | Proposed | Each GraphQL error type in rule 6 classifies as stated; a 200 with data and a `FORBIDDEN` path lands the data with the path pruned. | |
 
 ### The Access Client
 ----
@@ -130,7 +134,9 @@ Retry happens in exactly one place — the client seam — for exactly one class
 | --- | --- | --- |
 | Attempts per call | 4 (1 + 3 retries) | Octokit and AWS both settle at three retries; more masks an outage rather than surviving a blip |
 | Backoff | Exponential, base 1 s, cap 30 s, **full jitter** (`random(0, min(cap, base·2ⁿ))`) | AWS standard mode; jitter keeps a fleet from retrying in lockstep |
-| Header override | `Retry-After` (seconds or HTTP date) and `x-ratelimit-reset` win over the computed backoff when present | GitHub's own instruction beats our guess |
+| Header override | `Retry-After` (seconds or HTTP date) and `x-ratelimit-reset` win over the computed backoff when present — **if the wait fits the run's remaining wall clock**; otherwise the call degrades with reason `rate_limited_until <time>` instead of sleeping | GitHub's own instruction beats our guess; the run's deadline beats GitHub's |
+| Per-request timeouts | Connect 10 s, read 60 s, and a whole-call ceiling of `min(120 s, remaining wall clock)` | A hung body read must not eat the run (today: 30 s REST / 60 s GraphQL with no read ceiling) |
+| Sleeps are bounded | Every sleep is `min(computed, remaining wall clock)`; a sleep that would cross the deadline is not taken — the call degrades | The 20-minute ceiling is a deadline, not a hope |
 | Scope | Wraps the request **and the read** of the body | 2026-09-14's `IncompleteRead` escaped the client entirely: it is an `http.client.HTTPException`, not a `URLError` |
 | Idempotency | Every call this plugin makes is a read; re-issuing is safe. A future write goes through the seam with `retries=0` unless idempotent by construction | tap#322: re-observation is not change |
 | Callers | Never retry, never sleep. A `for attempt in` outside the seam is a defect | One layer only (SRE practice) |
@@ -143,6 +149,7 @@ Retry happens in exactly one place — the client seam — for exactly one class
 | req-github-core-reliability-retry-2 | Jittered Backoff | Proposed | Across 1,000 simulated retries at attempt n the sleeps are distributed over `[0, min(30, 2ⁿ)]`, never a constant. | |
 | req-github-core-reliability-retry-3 | Headers Win | Proposed | A 403 with `Retry-After: 7` sleeps 7 s (±jitter policy: none — the header is exact); a 429 with `x-ratelimit-reset` sleeps to the reset. | |
 | req-github-core-reliability-retry-4 | The Read Is Covered | Proposed | A body truncated mid-stream is classified transient and retried; it never escapes as a raw `http.client` or `httpx` exception. | Regression for 2026-09-14. |
+| req-github-core-reliability-retry-5 | Deadline Wins | Proposed | A `Retry-After: 1800` arriving with 5 minutes of wall clock left produces no sleep and a degradation with `rate_limited_until`; a body read stalled 90 s is timed out and classified transient. | |
 
 ### Per-Run Budget
 ----
@@ -159,12 +166,14 @@ A bad day must end. Two ceilings per run, both recorded on the job:
 
 Both values are module constants for v0, read by the seam alone, and reported in the run's `RUN_STARTED` record so a reader knows the ceilings that applied.
 
+**The ceiling is enforceable, not advisory.** The seam computes `remaining = deadline − now` before every request, every sleep and every read, and caps each of them by it (`req-github-core-reliability-retry`); no single operation may run past the deadline by more than the per-request read timeout. A run therefore ends within `wall_clock + 60 s` in the worst case, and the single-flight orphan threshold (`req-github-core-reliability-outcome`) is set above that bound so a live run at its ceiling is never mistaken for an orphan.
+
 #### Acceptance Criteria
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-reliability-budget-1 | Retry Budget Ends Retrying | Proposed | After 30 retries in one run the next transient failure produces one request and a degradation record, not a sleep. | |
-| req-github-core-reliability-budget-2 | Wall Clock Ends The Run | Proposed | A run whose layers stall past 20 minutes ends within one call of the ceiling with every unfinished surface marked not observed. | |
+| req-github-core-reliability-budget-2 | Wall Clock Ends The Run | Proposed | A run whose layers stall past 20 minutes ends within 60 s of the ceiling with every unfinished surface marked not observed; a sleep or read that would cross the deadline is not started. | |
 
 ### Degrade Per Layer
 ----
@@ -181,7 +190,7 @@ The collector's run is a sequence of layers (auth; repository listing; GraphQL c
 
 Rules:
 
-1. A layer that fails **after landing some pages** keeps what arrived: those repositories' data is observed, the rest are marked not observed for that surface. A cursor position is a fact; the run records how far it got.
+1. A layer that fails **after landing some pages** keeps what arrived: those repositories' data is observed, the rest are marked not observed for that surface. A cursor position is a fact; the run records how far it got. **Except foundation:** a partial account or repository listing is never persisted and never used to scope the run — a listing that did not complete aborts (`degrade-1`), because a shrunken repository set would read as repositories gone (`req-github-core-reliability-absence`).
 2. Layers are independent: the pull-request layer failing does not prevent the REST surfaces from running.
 3. Degradation is per run. The next run re-observes from scratch; nothing is remembered as "known bad" (that is the Backlog breaker).
 
@@ -264,12 +273,14 @@ Every decision the seam makes is a structured record on the run (`record_info` /
 
 | Code | Level | When | Data |
 | --- | --- | --- | --- |
-| `RETRY` | info | Each retry | layer, url/query, class, attempt, sleep_seconds, status |
+| `RETRY` | info | Each retry | layer, endpoint template, class, attempt, sleep_seconds, status |
 | `PAGE_SIZE_REDUCED` | info | Each halving | layer, from, to |
 | `LAYER_DEGRADED` | warn | A layer or per-repo surface gives up | layer, scope, reason (`budget_exhausted` / `wall_clock` / `rate_limited_until` / `terminal <status>`), pages_landed |
 | `INCOMPLETE_SURFACES` | warn | End of run when any | list of (surface, scope, reason) |
 | `RATE_LIMIT_LOW` | warn | Once per run | remaining, limit, reset |
 | `RUN_BUDGET` | info | Run start and end | attempts_per_call, retry_budget, wall_clock, retries_used, seconds_used, points_spent |
+
+**Redaction is part of the record shape.** Records name the **endpoint template** (`/repos/{owner}/{repo}/actions/runs`, `graphql:config_layer`), never a full URL with its query string; GraphQL variables are never recorded except `login` and a cursor; error bodies are recorded as GitHub's `message` field only, truncated to 200 characters, or as `<non-JSON body, N bytes>`; no header is ever recorded (`Authorization`, `Retry-After` and rate-limit values are copied into typed fields, not as header dumps); a URL that carries a signature or token (artifact download redirects) is recorded as its template plus `signed_url: true`. The same rule already governs the existing `record_*` callers; this makes it a requirement the proof harness checks.
 
 The run's `summary` ends with the counts: `… ; N retries, M surfaces degraded` (omitted when both are zero), so the collector table reads a flaky day at a glance.
 
@@ -279,6 +290,7 @@ The run's `summary` ends with the counts: `… ; N retries, M surfaces degraded`
 | --- | --- | :---: | --- | --- |
 | req-github-core-reliability-observability-1 | Records Present | Proposed | The proof harness's degraded run carries every applicable code above with the listed data keys. | |
 | req-github-core-reliability-observability-2 | Summary Counts | Proposed | A run with 3 retries and 1 degraded surface ends its summary with `; 3 retries, 1 surface degraded`; a clean run's summary is unchanged. | |
+| req-github-core-reliability-observability-3 | Redacted | Proposed | With the fake emitting a signed redirect URL, a 500 with a 5 KB HTML body and a 403 with a JSON message, the run's records contain the endpoint template, `signed_url: true`, `<non-JSON body, 5120 bytes>` and the 403's `message` — and no query string, header or token anywhere in `results`. | |
 
 ### Run Outcome
 ----
@@ -294,7 +306,7 @@ Composes with tap_cares' failure-mode convention (`req-tap-cares-collector-failu
 | **SUCCESSFUL** (degraded) | Any non-foundation layer degraded, or any surface incomplete | Today's counts plus `; N retries, M surfaces degraded` and the `INCOMPLETE_SURFACES` record. No new `CollectionJob` status — a distinct status would touch tap_cares for every plugin; the count and the record are the marker |
 | **FAILED** | A foundation layer failed after budget; or an unclassified exception | `_abort` as today; partial batches linked additively; asserts nothing about absence |
 
-**Single-flight.** A github_core run that finds another github_core job in `RUNNING` younger than the wall-clock ceiling records `RUN_SKIPPED_CONCURRENT` and exits SUCCESSFUL with that summary; one older than the ceiling is presumed orphaned (tap#454), the skip is recorded with its age, and the run proceeds. *Observed 2026-09-14:* a manual and a scheduled run overlapped for two minutes with no guard.
+**Single-flight, acquired atomically.** Mutual exclusion is an *acquisition*, not a check: at run start the seam takes a database lock on the collector's own row (`SELECT … FOR UPDATE` on the `Collector` node via the service layer) and, inside that lock, looks for a sibling job in `RUNNING` younger than the **orphan threshold** (`wall_clock + 5 min`, above the enforceable bound in `req-github-core-reliability-budget`). A fresh sibling → this run records `RUN_SKIPPED_CONCURRENT` and exits SUCCESSFUL with that summary. A sibling older than the threshold is presumed orphaned (tap#454): the skip is recorded with its age and this run proceeds. Two runs starting simultaneously serialize on the lock, so exactly one proceeds. The lock is held only for the check, never for the run. *Observed 2026-09-14:* a manual and a scheduled run overlapped for two minutes with no guard. If tap_cares lands a generic single-flight (tap#454), this requirement delegates to it and keeps only the threshold.
 
 #### Acceptance Criteria
 
@@ -302,7 +314,8 @@ Composes with tap_cares' failure-mode convention (`req-tap-cares-collector-failu
 | --- | --- | :---: | --- | --- |
 | req-github-core-reliability-outcome-1 | Degraded Is Successful And Says So | Proposed | A run with one degraded layer ends SUCCESSFUL, its summary carries the counts, and the `INCOMPLETE_SURFACES` record is present. | |
 | req-github-core-reliability-outcome-2 | Foundation Fails The Run | Proposed | A listing failure after budget ends FAILED with one error record. | |
-| req-github-core-reliability-outcome-3 | Single-Flight | Proposed | With a fresh RUNNING sibling the run skips and says so; with a stale one (older than the ceiling) it proceeds and records the presumed orphan. | |
+| req-github-core-reliability-outcome-3 | Single-Flight | Proposed | With a fresh RUNNING sibling the run skips and says so; with a stale one (older than the orphan threshold) it proceeds and records the presumed orphan. | |
+| req-github-core-reliability-outcome-4 | Mutual Exclusion Under Simultaneous Start | Proposed | Two runs started in the same second against a locked test database yield exactly one proceeding and one `RUN_SKIPPED_CONCURRENT`, in either order. | |
 
 ### Proof
 ----
