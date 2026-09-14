@@ -506,3 +506,41 @@ def test_graphql_refusal_quotes_githubs_message(monkeypatch: pytest.MonkeyPatch)
     with pytest.raises(mod.GithubGraphQLError) as ei:
         client._post_layer("config_layer", mod.config_query, {"login": "o", "cursor": None}, page_size=100)
     assert ei.value.status == 401 and "Bad credentials" in str(ei.value)
+
+
+def test_abandoned_worker_is_a_daemon_and_the_caller_regains_control() -> None:
+    import threading
+    import time as _time
+
+    spy = Spy()
+    budget = RunBudget(wall_clock=timedelta(seconds=0.3))
+    started = threading.Event()
+
+    def trickle(params: dict[str, Any]) -> tuple[int, dict[str, str], bytes]:
+        started.set()
+        _time.sleep(1.5)  # outlives the ceiling
+        return 200, {}, b"{}"
+
+    t0 = _time.monotonic()
+    g = call(trickle, _ctx(), budget=budget, recorder=spy, policy=NO_JITTER, sleep=_sleep)
+    assert not g.ok and _time.monotonic() - t0 < 1.0
+    started.wait(1.0)
+    workers = [th for th in threading.enumerate() if th.name == "github-call"]
+    assert workers and all(th.daemon for th in workers)  # never pins process exit
+
+
+def test_pagination_link_lookup_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tap_plugin.github_core.collectors.github_collector import api_client as mod
+    from tap_plugin.github_core.collectors.github_collector.github_call import RunBudget, Seam
+
+    client = mod.GithubClient(token="t", seam=Seam(budget=RunBudget(), recorder=Spy()))
+    monkeypatch.setattr(client, "_request_once", lambda url, timeout=30.0: (200, {"link": '<https://api.github.com/x?page=2>; rel="next"'}, b"[]"))
+    assert client.get("/repos/o/r/actions/runs") == []
+    assert client._next_link == "https://api.github.com/x?page=2"
+
+
+def test_unanticipated_exception_is_recorded_before_failing_closed() -> None:
+    clock, spy = Clock(), Spy()
+    with pytest.raises(ValueError):
+        call(_script(ValueError("not transport")), _ctx(), budget=_budget(clock), recorder=spy, policy=NO_JITTER, sleep=_sleep, now=clock)
+    assert spy.codes() == ["UNANTICIPATED"] and spy.records[0][3]["exception"] == "ValueError"

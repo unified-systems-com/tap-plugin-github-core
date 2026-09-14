@@ -109,7 +109,7 @@ logger = logging.getLogger(__name__)
 # Log site tokens for the recorder. Minted via scripts/log-site-id.
 _SITE_RUN_STARTED = "8fb5"
 #: Seam records (spec-github-core-reliability, req-…-observability): one site per code.
-_SEAM_SITES = {"RETRY": "f2d6", "PAGE_SIZE_REDUCED": "b800", "PARTIAL": "d9e2", "LAYER_DEGRADED": "4ca8", "TERMINAL": "695e", "RATE_LIMIT_LOW": "eacf", "RUN_BUDGET": "84fd", "INCOMPLETE_SURFACES": "06c1", "RUN_SKIPPED_CONCURRENT": "e33c"}
+_SEAM_SITES = {"RETRY": "f2d6", "PAGE_SIZE_REDUCED": "b800", "PARTIAL": "d9e2", "LAYER_DEGRADED": "4ca8", "TERMINAL": "695e", "RATE_LIMIT_LOW": "eacf", "RUN_BUDGET": "84fd", "INCOMPLETE_SURFACES": "06c1", "RUN_SKIPPED_CONCURRENT": "e33c", "UNANTICIPATED": "0002"}
 _SITE_ABORT_SECRET = "64be"
 _SITE_ABORT_API = "54ce"
 _SITE_REPO_DONE = "d98c"

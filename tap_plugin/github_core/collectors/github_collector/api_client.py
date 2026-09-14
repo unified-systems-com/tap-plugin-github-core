@@ -149,7 +149,8 @@ class GithubClient:
             raise GithubAPIError(status=gather.status or 0, url=url, body=body)
         # Pagination state is set HERE, from the attempt that won — never inside the transport,
         # which an abandoned attempt may still be running.
-        self._next_link = self._parse_next_link(gather.headers.get("Link", ""))
+        link = next((v for k, v in gather.headers.items() if k.lower() == "link"), "")
+        self._next_link = self._parse_next_link(link)
         return gather.parsed if gather.body else {}
 
     def _request_once(self, url: str, *, timeout: float = 30.0) -> tuple[int, dict[str, str], bytes]:

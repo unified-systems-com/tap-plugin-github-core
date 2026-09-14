@@ -20,11 +20,10 @@ import logging
 import random
 import re
 import socket
+import threading
 import time
 import urllib.error
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -441,7 +440,16 @@ def call(
             if body and _parse_json(body, strict=True) is _MALFORMED:
                 raise MalformedBody(len(body))
         except Exception as exc:  # noqa: BLE001 — classify() re-raises what it does not know (rule 5)
-            classification = classify(exc, now=clock(), attempt=attempt)
+            try:
+                classification = classify(exc, now=clock(), attempt=attempt)
+            except BaseException:
+                # Rule 5: fail closed — but say so first, so the run record names the condition.
+                recorder.warn(
+                    "UNANTICIPATED",
+                    f"{ctx.layer}: {type(exc).__name__} on {ctx.endpoint} — not a transport condition; failing the run closed",
+                    {"layer": ctx.layer, "endpoint": ctx.endpoint, "exception": type(exc).__name__, "credential_kind": ctx.credential_kind},
+                )
+                raise
             gather.status = getattr(exc, "status", None)
             if isinstance(exc, (HttpFailure, GraphQLErrors)):
                 gather.last_failure_body = exc.body
@@ -545,21 +553,30 @@ def _under_ceiling(transport: Transport, params: dict[str, Any], ceiling: float)
     """Run one attempt with an aggregate deadline (req-github-core-reliability-budget).
 
     Socket timeouts bound inactivity, not the whole request: a trickling body can outlive the
-    run. The attempt runs on a worker thread and is abandoned when the ceiling passes; the
-    abandoned thread ends at the next socket timeout, so the leak is bounded by the read
-    timeout. A ceiling of zero or less means the deadline has already passed.
+    run. The attempt runs on a **daemon** thread and is abandoned when the ceiling passes. A
+    stuck attempt cannot be killed from outside (there is no cancelling a blocked socket read in
+    CPython), so the guarantees are exactly these: the CALLER regains control at the ceiling; the
+    abandoned attempt mutates nothing (the transport contract); and, being a daemon, it never
+    pins process exit. A ceiling of zero or less means the deadline has already passed.
     """
     if ceiling <= 0:
         raise _CallCeilingExceeded("deadline passed before the attempt")
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="github-call")
-    future = pool.submit(transport, params)
-    try:
-        return future.result(timeout=ceiling)
-    except FuturesTimeout as exc:
-        raise _CallCeilingExceeded(f"call ceiling {ceiling:.0f}s exceeded") from exc
-    finally:
-        # Never block on a stuck attempt; the worker ends at its socket timeout.
-        pool.shutdown(wait=False, cancel_futures=True)
+    box: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            box["result"] = transport(params)
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the caller's thread
+            box["error"] = exc
+
+    worker = threading.Thread(target=_run, name="github-call", daemon=True)
+    worker.start()
+    worker.join(timeout=ceiling)
+    if worker.is_alive():
+        raise _CallCeilingExceeded(f"call ceiling {ceiling:.0f}s exceeded")
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
 
 
 def _degrade(gather: Gather, recorder: Recorder, ctx: CallContext, reason: str) -> Gather:
