@@ -24,13 +24,15 @@ One property this spec exists to protect for the work that follows it: **degrada
 | 2 | Degradation Is Never Absence | Anything not observed this run is marked not observed, per item and per surface, so no downstream pass reads a fetch failure as a removal. |
 | 3 | Said Out Loud | Every retry, degradation and page change is a structured run record, and the run's summary counts them, so a flaky day is visible in the job and not only in a log. |
 | 4 | One Seam | Every network call in the plugin goes through one client and one retry policy; callers never retry and never sleep. |
-| 5 | Professionals Maintain The Transport | The HTTP transport, typed endpoints, pagination, App auth and rate-limit detection come from GitHub's ecosystem client (githubkit); this plugin keeps only the policy and the semantics that are the product. |
+| 5 | Gather, Confirm, Process | The collector gathers, confirms the gather is reliable, then hands it to the processing layers above, which never touch the network and can run against stored gathers. |
+| 6 | Professionals Maintain The Transport | The HTTP transport, typed endpoints, pagination, App auth and rate-limit detection come from GitHub's ecosystem client (githubkit); this plugin keeps only the policy and the semantics that are the product. |
 
 ## Requirements
 
 | RID | Name | Status | Notes |
 | --- | --- | :---: | --- |
 | req-github-core-reliability-taxonomy | [Failure Taxonomy](#failure-taxonomy) | Proposed | Three classes — transient, terminal, partial — and the signal-to-class table |
+| req-github-core-reliability-layers | [Gather, Confirm, Process](#gather-confirm-process) | Proposed | Three layers: the seam returns gathers; a gate admits only complete or pruned-partial gathers; processing imports no client and handles no transport failure |
 | req-github-core-reliability-client | [The Access Client](#the-access-client) | Proposed | The recorded decision: githubkit through a thin seam; the three seams kept; the migration |
 | req-github-core-reliability-retry | [Retry Policy](#retry-policy) | Proposed | Bounded retry with exponential backoff and full jitter, honoring GitHub's headers, covering the read, in the client only |
 | req-github-core-reliability-budget | [Per-Run Budget](#per-run-budget) | Proposed | A retry budget and a wall-clock ceiling per run; exhaustion degrades, never spins |
@@ -76,6 +78,40 @@ Rules:
 | req-github-core-reliability-taxonomy-3 | Terminal Never Retried | Proposed | A 401, a bodied 404, a 422 and a permission 403 each produce exactly one request in the proof harness. | |
 | req-github-core-reliability-taxonomy-4 | Closed By Defaults | Proposed | An unlisted status (e.g. 418), an unlisted transport exception and an unanticipated exception each take the default path in rule 5, and the run record names the unmapped signal. | |
 | req-github-core-reliability-taxonomy-5 | GraphQL Types Mapped | Proposed | Each GraphQL error type in rule 6 classifies as stated; a 200 with data and a `FORBIDDEN` path lands the data with the path pruned. | |
+
+### Gather, Confirm, Process
+----
+RID: `req-github-core-reliability-layers`
+
+Status: `Proposed`
+
+George, 2026-09-14: "bake this as a layered approach — the collector gathers data, confirms it's reliable, then hands that data to the processing layers above it which act on it." Today fetching and shaping interleave: a method calls GitHub, shapes the answer into envelopes and moves on, so a transport failure surfaces in the middle of processing code and a shaper has to know what a 504 is. Under this requirement the run is three layers with one job each:
+
+| Layer | Job | Owns | Never |
+| --- | --- | --- | --- |
+| **Gather** | Talk to GitHub through the seam and return a **gather**: the exact bytes received, the parsed body, and the facts about the fetch — `surface`, `scope` (account or repository), `endpoint` template, `complete` (walk ran to the end, no degradation, no cap), `degraded_paths` (pruned GraphQL paths with their notes), `class` of any terminal failure, `status`, `digest` (sha256 of the bytes), `observed_at`, `credential_kind`, `rate_limit` snapshot | The only code in the plugin that imports the client or sees a transport exception | Shapes anything |
+| **Confirm** | The gate between gather and process: admit a gather that is `complete`, or partial with every degraded path pruned and named; refuse an incomplete or failed gather, marking its surface not observed this run (`req-github-core-reliability-absence`) and recording why | The completeness check, the `INCOMPLETE_SURFACES` record | Lets a refused gather reach a shaper |
+| **Process** | Shapers and decomposers turn admitted gathers into node and edge envelopes and the GRIFT batch | Identity, decomposition, three-state fields on nodes | Imports a client, catches an HTTP or transport exception, sleeps, or reads the network |
+
+Consequences that fall out, and are the reason for the shape:
+
+1. **Replay.** Processing runs unchanged against stored gathers — a regression corpus from real responses (the zizmor corpus pattern), an offline re-derivation for stale-edge reassessment (tap#447), a diagnosis of a bad day from the bytes rather than a traceback.
+2. **Evidence for free.** A gather *is* the audit record: bytes plus digest plus request facts. Retaining gathers is a storage decision (a tap_cares capability, its own spec), not a collector change; the hook is the gather object.
+3. **The dcom line in code.** A gather is an `operation` — it happened once and is immutable; processing is a derivation from it. What the reliability rules protect (retry, budget, degrade) is entirely inside Gather; what the absence contract protects is entirely at Confirm.
+4. **Foundation stays foundation.** The account and repository listings are gathers like any other, but Confirm refuses a partial one absolutely (`req-github-core-reliability-degrade` rule 1's exception): the run aborts rather than processing a shrunken set.
+
+#### Implementation
+
+`collectors/github_collector/gather.py` — the `Gather` dataclass and the seam's return type; `github_call.py` returns gathers. `collector.py`'s run becomes, per layer: gather → confirm → process, with the confirm step one function (`admit(gather) -> Admitted | Refused`) that writes the absence records. Existing shapers (`graphql_client.py`'s `refs` / `rulesets` / `environments` / `releases` / `workflow_files`, `parser.py`, `enrichment.py`, the per-surface builders in `collector.py`) move behind the gate and lose every `try/except GithubAPIError` and every status-code branch they carry today; those branches become Confirm's job.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-layers-1 | Gather Carries Its Facts | Proposed | Every gather the seam returns has `surface`, `scope`, `endpoint`, `complete`, `degraded_paths`, `digest`, `observed_at`, `credential_kind`; the digest equals sha256 of the stored bytes. | |
+| req-github-core-reliability-layers-2 | Processing Is Network-Blind | Proposed | A test walks every processing module and fails if one imports the client, `urllib`, `httpx` or githubkit, or catches `GithubAPIError` / `GithubGraphQLError` / an HTTP exception. | Mechanical; runs in CI. |
+| req-github-core-reliability-layers-3 | Only Admitted Gathers Are Processed | Proposed | In the proof harness an incomplete gather never reaches a shaper (the shaper is a spy), its surface is marked not observed, and `INCOMPLETE_SURFACES` names it; a partial gather reaches the shaper with its degraded paths pruned. | |
+| req-github-core-reliability-layers-4 | Replayable | Proposed | The processing layer, fed the gathers recorded from one harness run, produces a byte-identical GRIFT batch (ids and content) to the live run. | The replay corpus is the evidence store's first consumer. |
 
 ### The Access Client
 ----
@@ -323,7 +359,7 @@ RID: `req-github-core-reliability-proof`
 
 Status: `Proposed`
 
-A fake GitHub (`tests/fake_github.py`) — an in-process HTTP server or a githubkit transport stub — scripted per test to emit each taxonomy signal at a chosen call: 504, 502, 429 with headers, 403 with and without `Retry-After`, empty-body 404, bodied 404, connection reset, truncated body, timeout, GraphQL "couldn't respond in time", GraphQL partial errors, a capped walk. The collector runs against it (via `__new__` construction as the existing tests do) and every acceptance criterion above that names the proof harness is a test in `tests/test_reliability.py`. The harness is also the acceptance test for the githubkit migration: the same tests pass before and after each step of `req-github-core-reliability-client`.
+A fake GitHub (`tests/fake_github.py`) — an in-process HTTP server or a githubkit transport stub — scripted per test to emit each taxonomy signal at a chosen call: 504, 502, 429 with headers, 403 with and without `Retry-After`, empty-body 404, bodied 404, connection reset, truncated body, timeout, GraphQL "couldn't respond in time", GraphQL partial errors, a capped walk. The collector runs against it (via `__new__` construction as the existing tests do) and every acceptance criterion above that names the proof harness is a test in `tests/test_reliability.py`. The harness records every gather a run produces so `req-github-core-reliability-layers-4` can replay them. It is also the acceptance test for the githubkit migration: the same tests pass before and after each step of `req-github-core-reliability-client`.
 
 #### Acceptance Criteria
 
