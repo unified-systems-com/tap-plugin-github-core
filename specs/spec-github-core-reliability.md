@@ -1,0 +1,336 @@
+# github_core Reliability Specification
+
+**GitHub is not a trustworthy dependency.** It times out, drops connections mid-body, returns empty 404s, rate-limits in two different ways, and degrades individual GraphQL fields while returning 200. Every collector action in this plugin that touches the REST or GraphQL API follows the rules in this document, so that one bad byte never becomes a failed run, and a failed fetch never reads as a fact about the organization.
+
+Cross-cutting: this spec governs `spec-github-core-v0.md`'s collector requirements wherever they reach the network, and any future GitHub-facing collector in this plugin. Where this spec and a per-surface requirement disagree about failure handling, this spec wins and the per-surface requirement is corrected.
+
+## Philosophy
+
+Three afternoons of evidence, 2026-09-11 and 2026-09-14 (github-core#128): a 504 "we couldn't respond to your request in time" fourteen seconds into a run; a connection GitHub closed after 186 seconds; a response body cut off at 219 of 248 kilobytes. Each aborted the whole collection. The collector had exactly one retry, for the empty-body 404 quirk, and the GraphQL client had none. Meanwhile a job orphaned by a worker restart sat in RUNNING for four days and blocked a dependent collector's every run, each skip recorded as green (tap#454, zizmor-tap#41).
+
+The collector already does one of the three things reliability needs, and does it well: **three states, never two** — a refused read lands as `unobservable` with the status in a note, page and resolution caps are reported as budget facts, a degraded GraphQL field is pruned so a null never reads as an observation. What it lacks are the other two: **retry within a budget**, and **degrade per layer** — land what arrived, mark what did not as unobserved, continue.
+
+Prior art shaped the rules (surveyed 2026-09-14): GitHub's own guidance (wait for `x-ratelimit-reset`; honor `Retry-After`; shrink GraphQL pages on "couldn't respond in time"); Octokit's retry and throttling plugins (retry 5xx and network errors, an explicit do-not-retry list, throttling kept separate from retry); AWS SDK standard retry mode (exponential backoff with full jitter and a retry budget so an outage does not amplify load); Google SRE practice (retry at one layer only); and Kubernetes controllers (level-triggered, idempotent reconcile — a failed pass is harmless because the next one re-observes, which tap#322 already rules for the grid: re-observation is not change). Retries turned out to be the smallest part. The larger parts are a budget so a bad day ends, and per-layer degradation so a run lands what it got.
+
+One property this spec exists to protect for the work that follows it: **degradation is never absence.** Tombstoning — recording that a thing was confirmed removed — can only be trusted if a thing we failed to fetch is never mistaken for a thing that is gone (`req-github-core-reliability-absence`). A Monday like 2026-09-14, under a collector that tombstones on "not in the listing", would have deleted half the organization.
+
+**Provenance markers.** Claims marked *observed* were measured on the demo-dev instance on 2026-09-14; the client comparison is from PyPI metadata and the libraries' source on that date; everything else is *designed*.
+
+## Goals
+
+| # | Name | Description |
+| --- | --- | --- |
+| 1 | One Bad Byte Never Fails A Run | Transient failures are retried within a budget; a layer that still fails degrades; only a foundation failure ends a run. |
+| 2 | Degradation Is Never Absence | Anything not observed this run is marked not observed, per item and per surface, so no downstream pass reads a fetch failure as a removal. |
+| 3 | Said Out Loud | Every retry, degradation and page change is a structured run record, and the run's summary counts them, so a flaky day is visible in the job and not only in a log. |
+| 4 | One Seam | Every network call in the plugin goes through one client and one retry policy; callers never retry and never sleep. |
+| 5 | Professionals Maintain The Transport | The HTTP transport, typed endpoints, pagination, App auth and rate-limit detection come from GitHub's ecosystem client (githubkit); this plugin keeps only the policy and the semantics that are the product. |
+
+## Requirements
+
+| RID | Name | Status | Notes |
+| --- | --- | :---: | --- |
+| req-github-core-reliability-taxonomy | [Failure Taxonomy](#failure-taxonomy) | Proposed | Three classes — transient, terminal, partial — and the signal-to-class table |
+| req-github-core-reliability-client | [The Access Client](#the-access-client) | Proposed | The recorded decision: githubkit through a thin seam; the three seams kept; the migration |
+| req-github-core-reliability-retry | [Retry Policy](#retry-policy) | Proposed | Bounded retry with exponential backoff and full jitter, honoring GitHub's headers, covering the read, in the client only |
+| req-github-core-reliability-budget | [Per-Run Budget](#per-run-budget) | Proposed | A retry budget and a wall-clock ceiling per run; exhaustion degrades, never spins |
+| req-github-core-reliability-degrade | [Degrade Per Layer](#degrade-per-layer) | Proposed | Foundation layers abort; every other layer marks its surface unobserved and the run continues; a partial page lands what arrived |
+| req-github-core-reliability-absence | [Degradation Is Never Absence](#degradation-is-never-absence) | Proposed | The contract tombstoning relies on: not fetched ≠ not present; incomplete surfaces are named on the run |
+| req-github-core-reliability-adaptive-pages | [Adaptive GraphQL Pages](#adaptive-graphql-pages) | Proposed | Page halving on timeout with a floor, recorded |
+| req-github-core-reliability-ratelimit | [Rate Limits](#rate-limits) | Proposed | Primary and secondary per GitHub's guidance; never burn to zero |
+| req-github-core-reliability-observability | [Observability](#observability) | Proposed | Every retry, degrade and page change as a run record; counts in the summary |
+| req-github-core-reliability-outcome | [Run Outcome](#run-outcome) | Proposed | What SUCCESSFUL and FAILED mean under degradation; single-flight per collector |
+| req-github-core-reliability-proof | [Proof](#proof) | Proposed | A fake GitHub that emits every failure class; every layer proven to degrade |
+| req-github-core-reliability-breaker | [Cross-Run Circuit Breaker](#cross-run-circuit-breaker) | Backlog | Stop calling a dependency that is down; needs state across runs |
+| req-github-core-reliability-conditional | [Conditional Requests](#conditional-requests) | Backlog | ETag / If-None-Match; an efficiency edge, not a reliability one |
+
+### Failure Taxonomy
+----
+RID: `req-github-core-reliability-taxonomy`
+
+Status: `Proposed`
+
+Every failure a network call can produce is one of three classes. The class decides what happens next; nothing else does.
+
+| Class | Meaning | Signals |
+| --- | --- | --- |
+| **transient** | GitHub or the network failed to answer this time; the same request may succeed shortly | HTTP 500, 502, 503, 504; HTTP 429; HTTP 403 carrying `Retry-After` or a rate-limit body; connection refused / reset / closed without response; a truncated body (`IncompleteRead`, `RemoteProtocolError`); a client-side timeout; a GraphQL body whose only error is "couldn't respond to your request in time" or a `RATE_LIMITED` type; an HTTP 404 with an **empty** body (GitHub's undocumented quirk on `/actions/*` — a real 404 always carries `{"message": …}`) |
+| **terminal** | The answer is an answer; asking again changes nothing | HTTP 400, 401, 403 without `Retry-After` (a permission refusal), 404 with a body, 410, 422, 451; a GraphQL `FORBIDDEN` / `NOT_FOUND` / `INSUFFICIENT_SCOPES` error on a path |
+| **partial** | GitHub answered, and part of the answer is missing or degraded | A 200 GraphQL response with `data` beside `errors[]` (a field the credential could not read arrives as `null` with an error entry); a REST listing whose walk stopped at the page cap |
+
+Rules:
+
+1. A **transient** failure is retried by the client under `req-github-core-reliability-retry` and, when the budget is spent, becomes a layer-level degradation under `req-github-core-reliability-degrade`.
+2. A **terminal** failure is never retried. It is recorded with its status and body, and the surface it refused lands as `unobservable` with the status in its note — the existing three-state discipline (`spec-github-core-v0.md`, refused is not empty).
+3. A **partial** answer lands what arrived; the degraded paths are pruned (never left as `null`) and recorded as notes, exactly as `graphql_client.prune_errored_paths` does today; a capped walk is reported as incomplete with the count left behind.
+4. The classification lives in one function in the client seam and nowhere else. A caller that inspects a status code to decide whether to retry is a defect.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-taxonomy-1 | One Classifier | Proposed | A single function maps any exception or response the client can produce to `transient` / `terminal` / `partial`; every signal in the table has a unit test. | |
+| req-github-core-reliability-taxonomy-2 | Empty-404 Folded In | Proposed | The empty-body 404 is one row of the transient class, retried by the general policy; the bespoke `_EMPTY_404_*` loop in `api_client.py:36–143` is removed. | Its detection rule (empty body vs `{"message"}` body) survives as the classifier's rule. |
+| req-github-core-reliability-taxonomy-3 | Terminal Never Retried | Proposed | A 401, a bodied 404, a 422 and a permission 403 each produce exactly one request in the proof harness. | |
+
+### The Access Client
+----
+RID: `req-github-core-reliability-client`
+
+Status: `Proposed`
+
+**Decision (George, 2026-09-14): githubkit, through a thin seam of this plugin's own.** Recorded here with the comparison, per the build-collector skill's Step 1.5, because the previous choice — two hand-rolled clients on `urllib` — was made by default under the no-new-dependency rule and never written down, and three weeks later the collector had grown its own pagination, App-JWT exchange and (one) retry, with zero retries where it mattered.
+
+| Axis | Ours (`api_client.py`, `graphql_client.py`, `app_jwt.py`) | githubkit 0.16.1 | PyGithub 2.10.0 |
+| --- | --- | --- | --- |
+| Three-state fidelity | Purpose-built; GraphQL partial errors pruned so data survives | REST exceptions carry status, headers, body. GraphQL helper raises on any error and discards partial data — bypassable by posting raw | Object layer wraps 404 into typed exceptions with status and body; GraphQL minimal |
+| Free of charge | Empty-body-404 retry only | 5xx retry (3, quadratic backoff, no jitter); rate-limit detection (primary vs secondary, typed, with the wait); pagination; App auth (JWT mint, cache, installation exchange); typed REST from GitHub's OpenAPI; sync + async. Retry hook pluggable | 5xx and Retry-After 403 via urllib3 Retry; rate-limit waits; App auth; sync only |
+| Coverage | Exactly what we wrote | Full REST, GraphQL with pagination, GHES base URL | Full REST object model; GraphQL barely |
+| Dependencies | `cryptography` | httpx, httpcore, anyio, certifi, idna, hishel, msgpack, pydantic, pydantic-core, typing-extensions, githubkit-schemas; `+ pyjwt[crypto]` → `cryptography` for App auth (~12) | requests, urllib3, pyjwt, `cryptography`, typing-extensions, **pynacl** |
+| FIPS | Clean | Clean: httpx uses the stdlib `ssl` module; pydantic-core is Rust without crypto; pyjwt signs through `cryptography` on the validated system-OpenSSL path this plugin already uses | **pynacl bundles libsodium** — a non-validated provider, never called by us, but a declared posture and a `ci` waiver would be required |
+| Maintenance | Us | MIT; 345 stars, 29 contributors, 25 commits / 90 d, pushed 2026-09-13, 7 open issues; Octokit-inspired; schemas regenerated from GitHub's API description | LGPL-3.0; 7,772 stars, 100 contributors, 22 commits / 90 d, 405 open issues |
+| Supply chain | n/a | dist `githubkit` on PyPI ↔ `yanyongyu/githubkit` (verified 2026-09-14); pin `>=0.16,<1` in `pyproject`, Renovate-tracked; advisory check: none open on the dist or its set as of 2026-09-14 — **re-check at adoption** | dist `PyGithub` ↔ `PyGithub/PyGithub` |
+| Async | No | Yes | No |
+
+gidgethub (async-only, no retry, last release 2025-06) and ghapi (REST-only, own HTTP stack) were considered and dropped.
+
+**The three seams this plugin keeps**, because they are the product and a library rightly does not have them:
+
+1. **GraphQL is posted through githubkit's generic request, not its GraphQL helper**, and this plugin's `prune_errored_paths` keeps doing partial-error handling: the helper raises when any error is present and throws the data away. (Upstream contribution candidate: a flag returning `data` beside `errors`.)
+2. **The retry decision function is ours** (`req-github-core-reliability-retry`), handed to githubkit's `auto_retry` hook: its default covers 5xx and rate limits only, without jitter, and does not retry network errors or truncated reads.
+3. **Three-state semantics stay in the collector**, unchanged: the library changes how bytes arrive, not what refused means.
+
+#### Implementation
+
+Migration, one PR per step, each behind the proof harness (`req-github-core-reliability-proof`) so behaviour is pinned before the engine changes:
+
+1. Land the seam: a `github_call` module owning the classifier, the retry decision function, the budget and the run-record hooks — over the existing `urllib` clients first.
+2. Swap the REST transport to githubkit (`api_client.py` → thin adapter or deletion); pagination and App auth (`app_jwt.py`) move to githubkit's `AppAuth`.
+3. Swap the GraphQL transport (`graphql_client.py` keeps its queries, shapers and pruning; `_post` becomes a githubkit raw request).
+4. `pyproject`: `githubkit[auth-app]>=0.16,<1`; manifest `[fips]` re-verified by `validate_plugin --strict`'s crypto-providers scan; `ci` record unchanged unless the scan says otherwise.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-client-1 | Decision Recorded | Implemented | The comparison table above, with the losers named and the supply-chain row dated. | This section. |
+| req-github-core-reliability-client-2 | One Transport | Proposed | After migration no module in the plugin imports `urllib.request`; every request goes through githubkit under the seam. | |
+| req-github-core-reliability-client-3 | Seams Hold | Proposed | GraphQL partial responses still land pruned data (proof harness); the retry decision function in use is this plugin's; refused / absent / degraded remain distinguishable on every surface `spec-github-core-v0.md` marks three-state. | |
+| req-github-core-reliability-client-4 | FIPS Clean After | Proposed | `validate_plugin --strict` reports `[fips] compatible` with no non-validated provider found after the dependency lands. | |
+
+### Retry Policy
+----
+RID: `req-github-core-reliability-retry`
+
+Status: `Proposed`
+
+Retry happens in exactly one place — the client seam — for exactly one class — transient — and always within the run's budget.
+
+| Parameter | Value | Why |
+| --- | --- | --- |
+| Attempts per call | 4 (1 + 3 retries) | Octokit and AWS both settle at three retries; more masks an outage rather than surviving a blip |
+| Backoff | Exponential, base 1 s, cap 30 s, **full jitter** (`random(0, min(cap, base·2ⁿ))`) | AWS standard mode; jitter keeps a fleet from retrying in lockstep |
+| Header override | `Retry-After` (seconds or HTTP date) and `x-ratelimit-reset` win over the computed backoff when present | GitHub's own instruction beats our guess |
+| Scope | Wraps the request **and the read** of the body | 2026-09-14's `IncompleteRead` escaped the client entirely: it is an `http.client.HTTPException`, not a `URLError` |
+| Idempotency | Every call this plugin makes is a read; re-issuing is safe. A future write goes through the seam with `retries=0` unless idempotent by construction | tap#322: re-observation is not change |
+| Callers | Never retry, never sleep. A `for attempt in` outside the seam is a defect | One layer only (SRE practice) |
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-retry-1 | Transient Retried, Bounded | Proposed | A call that fails transiently three times then succeeds returns the success; one that fails four times raises to the layer as exhausted. | Proof harness. |
+| req-github-core-reliability-retry-2 | Jittered Backoff | Proposed | Across 1,000 simulated retries at attempt n the sleeps are distributed over `[0, min(30, 2ⁿ)]`, never a constant. | |
+| req-github-core-reliability-retry-3 | Headers Win | Proposed | A 403 with `Retry-After: 7` sleeps 7 s (±jitter policy: none — the header is exact); a 429 with `x-ratelimit-reset` sleeps to the reset. | |
+| req-github-core-reliability-retry-4 | The Read Is Covered | Proposed | A body truncated mid-stream is classified transient and retried; it never escapes as a raw `http.client` or `httpx` exception. | Regression for 2026-09-14. |
+
+### Per-Run Budget
+----
+RID: `req-github-core-reliability-budget`
+
+Status: `Proposed`
+
+A bad day must end. Two ceilings per run, both recorded on the job:
+
+| Budget | Value | On exhaustion |
+| --- | --- | --- |
+| Retries per run | 30 | Further transient failures are not retried; each becomes an immediate layer degradation (`req-github-core-reliability-degrade`) with reason `budget_exhausted` |
+| Wall clock per run | 20 minutes (healthy runs *observed* 4–9 min on 26 repos, 2026-09-14) | The layer in flight degrades; remaining layers are skipped and marked not observed; the run ends and says so |
+
+Both values are module constants for v0, read by the seam alone, and reported in the run's `RUN_STARTED` record so a reader knows the ceilings that applied.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-budget-1 | Retry Budget Ends Retrying | Proposed | After 30 retries in one run the next transient failure produces one request and a degradation record, not a sleep. | |
+| req-github-core-reliability-budget-2 | Wall Clock Ends The Run | Proposed | A run whose layers stall past 20 minutes ends within one call of the ceiling with every unfinished surface marked not observed. | |
+
+### Degrade Per Layer
+----
+RID: `req-github-core-reliability-degrade`
+
+Status: `Proposed`
+
+The collector's run is a sequence of layers (auth; repository listing; GraphQL config layer; GraphQL pull-request layer; per-repository REST surfaces — workflows, runs, jobs, artifacts, packages, rulesets, secrets, environments, alerts …). Today an exhausted failure in any of them aborts the run (`collector.py:830` `_abort`, called from `_fetch_config_layer` and `_fetch_pull_request_layer` among others). Under this requirement:
+
+| Layer kind | Members | On exhausted transient failure |
+| --- | --- | --- |
+| **Foundation** | Credential resolution / App token; the account and repository listing | Abort the run (`_abort`). Nothing downstream can be placed without them, and a partial repository listing would silently shrink the org — see `req-github-core-reliability-absence`. |
+| **Everything else** | Every other layer and every per-repository surface | Mark the surface `unobservable` for this run with reason and status in the note (per repository where the surface is per-repository), record a `LAYER_DEGRADED` warning, and **continue**. |
+
+Rules:
+
+1. A layer that fails **after landing some pages** keeps what arrived: those repositories' data is observed, the rest are marked not observed for that surface. A cursor position is a fact; the run records how far it got.
+2. Layers are independent: the pull-request layer failing does not prevent the REST surfaces from running.
+3. Degradation is per run. The next run re-observes from scratch; nothing is remembered as "known bad" (that is the Backlog breaker).
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-degrade-1 | Foundation Aborts | Proposed | A repository listing that fails after budget produces a FAILED run with one error record and no partial repository set. | |
+| req-github-core-reliability-degrade-2 | Others Continue | Proposed | Each non-foundation layer, failed after budget in the proof harness, yields a run that completes, marks that surface unobservable with a reason, and lands every other layer. | One test per layer. |
+| req-github-core-reliability-degrade-3 | Partial Page Lands | Proposed | A GraphQL walk that fails on page 3 of 5 lands pages 1–2's repositories as observed and marks the remainder not observed for that layer, with the cursor position in the record. | |
+
+### Degradation Is Never Absence
+----
+RID: `req-github-core-reliability-absence`
+
+Status: `Proposed`
+
+The contract every downstream pass — tombstoning first among them — relies on:
+
+1. **Not fetched is not not-present.** An item the run did not observe because its surface degraded, its walk was capped, its layer was skipped by the wall clock, or its read was refused is marked *not observed this run*; it is never omitted silently and never marked absent, removed or empty.
+2. **Absence is a positive observation.** Only a surface whose listing **completed** (walk complete, no degradation, no cap) may assert that an item is not in it. The run record carries, per surface, `complete: true|false` — the field a tombstone pass reads before it trusts a missing item.
+3. **Surfaces incomplete this run are named** in the run's summary and in a structured `INCOMPLETE_SURFACES` record listing each `(surface, scope, reason)`, so a reader or an agent can skip them without parsing prose.
+4. **A FAILED run asserts nothing about absence.** Its partial batches, if linked, are additive observations only.
+
+This requirement is the seam between this spec and the tombstoning design (George, double-tap session, 2026-09-14): a removal is confirmed only against a complete listing, never against a degraded one.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-absence-1 | Completeness Per Surface | Proposed | Every listing surface the run touches reports `complete: true|false` with a reason when false, in a structured run record. | |
+| req-github-core-reliability-absence-2 | No Silent Omission | Proposed | In the proof harness, a degraded surface leaves every previously-known item of that surface marked not-observed-this-run, never absent; the batch contains no deletion or "empty" assertion for it. | |
+| req-github-core-reliability-absence-3 | Incomplete Surfaces Listed | Proposed | The run summary names the count of incomplete surfaces and the `INCOMPLETE_SURFACES` record lists them. | |
+
+### Adaptive GraphQL Pages
+----
+RID: `req-github-core-reliability-adaptive-pages`
+
+Status: `Proposed`
+
+GitHub's "couldn't respond to your request in time" is a statement about the query's cost, and its documented remedy is smaller pages. The config layer asks for 100 repositories per page with nested rulesets, rules, bypass actors, environments, 100 refs, 50 releases with assets and the full workflow-file tree (`graphql_client.py:50` `_REPO_PAGE_SIZE = 100`, `:99–190`); the pull-request layer asks 5 repositories × 30 PRs × checks. On a 504 or timeout classified transient for a GraphQL call, the seam halves the outermost page size before the retry — 100 → 50 → 25 → 10 (floor) — keeps the reduced size for the rest of that layer in that run, and records the change. The floor exhausted is a transient failure like any other and degrades per `req-github-core-reliability-degrade`.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-adaptive-pages-1 | Halve On Timeout | Proposed | Two consecutive 504s on a 100-repository page yield the third request at 25; a fake that serves 25-repository pages then completes the layer SUCCESSFUL. | |
+| req-github-core-reliability-adaptive-pages-2 | Recorded | Proposed | The run carries a `PAGE_SIZE_REDUCED` record per reduction with layer, from, to. | |
+
+### Rate Limits
+----
+RID: `req-github-core-reliability-ratelimit`
+
+Status: `Proposed`
+
+Per GitHub's guidance, which githubkit's detection already distinguishes:
+
+| Limit | Signal | Behaviour |
+| --- | --- | --- |
+| Primary | 403/429 with `x-ratelimit-remaining: 0` | Wait until `x-ratelimit-reset` if that is within the run's remaining wall clock; otherwise stop the layer with reason `rate_limited_until <reset>` and degrade — never spin, never burn |
+| Secondary | 403/429 with `Retry-After`, or a secondary-limit body | Wait `Retry-After` (else ≥ 60 s), **at most twice per run**; a third is `budget_exhausted` |
+| Approaching | `x-ratelimit-remaining` below 5 % of `x-ratelimit-limit` on any response | Record `RATE_LIMIT_LOW` once; the seam may pause until reset if within wall clock |
+
+Every response's `remaining` / `cost` (GraphQL `rateLimit`) is read and the run's final record reports the points spent (the config layer already reports cost).
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-ratelimit-1 | Primary Waits Or Stops | Proposed | A primary limit with reset in 40 s waits then continues; one with reset in 40 min degrades the layer with the reset time in the reason. | |
+| req-github-core-reliability-ratelimit-2 | Secondary Twice | Proposed | Two secondary limits in a run are waited; the third degrades. | |
+
+### Observability
+----
+RID: `req-github-core-reliability-observability`
+
+Status: `Proposed`
+
+Every decision the seam makes is a structured record on the run (`record_info` / `record_warn` with `message_code` and `message_data`), never only a log line:
+
+| Code | Level | When | Data |
+| --- | --- | --- | --- |
+| `RETRY` | info | Each retry | layer, url/query, class, attempt, sleep_seconds, status |
+| `PAGE_SIZE_REDUCED` | info | Each halving | layer, from, to |
+| `LAYER_DEGRADED` | warn | A layer or per-repo surface gives up | layer, scope, reason (`budget_exhausted` / `wall_clock` / `rate_limited_until` / `terminal <status>`), pages_landed |
+| `INCOMPLETE_SURFACES` | warn | End of run when any | list of (surface, scope, reason) |
+| `RATE_LIMIT_LOW` | warn | Once per run | remaining, limit, reset |
+| `RUN_BUDGET` | info | Run start and end | attempts_per_call, retry_budget, wall_clock, retries_used, seconds_used, points_spent |
+
+The run's `summary` ends with the counts: `… ; N retries, M surfaces degraded` (omitted when both are zero), so the collector table reads a flaky day at a glance.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-observability-1 | Records Present | Proposed | The proof harness's degraded run carries every applicable code above with the listed data keys. | |
+| req-github-core-reliability-observability-2 | Summary Counts | Proposed | A run with 3 retries and 1 degraded surface ends its summary with `; 3 retries, 1 surface degraded`; a clean run's summary is unchanged. | |
+
+### Run Outcome
+----
+RID: `req-github-core-reliability-outcome`
+
+Status: `Proposed`
+
+Composes with tap_cares' failure-mode convention (`req-tap-cares-collector-failure-mode-1..7`): `record_error` + raise is how a run fails; one terminal write; the collector sets `summary`.
+
+| Outcome | When | Summary |
+| --- | --- | --- |
+| **SUCCESSFUL** (clean) | Every layer complete | As today |
+| **SUCCESSFUL** (degraded) | Any non-foundation layer degraded, or any surface incomplete | Today's counts plus `; N retries, M surfaces degraded` and the `INCOMPLETE_SURFACES` record. No new `CollectionJob` status — a distinct status would touch tap_cares for every plugin; the count and the record are the marker |
+| **FAILED** | A foundation layer failed after budget; or an unclassified exception | `_abort` as today; partial batches linked additively; asserts nothing about absence |
+
+**Single-flight.** A github_core run that finds another github_core job in `RUNNING` younger than the wall-clock ceiling records `RUN_SKIPPED_CONCURRENT` and exits SUCCESSFUL with that summary; one older than the ceiling is presumed orphaned (tap#454), the skip is recorded with its age, and the run proceeds. *Observed 2026-09-14:* a manual and a scheduled run overlapped for two minutes with no guard.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-outcome-1 | Degraded Is Successful And Says So | Proposed | A run with one degraded layer ends SUCCESSFUL, its summary carries the counts, and the `INCOMPLETE_SURFACES` record is present. | |
+| req-github-core-reliability-outcome-2 | Foundation Fails The Run | Proposed | A listing failure after budget ends FAILED with one error record. | |
+| req-github-core-reliability-outcome-3 | Single-Flight | Proposed | With a fresh RUNNING sibling the run skips and says so; with a stale one (older than the ceiling) it proceeds and records the presumed orphan. | |
+
+### Proof
+----
+RID: `req-github-core-reliability-proof`
+
+Status: `Proposed`
+
+A fake GitHub (`tests/fake_github.py`) — an in-process HTTP server or a githubkit transport stub — scripted per test to emit each taxonomy signal at a chosen call: 504, 502, 429 with headers, 403 with and without `Retry-After`, empty-body 404, bodied 404, connection reset, truncated body, timeout, GraphQL "couldn't respond in time", GraphQL partial errors, a capped walk. The collector runs against it (via `__new__` construction as the existing tests do) and every acceptance criterion above that names the proof harness is a test in `tests/test_reliability.py`. The harness is also the acceptance test for the githubkit migration: the same tests pass before and after each step of `req-github-core-reliability-client`.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-reliability-proof-1 | Every Signal Scripted | Proposed | The fake can emit every signal in the taxonomy table on demand, at a chosen call index. | |
+| req-github-core-reliability-proof-2 | Every Layer Degrades | Proposed | One test per non-foundation layer proves it degrades and the run continues. | |
+
+### Cross-Run Circuit Breaker
+----
+RID: `req-github-core-reliability-breaker`
+
+Status: `Backlog`
+
+When GitHub is down, every scheduled run spends its full budget discovering that. A breaker remembers the last run's outcome per layer and, after N consecutive exhausted failures, skips the layer for a cooling period with a `LAYER_SKIPPED_BREAKER` record, probing again after it. Needs state across runs (a fact on the collector node, or the last job's records) that the collector does not read today. Enter a sprint after two flaky days have been observed under the v0 rules.
+
+### Conditional Requests
+----
+RID: `req-github-core-reliability-conditional`
+
+Status: `Backlog`
+
+`If-None-Match` / ETag on the REST surfaces: a 304 costs no rate-limit points. An efficiency edge, not a reliability one; githubkit's cache layer (hishel) may give it for free. Measure the points a healthy run spends first.
