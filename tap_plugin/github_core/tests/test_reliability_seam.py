@@ -142,6 +142,20 @@ def test_unanticipated_exception_fails_closed() -> None:
         classify(ValueError("not a transport thing"), now=T0)
 
 
+def test_local_os_errors_fail_closed_and_unlisted_transport_is_transient_once() -> None:
+    for exc in (PermissionError("denied"), FileNotFoundError("gone"), IsADirectoryError("dir")):
+        with pytest.raises(type(exc)):
+            classify(exc, now=T0)
+    assert classify(OSError("weird"), now=T0, attempt=1).klass == "transient"
+    assert classify(OSError("weird"), now=T0, attempt=2).klass == "terminal"
+    clock, spy = Clock(), Spy()
+    t = _script(OSError("weird"), OSError("weird"), _ok({}))
+    g = call(t, _ctx(), budget=_budget(clock), recorder=spy, policy=NO_JITTER, sleep=_sleep, now=clock)
+    assert g.failure == "terminal" and len(t.calls) == 2 and spy.codes() == ["RETRY", "TERMINAL"]
+    with pytest.raises(PermissionError):
+        call(_script(PermissionError("denied")), _ctx(), budget=_budget(clock), recorder=spy, policy=NO_JITTER, sleep=_sleep, now=clock)
+
+
 def test_retry_after_header_forms() -> None:
     assert classify(_http(429, headers={"Retry-After": "12"}), now=T0).retry_after == 12.0
     http_date = (T0 + timedelta(seconds=90)).strftime("%a, %d %b %Y %H:%M:%S GMT")
@@ -283,12 +297,95 @@ def test_graphql_page_floor_holds() -> None:
 # --- partial and the gather's facts -------------------------------------------------------------
 
 
-def test_partial_graphql_hands_up_degraded_paths_without_failure() -> None:
+def test_partial_graphql_lands_the_bytes_names_the_paths_and_is_not_complete() -> None:
     clock, spy = Clock(), Spy()
-    t = _script(GraphQLErrors([{"type": "FORBIDDEN", "path": ["repositoryOwner", "repositories", "nodes", 3, "rulesets"], "message": "x"}], has_data=True))
-    g = call(t, _ctx(graphql=True, layer="graphql"), budget=_budget(clock), recorder=spy, policy=NO_JITTER, sleep=_sleep, now=clock)
+    raw = json.dumps({"data": {"repositoryOwner": {"repositories": {"nodes": [{}, {}, {}, {"rulesets": None}]}}}, "errors": [{"type": "FORBIDDEN", "path": ["repositoryOwner", "repositories", "nodes", 3, "rulesets"], "message": "x"}]}).encode()
+    t = _script(GraphQLErrors([{"type": "FORBIDDEN", "path": ["repositoryOwner", "repositories", "nodes", 3, "rulesets"], "message": "x"}], has_data=True, body=raw, headers={"x-ratelimit-remaining": "4000", "x-ratelimit-limit": "5000"}))
+    g = call(t, _ctx(graphql=True, layer="graphql", page_size=100), budget=_budget(clock), recorder=spy, policy=NO_JITTER, sleep=_sleep, now=clock)
     assert g.ok and not g.complete
     assert g.degraded_paths == ["repositoryOwner.repositories.nodes.3.rulesets"]
+    assert g.body == raw and g.digest == hashlib.sha256(raw).hexdigest() and g.parsed["data"] is not None
+    assert g.rate_limit.remaining == 4000 and g.page_size == 100
+    assert spy.codes() == ["PARTIAL"] and spy.records[0][3]["count"] == 1
+
+
+def test_graphql_adapter_turns_data_beside_errors_into_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Through the real `_post_layer` transport, not an injected exception (review finding)."""
+    import io
+    import urllib.request
+
+    from tap_plugin.github_core.collectors.github_collector import graphql_client as mod
+    from tap_plugin.github_core.collectors.github_collector.github_call import RunBudget, Seam
+
+    raw = json.dumps({"data": {"rateLimit": {"cost": 1}, "repositoryOwner": None}, "errors": [{"type": "NOT_FOUND", "path": ["repositoryOwner"], "message": "x"}]}).encode()
+
+    class _Resp(io.BytesIO):
+        status = 200
+        headers = {"x-ratelimit-remaining": "4999", "x-ratelimit-limit": "5000"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: _Resp(raw))
+    spy = Spy()
+    client = mod.GithubGraphQLClient(token="t", seam=Seam(budget=RunBudget(), recorder=spy))
+    body = client._post_layer("config_layer", mod.config_query, {"login": "o", "cursor": None}, page_size=100)
+    assert body["errors"][0]["type"] == "NOT_FOUND" and body["data"]["rateLimit"]["cost"] == 1
+    assert spy.codes() == ["PARTIAL"] and spy.records[0][3]["degraded_paths"] == ["repositoryOwner"]
+
+
+def test_malformed_2xx_body_is_transient_never_complete() -> None:
+    clock, spy = Clock(), Spy()
+    t = _script((200, {}, b'{"workflow_runs": [{"id": 1'), _ok({"workflow_runs": []}))
+    g = call(t, _ctx(), budget=_budget(clock), recorder=spy, policy=NO_JITTER, sleep=_sleep, now=clock)
+    assert g.ok and g.parsed == {"workflow_runs": []} and len(t.calls) == 2
+    assert spy.codes() == ["RETRY"] and "truncated" in spy.records[0][3]["reason"]
+
+
+def test_call_ceiling_bounds_a_trickling_attempt() -> None:
+    import time as _time
+
+    spy = Spy()
+    budget = RunBudget(wall_clock=timedelta(seconds=0.3))  # real clock: ceiling = remaining ≈ 0.3 s
+
+    def slow(params: dict[str, Any]) -> tuple[int, dict[str, str], bytes]:
+        _time.sleep(1.0)
+        return 200, {}, b"{}"
+
+    started = _time.monotonic()
+    g = call(slow, _ctx(), budget=budget, recorder=spy, policy=NO_JITTER, sleep=_sleep)
+    assert not g.ok and _time.monotonic() - started < 0.9
+    assert spy.codes()[-1] == "LAYER_DEGRADED"
+
+
+def test_endpoint_template_redacts_whole_tails_and_ids() -> None:
+    from tap_plugin.github_core.collectors.github_collector.github_call import endpoint_template, scope_from_path
+
+    assert endpoint_template("/repos/acme/r/contents/private/token.txt?ref=main") == "/repos/{owner}/{repo}/contents/{name}"
+    assert endpoint_template("/repos/acme/r/git/ref/heads/feature/x") == "/repos/{owner}/{repo}/git/ref/{name}"
+    assert endpoint_template("/repos/acme/r/actions/secrets/DEPLOY_KEY") == "/repos/{owner}/{repo}/actions/secrets/{name}"
+    assert endpoint_template("/repos/acme/r/actions/runs/1234/jobs?per_page=100") == "/repos/{owner}/{repo}/actions/runs/{id}/jobs"
+    assert endpoint_template("/repos/acme/r/commits/" + "a" * 40 + "/check-runs") == "/repos/{owner}/{repo}/commits/{sha}/check-runs"
+    assert endpoint_template("/orgs/acme/actions/secrets/TOKEN") == "/orgs/{org}/actions/secrets/{name}"
+    assert endpoint_template("https://api.github.com/repos/acme/r/actions/runs") == "/repos/{owner}/{repo}/actions/runs"
+    assert scope_from_path("/repos/acme/r/actions/runs") == "acme/r" and scope_from_path("/orgs/acme/x") == "acme" and scope_from_path("/rate_limit") == "account"
+
+
+def test_pat_bound_client_records_its_own_credential_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tap_plugin.github_core.collectors.github_collector import api_client as mod
+    from tap_plugin.github_core.collectors.github_collector.github_call import RunBudget, Seam
+
+    spy = Spy()
+    seam = Seam(budget=RunBudget(), recorder=spy, credential_kind="app")
+    pat = mod.GithubClient(token="t", seam=seam, credential_kind="pat")
+    monkeypatch.setattr(pat, "_request_once", lambda url, timeout=30.0: (_ for _ in ()).throw(_http(401)))
+    with pytest.raises(mod.GithubAPIError):
+        pat.get("/repos/acme/r/rulesets/7")
+    assert spy.codes() == ["TERMINAL"] and spy.records[0][3]["credential_kind"] == "pat"
+    assert spy.records[0][3]["endpoint"] == "/repos/{owner}/{repo}/rulesets/{name}"
 
 
 def test_gather_digest_is_sha256_of_the_exact_bytes_and_flags_signed_urls() -> None:

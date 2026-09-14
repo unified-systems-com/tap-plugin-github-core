@@ -64,6 +64,7 @@ class GithubClient:
         api_base_url: str = "https://api.github.com",
         retry_empty_404: bool = True,
         seam: Seam | None = None,
+        credential_kind: str = "",
     ) -> None:
         self._token = token
         self._api_base_url = api_base_url.rstrip("/")
@@ -71,6 +72,9 @@ class GithubClient:
         # switch; under the seam it means a single-attempt policy for THIS client.
         self._policy = RetryPolicy() if retry_empty_404 else RetryPolicy(attempts=1)
         self._seam = seam or Seam.standalone()
+        #: This client's credential kind when it differs from the run's primary (the PAT-bound
+        #: ruleset client under an App run) — provenance names the token that actually asked.
+        self._credential_kind = credential_kind
 
     # Set by every `get_paginated` walk: did it reach the end of the Link chain?
     last_walk_complete: bool = True
@@ -130,7 +134,7 @@ class GithubClient:
             scope=scope_from_path(path),
             endpoint=endpoint_template(path),
             layer="rest",
-            credential_kind=self._seam.credential_kind,
+            credential_kind=self._credential_kind or self._seam.credential_kind,
         )
         seam = self._seam
 
@@ -155,7 +159,8 @@ class GithubClient:
             },
         )
         try:
-            with urlopen(req, timeout=timeout) as resp:  # noqa: S310 - controlled hostname
+            # nosec B310 — `url` is built from the credential envelope's https api_base_url (secret.py).
+            with urlopen(req, timeout=timeout) as resp:  # noqa: S310 # nosec B310
                 body = resp.read()
                 headers = dict(resp.headers.items())
                 self._next_link = self._parse_next_link(resp.headers.get("Link", ""))

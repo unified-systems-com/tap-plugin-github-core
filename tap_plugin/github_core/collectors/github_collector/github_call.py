@@ -23,6 +23,8 @@ import socket
 import time
 import urllib.error
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -67,7 +69,7 @@ class NullRecorder:
     """A recorder for clients used outside a collection run (self-test probes, tests)."""
 
     def info(self, code: str, message: str, data: dict[str, Any]) -> None:
-        logger.debug("[d9e2] %s: %s", code, message)
+        logger.debug("[3c1a] %s: %s", code, message)
 
     def warn(self, code: str, message: str, data: dict[str, Any]) -> None:
         logger.info("[b47e] %s: %s", code, message)
@@ -78,7 +80,7 @@ _ORG = re.compile(r"^/orgs/[^/]+")
 _USER = re.compile(r"^/users/[^/]+")
 _SHA = re.compile(r"/[0-9a-f]{40}(?=/|$)")
 _NUM = re.compile(r"/\d+(?=/|$)")
-_NAMED_TAIL = re.compile(r"^(/repos/\{owner\}/\{repo\}/(?:actions/(?:secrets|variables|workflows|environments)|environments|rulesets|git/ref|contents|releases/tags|branches|commits/\{sha\}/check-runs))/[^/]+")
+_NAMED_TAIL = re.compile(r"^(/repos/\{owner\}/\{repo\}/(?:actions/(?:secrets|variables|workflows|environments)|environments|rulesets|git/ref|git/refs|contents|releases/tags|branches|commits/\{sha\}/check-runs)|/orgs/\{org\}/actions/(?:secrets|variables|runner-groups))/.+$")
 
 
 def endpoint_template(path: str) -> str:
@@ -97,7 +99,7 @@ def endpoint_template(path: str) -> str:
     out = _USER.sub("/users/{user}", out)
     out = _SHA.sub("/{sha}", out)
     out = _NUM.sub("/{id}", out)
-    out = _NAMED_TAIL.sub(r"\1/{name}", out)
+    out = _NAMED_TAIL.sub(r"\1/{name}", out)  # the whole tail: names and paths may contain '/'
     return out
 
 
@@ -200,13 +202,25 @@ def rate_limit_snapshot(headers: Mapping[str, str], cost: int | None = None) -> 
     )
 
 
-def classify(exc: BaseException, *, now: datetime | None = None) -> Classification:
-    """Map anything a transport can raise to transient / terminal / partial (rule 5 closes the table)."""
+_LOCAL_OSERRORS = (PermissionError, FileNotFoundError, IsADirectoryError, NotADirectoryError, FileExistsError)
+
+
+def classify(exc: BaseException, *, now: datetime | None = None, attempt: int = 1) -> Classification:
+    """Map anything a transport can raise to transient / terminal / partial (rule 5 closes the table).
+
+    ``attempt`` is the 1-based attempt that raised: an UNLISTED transport exception is transient on
+    the first attempt and terminal after — one retry proves it was not a blip. Local filesystem
+    errors are not transport at all and fail the run closed.
+    """
     now = now or datetime.now(UTC)
     if isinstance(exc, HttpFailure):
         return _classify_http(exc.status, exc.headers, exc.body, now)
     if isinstance(exc, GraphQLErrors):
         return _classify_graphql(exc)
+    if isinstance(exc, _MalformedBody):
+        return Classification("transient", f"truncated: {exc}")
+    if isinstance(exc, _CallCeilingExceeded):
+        return Classification("transient", f"timeout: {exc}")
     if isinstance(exc, (http.client.IncompleteRead, http.client.RemoteDisconnected)):
         return Classification("transient", f"truncated: {type(exc).__name__}")
     if isinstance(exc, (TimeoutError, socket.timeout)):
@@ -217,10 +231,14 @@ def classify(exc: BaseException, *, now: datetime | None = None) -> Classificati
         return Classification("transient", f"transport: {exc.reason}")
     if isinstance(exc, http.client.HTTPException):
         return Classification("transient", f"http.client: {type(exc).__name__}")
+    if isinstance(exc, _LOCAL_OSERRORS):
+        raise exc  # not transport: a local error fails the run closed (rule 5)
     if isinstance(exc, OSError):
-        # Rule 5: an unlisted transport exception is transient once, then terminal (the caller's
-        # attempt counter makes it so); we name it so the table can grow.
-        return Classification("transient", f"unlisted transport: {type(exc).__name__}")
+        # Rule 5: an unlisted transport exception is transient ONCE, then terminal; named so the
+        # table can grow.
+        if attempt <= 1:
+            return Classification("transient", f"unlisted transport: {type(exc).__name__}")
+        return Classification("terminal", f"unlisted transport after one retry: {type(exc).__name__}")
     raise exc  # rule 5: an unanticipated exception fails the run closed, named by the run record
 
 
@@ -254,10 +272,17 @@ def _classify_http(status: int, headers: Mapping[str, str], body: bytes, now: da
 
 @dataclass
 class GraphQLErrors(Exception):
-    """A GraphQL response carrying ``errors[]`` — with or without ``data``."""
+    """A GraphQL response carrying ``errors[]`` — with or without ``data``.
+
+    When ``data`` is present the transport passes the raw body and headers along so the seam
+    can land the partial answer (bytes, digest, degraded paths) instead of dropping it.
+    """
 
     errors: list[dict[str, Any]]
     has_data: bool
+    body: bytes = b""
+    headers: Mapping[str, str] = field(default_factory=dict)
+    status: int = 200
 
     def types(self) -> set[str]:
         return {str(e.get("type") or "") for e in self.errors}
@@ -407,25 +432,40 @@ def call(
             return gather.refused("transient", "wall_clock")
         params = {"page_size": page_size, "read_timeout": budget.read_timeout(), "call_ceiling": budget.call_ceiling()}
         try:
-            status, headers, body = transport(params)
+            status, headers, body = _under_ceiling(transport, params, params["call_ceiling"])
+            if body and _parse_json(body, strict=True) is _MALFORMED:
+                raise _MalformedBody(len(body))
         except Exception as exc:  # noqa: BLE001 — classify() re-raises what it does not know (rule 5)
-            classification = classify(exc, now=clock())
+            classification = classify(exc, now=clock(), attempt=attempt)
             gather.status = getattr(exc, "status", None)
             if classification.klass == "terminal":
                 recorder.warn(
                     "TERMINAL",
                     f"{ctx.layer}: {classification.reason} on {ctx.endpoint}",
-                    {"layer": ctx.layer, "endpoint": ctx.endpoint, "status": gather.status, "reason": classification.reason},
+                    {"layer": ctx.layer, "endpoint": ctx.endpoint, "status": gather.status, "reason": classification.reason, "credential_kind": ctx.credential_kind},
                 )
                 return gather.refused("terminal", classification.reason)
             if classification.klass == "partial":
-                # A GraphQL body with data beside errors: hand it up as partial; the caller prunes.
+                # A GraphQL body with data beside errors: land what arrived as PARTIAL — bytes,
+                # digest, parsed body — with the degraded paths named; the caller prunes them.
                 gql = exc if isinstance(exc, GraphQLErrors) else None
                 gather.degraded_paths = [
                     ".".join(str(p) for p in (e.get("path") or [])) or "<root>" for e in (gql.errors if gql else [])
                 ]
+                if gql is not None and gql.body:
+                    gather.body = gql.body
+                    gather.parsed = _parse_json(gql.body)
+                    gather.status = gql.status
+                    gather.rate_limit = rate_limit_snapshot(gql.headers)
                 gather.failure = None
                 gather.complete = False
+                gather.page_size = page_size
+                gather.observed_at = clock()
+                recorder.info(
+                    "PARTIAL",
+                    f"{ctx.layer}: {len(gather.degraded_paths)} degraded path(s) pruned on {ctx.endpoint}",
+                    {"layer": ctx.layer, "endpoint": ctx.endpoint, "degraded_paths": gather.degraded_paths[:20], "count": len(gather.degraded_paths)},
+                )
                 return gather
             # transient
             if classification.rate_limited == "secondary":
@@ -461,6 +501,7 @@ def call(
                     "attempt": attempt,
                     "sleep_seconds": round(wait, 2),
                     "status": gather.status,
+                    "credential_kind": ctx.credential_kind,
                 },
             )
             sleep(wait)
@@ -479,11 +520,44 @@ def call(
     return _degrade(gather, recorder, ctx, "attempts_exhausted")  # pragma: no cover — loop returns
 
 
+class _MalformedBody(Exception):
+    """A 2xx whose body is not JSON — a truncated or proxy-generated answer, never an observation."""
+
+    def __init__(self, size: int) -> None:
+        super().__init__(f"malformed 2xx body ({size} bytes)")
+        self.size = size
+
+
+class _CallCeilingExceeded(TimeoutError):
+    """The whole attempt — connect, request and read — outlived its ceiling."""
+
+
+def _under_ceiling(transport: Transport, params: dict[str, Any], ceiling: float) -> tuple[int, Mapping[str, str], bytes]:
+    """Run one attempt with an aggregate deadline (req-github-core-reliability-budget).
+
+    Socket timeouts bound inactivity, not the whole request: a trickling body can outlive the
+    run. The attempt runs on a worker thread and is abandoned when the ceiling passes; the
+    abandoned thread ends at the next socket timeout, so the leak is bounded by the read
+    timeout. A ceiling of zero or less means the deadline has already passed.
+    """
+    if ceiling <= 0:
+        raise _CallCeilingExceeded("deadline passed before the attempt")
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="github-call")
+    future = pool.submit(transport, params)
+    try:
+        return future.result(timeout=ceiling)
+    except FuturesTimeout as exc:
+        raise _CallCeilingExceeded(f"call ceiling {ceiling:.0f}s exceeded") from exc
+    finally:
+        # Never block on a stuck attempt; the worker ends at its socket timeout.
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
 def _degrade(gather: Gather, recorder: Recorder, ctx: CallContext, reason: str) -> Gather:
     recorder.warn(
         "LAYER_DEGRADED",
         f"{ctx.layer}: {ctx.surface} for {ctx.scope} not observed this run — {reason}",
-        {"layer": ctx.layer, "surface": ctx.surface, "scope": ctx.scope, "reason": reason, "attempts": gather.attempts},
+        {"layer": ctx.layer, "surface": ctx.surface, "scope": ctx.scope, "reason": reason, "attempts": gather.attempts, "credential_kind": ctx.credential_kind},
     )
     return gather.refused("transient", reason)
 
@@ -495,13 +569,18 @@ def _next_page_size(current: int) -> int:
     return current
 
 
-def _parse_json(body: bytes) -> Any:
+_MALFORMED = object()
+
+
+def _parse_json(body: bytes, *, strict: bool = False) -> Any:
+    """Decode a JSON body; empty is None. Malformed is ``_MALFORMED`` when strict (the caller turns
+    it into a transient failure — a 2xx with a broken body is never a complete observation)."""
     if not body:
         return None
     try:
         return json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return None
+        return _MALFORMED if strict else None
 
 
 def _check_rate_limit_low(snapshot: RateLimitSnapshot, recorder: Recorder, budget: RunBudget) -> None:

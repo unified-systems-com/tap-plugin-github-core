@@ -379,10 +379,15 @@ class GithubGraphQLClient:
             except urllib.error.HTTPError as exc:
                 raise HttpFailure(status=exc.code, headers=dict((exc.headers or {}).items()), body=exc.read() if exc.fp else b"") from exc
             body = json.loads(raw.decode("utf-8"))
+            errors = list(body.get("errors") or [])
             if body.get("data") is None:
                 # No data at all means the whole query failed — the seam classifies the error types
                 # (RATE_LIMITED, "couldn't respond in time" → smaller page, FORBIDDEN → terminal).
-                raise GraphQLErrors(errors=list(body.get("errors") or []), has_data=False)
+                raise GraphQLErrors(errors=errors, has_data=False, status=status, headers=headers)
+            if errors:
+                # Data beside errors is PARTIAL: the seam lands the bytes and names the degraded
+                # paths; the caller's prune_errored_paths removes them from the data.
+                raise GraphQLErrors(errors=errors, has_data=True, body=raw, headers=headers, status=status)
             return status, headers, raw
 
         gather = call(transport, ctx, budget=seam.budget, recorder=seam.recorder)
