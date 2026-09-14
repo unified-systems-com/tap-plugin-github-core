@@ -217,7 +217,7 @@ def classify(exc: BaseException, *, now: datetime | None = None, attempt: int = 
         return _classify_http(exc.status, exc.headers, exc.body, now)
     if isinstance(exc, GraphQLErrors):
         return _classify_graphql(exc)
-    if isinstance(exc, _MalformedBody):
+    if isinstance(exc, MalformedBody):
         return Classification("transient", f"truncated: {exc}")
     if isinstance(exc, _CallCeilingExceeded):
         return Classification("transient", f"timeout: {exc}")
@@ -421,6 +421,11 @@ def call(
     ``transport(params)`` performs ONE attempt: it receives ``{"page_size": n, "read_timeout": s,
     "call_ceiling": s}`` and returns ``(status, headers, body)`` for any 2xx, or raises
     ``HttpFailure`` / ``GraphQLErrors`` / a transport exception. The seam never sees a URL.
+
+    **A transport must not mutate its client.** An attempt abandoned at the call ceiling keeps
+    running on its worker until its socket times out; anything it wrote to shared state (a
+    pagination cursor, a cache) would land after the seam has moved on. Everything the caller
+    needs from the winning attempt travels back on the Gather (``headers``, ``body``).
     """
     policy = policy or RetryPolicy()
     clock = now or budget.clock
@@ -434,10 +439,13 @@ def call(
         try:
             status, headers, body = _under_ceiling(transport, params, params["call_ceiling"])
             if body and _parse_json(body, strict=True) is _MALFORMED:
-                raise _MalformedBody(len(body))
+                raise MalformedBody(len(body))
         except Exception as exc:  # noqa: BLE001 — classify() re-raises what it does not know (rule 5)
             classification = classify(exc, now=clock(), attempt=attempt)
             gather.status = getattr(exc, "status", None)
+            if isinstance(exc, (HttpFailure, GraphQLErrors)):
+                gather.last_failure_body = exc.body
+                gather.last_failure_headers = dict(exc.headers.items()) if exc.headers else {}
             if classification.klass == "terminal":
                 recorder.warn(
                     "TERMINAL",
@@ -515,12 +523,13 @@ def call(
         gather.rate_limit = rate_limit_snapshot(headers)
         gather.contains_signed_urls = b"X-Amz-Signature" in body or b"&sig=" in body
         gather.page_size = page_size
+        gather.headers = dict(headers.items()) if headers else {}
         _check_rate_limit_low(gather.rate_limit, recorder, budget)
         return gather
     return _degrade(gather, recorder, ctx, "attempts_exhausted")  # pragma: no cover — loop returns
 
 
-class _MalformedBody(Exception):
+class MalformedBody(Exception):
     """A 2xx whose body is not JSON — a truncated or proxy-generated answer, never an observation."""
 
     def __init__(self, size: int) -> None:

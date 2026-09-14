@@ -143,12 +143,18 @@ class GithubClient:
 
         gather = call(transport, ctx, budget=seam.budget, recorder=seam.recorder, policy=self._policy)
         if not gather.ok:
-            raise GithubAPIError(status=gather.status or 0, url=url, body=gather.failure_reason)
+            # GitHub's own explanatory body when there was one (the contract callers hold), else
+            # the seam's reason (an exhausted transient has no single answer to quote).
+            body = gather.last_failure_body.decode("utf-8", errors="replace") or gather.failure_reason
+            raise GithubAPIError(status=gather.status or 0, url=url, body=body)
+        # Pagination state is set HERE, from the attempt that won — never inside the transport,
+        # which an abandoned attempt may still be running.
+        self._next_link = self._parse_next_link(gather.headers.get("Link", ""))
         return gather.parsed if gather.body else {}
 
     def _request_once(self, url: str, *, timeout: float = 30.0) -> tuple[int, dict[str, str], bytes]:
         """ONE attempt: ``(status, headers, body)`` for 2xx; ``HttpFailure`` for any other status;
-        transport exceptions propagate for the seam to classify. Sets the next Link on success."""
+        transport exceptions propagate for the seam to classify. Mutates nothing on the client."""
         req = Request(
             url,
             headers={
@@ -163,7 +169,6 @@ class GithubClient:
             with urlopen(req, timeout=timeout) as resp:  # noqa: S310 # nosec B310
                 body = resp.read()
                 headers = dict(resp.headers.items())
-                self._next_link = self._parse_next_link(resp.headers.get("Link", ""))
                 return resp.status, headers, body
         except HTTPError as exc:
             body = exc.read() if exc.fp else b""

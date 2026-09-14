@@ -58,6 +58,13 @@ class Gather:
     attempts: int = 1
     contains_signed_urls: bool = False
     page_size: int | None = None  # the outermost GraphQL page the successful attempt used
+    #: The winning attempt's response headers (in memory for the caller — pagination `Link`; never
+    #: persisted to a run record; the typed snapshot above is what records may carry).
+    headers: dict[str, str] = field(default_factory=dict)
+    #: GitHub's own answer on a refused fetch — the last failure's body and headers — so a caller's
+    #: existing error contract (`GithubAPIError.body`) still carries GitHub's explanatory message.
+    last_failure_body: bytes = b""
+    last_failure_headers: dict[str, str] = field(default_factory=dict)
 
     @property
     def digest(self) -> str:

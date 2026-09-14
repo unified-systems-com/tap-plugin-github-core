@@ -416,3 +416,93 @@ def test_budget_report_names_the_ceilings() -> None:
     clock.advance(42)
     r = b.report()
     assert r == {"attempts_per_call": 4, "retry_budget": 30, "wall_clock_seconds": 1200, "retries_used": 1, "seconds_used": 42}
+
+
+def test_abandoned_attempt_cannot_clobber_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An attempt that outlives the call ceiling must not set `_next_link` after the seam moved on."""
+    import threading
+    import time as _time
+
+    from tap_plugin.github_core.collectors.github_collector import api_client as mod
+    from tap_plugin.github_core.collectors.github_collector.github_call import RunBudget, Seam
+
+    spy = Spy()
+    client = mod.GithubClient(token="t", seam=Seam(budget=RunBudget(wall_clock=timedelta(seconds=0.3)), recorder=spy))
+    client._next_link = "https://api.github.com/keep-me"
+    finished = threading.Event()
+
+    def slow(url: str, *, timeout: float = 30.0):
+        _time.sleep(0.8)
+        finished.set()
+        return 200, {"Link": '<https://api.github.com/late?page=2>; rel="next"'}, b"[]"
+
+    monkeypatch.setattr(client, "_request_once", slow)
+    with pytest.raises(mod.GithubAPIError):
+        client.get("/repos/o/r/actions/runs")
+    assert client._next_link == "https://api.github.com/keep-me"
+    finished.wait(2.0)
+    assert client._next_link == "https://api.github.com/keep-me"  # the late attempt changed nothing
+
+
+def test_rest_refusal_carries_githubs_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tap_plugin.github_core.collectors.github_collector import api_client as mod
+    from tap_plugin.github_core.collectors.github_collector.github_call import RunBudget, Seam
+
+    client = mod.GithubClient(token="t", seam=Seam(budget=RunBudget(), recorder=Spy()))
+    monkeypatch.setattr(client, "_request_once", lambda url, timeout=30.0: (_ for _ in ()).throw(_http(404, body=b'{"message": "Not Found", "documentation_url": "x"}')))
+    with pytest.raises(mod.GithubAPIError) as ei:
+        client.get("/repos/o/r")
+    assert ei.value.status == 404 and '"Not Found"' in ei.value.body
+    # an exhausted transient quotes the last failure's body too
+    client2 = mod.GithubClient(token="t", seam=Seam(budget=RunBudget(), recorder=Spy()), retry_empty_404=False)
+    monkeypatch.setattr(client2, "_request_once", lambda url, timeout=30.0: (_ for _ in ()).throw(_http(503, body=b'{"message": "Service Unavailable"}')))
+    with pytest.raises(mod.GithubAPIError) as ei2:
+        client2.get("/repos/o/r")
+    assert ei2.value.status == 503 and "Service Unavailable" in ei2.value.body
+
+
+def test_graphql_non_json_2xx_is_retried_not_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import urllib.request
+
+    from tap_plugin.github_core.collectors.github_collector import graphql_client as mod
+    from tap_plugin.github_core.collectors.github_collector.github_call import RunBudget, Seam
+
+    bodies = [b"<html>bad gateway</html>", json.dumps({"data": {"rateLimit": {"cost": 1}, "repositoryOwner": {"repositories": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}).encode()]
+
+    class _Resp(io.BytesIO):
+        status = 200
+        headers: dict[str, str] = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: _Resp(bodies.pop(0)))
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None) if hasattr(mod, "time") else None
+    spy = Spy()
+    client = mod.GithubGraphQLClient(token="t", seam=Seam(budget=RunBudget(), recorder=spy))
+    import tap_plugin.github_core.collectors.github_collector.github_call as gc
+    monkeypatch.setattr(gc.time, "sleep", lambda s: None)
+    body = client._post_layer("config_layer", mod.config_query, {"login": "o", "cursor": None}, page_size=100)
+    assert body["data"]["rateLimit"]["cost"] == 1
+    assert spy.codes() == ["RETRY"] and "truncated" in spy.records[0][3]["reason"]
+
+
+def test_graphql_refusal_quotes_githubs_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+    import urllib.request
+
+    from tap_plugin.github_core.collectors.github_collector import graphql_client as mod
+    from tap_plugin.github_core.collectors.github_collector.github_call import RunBudget, Seam
+
+    def boom(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {"Content-Type": "application/json"}, __import__("io").BytesIO(b'{"message": "Bad credentials"}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    client = mod.GithubGraphQLClient(token="t", seam=Seam(budget=RunBudget(), recorder=Spy()))
+    with pytest.raises(mod.GithubGraphQLError) as ei:
+        client._post_layer("config_layer", mod.config_query, {"login": "o", "cursor": None}, page_size=100)
+    assert ei.value.status == 401 and "Bad credentials" in str(ei.value)

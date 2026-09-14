@@ -45,7 +45,7 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
-from .github_call import CallContext, GraphQLErrors, HttpFailure, Seam, call
+from .github_call import CallContext, GraphQLErrors, HttpFailure, MalformedBody, Seam, call, message_from_body
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +378,13 @@ class GithubGraphQLClient:
                     status = response.status
             except urllib.error.HTTPError as exc:
                 raise HttpFailure(status=exc.code, headers=dict((exc.headers or {}).items()), body=exc.read() if exc.fp else b"") from exc
-            body = json.loads(raw.decode("utf-8"))
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as exc:
+                # A 2xx that is not JSON is a truncated or proxy answer — transient, retried by the seam.
+                raise MalformedBody(len(raw)) from exc
+            if not isinstance(body, dict):
+                raise MalformedBody(len(raw))
             errors = list(body.get("errors") or [])
             if body.get("data") is None:
                 # No data at all means the whole query failed — the seam classifies the error types
@@ -392,7 +398,11 @@ class GithubGraphQLClient:
 
         gather = call(transport, ctx, budget=seam.budget, recorder=seam.recorder)
         if not gather.ok:
-            raise GithubGraphQLError(f"{layer}: {gather.failure_reason}", status=gather.status)
+            detail = message_from_body(gather.last_failure_body) if gather.last_failure_body else ""
+            raise GithubGraphQLError(
+                f"{layer}: {gather.failure_reason}" + (f" — {detail}" if detail and detail != "<empty body>" else ""),
+                status=gather.status,
+            )
         if gather.page_size:
             self.page_sizes[layer] = gather.page_size
         return gather.parsed if isinstance(gather.parsed, dict) else {}
