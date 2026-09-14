@@ -18,6 +18,7 @@ import http.client
 import json
 import logging
 import random
+import re
 import socket
 import time
 import urllib.error
@@ -60,6 +61,55 @@ class Recorder(Protocol):
     def info(self, code: str, message: str, data: dict[str, Any]) -> None: ...
 
     def warn(self, code: str, message: str, data: dict[str, Any]) -> None: ...
+
+
+class NullRecorder:
+    """A recorder for clients used outside a collection run (self-test probes, tests)."""
+
+    def info(self, code: str, message: str, data: dict[str, Any]) -> None:
+        logger.debug("[d9e2] %s: %s", code, message)
+
+    def warn(self, code: str, message: str, data: dict[str, Any]) -> None:
+        logger.info("[b47e] %s: %s", code, message)
+
+
+_OWNER_REPO = re.compile(r"^/repos/[^/]+/[^/]+")
+_ORG = re.compile(r"^/orgs/[^/]+")
+_USER = re.compile(r"^/users/[^/]+")
+_SHA = re.compile(r"/[0-9a-f]{40}(?=/|$)")
+_NUM = re.compile(r"/\d+(?=/|$)")
+_NAMED_TAIL = re.compile(r"^(/repos/\{owner\}/\{repo\}/(?:actions/(?:secrets|variables|workflows|environments)|environments|rulesets|git/ref|contents|releases/tags|branches|commits/\{sha\}/check-runs))/[^/]+")
+
+
+def endpoint_template(path: str) -> str:
+    """The redacted identity of a request: ``/repos/{owner}/{repo}/actions/runs/{id}/jobs``.
+
+    Query strings are dropped; owner/repo/org/user segments, numeric ids and 40-hex SHAs are
+    replaced by placeholders; the name segment after a few well-known collections (secrets,
+    workflows, environments, tags, refs, branches) is replaced too, so a secret or branch NAME
+    never lands in a run record (req-github-core-reliability-observability).
+    """
+    path = path.split("?", 1)[0]
+    if path.startswith("http"):
+        path = "/" + path.split("/", 3)[3] if path.count("/") >= 3 else path
+    out = _OWNER_REPO.sub("/repos/{owner}/{repo}", path)
+    out = _ORG.sub("/orgs/{org}", out)
+    out = _USER.sub("/users/{user}", out)
+    out = _SHA.sub("/{sha}", out)
+    out = _NUM.sub("/{id}", out)
+    out = _NAMED_TAIL.sub(r"\1/{name}", out)
+    return out
+
+
+def scope_from_path(path: str) -> str:
+    """``owner/repo`` for a repository path, ``owner`` for an org/user path, else ``account``."""
+    path = path.split("?", 1)[0]
+    parts = [p for p in path.split("/") if p]
+    if len(parts) >= 3 and parts[0] == "repos":
+        return f"{parts[1]}/{parts[2]}"
+    if len(parts) >= 2 and parts[0] in ("orgs", "users"):
+        return parts[1]
+    return "account"
 
 
 # --- classification (req-github-core-reliability-taxonomy) --------------------------------------
@@ -279,6 +329,19 @@ class RunBudget:
 
 
 @dataclass
+class Seam:
+    """One per run: the budget, the recorder and the credential kind every client shares."""
+
+    budget: RunBudget
+    recorder: Recorder
+    credential_kind: str = ""
+
+    @classmethod
+    def standalone(cls) -> Seam:
+        return cls(budget=RunBudget(), recorder=NullRecorder())
+
+
+@dataclass
 class RetryPolicy:
     attempts: int = ATTEMPTS_PER_CALL
     base: float = BACKOFF_BASE_SECONDS
@@ -410,6 +473,7 @@ def call(
         gather.observed_at = clock()
         gather.rate_limit = rate_limit_snapshot(headers)
         gather.contains_signed_urls = b"X-Amz-Signature" in body or b"&sig=" in body
+        gather.page_size = page_size
         _check_rate_limit_low(gather.rate_limit, recorder, budget)
         return gather
     return _degrade(gather, recorder, ctx, "attempts_exhausted")  # pragma: no cover — loop returns

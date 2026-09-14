@@ -14,8 +14,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-
-from tap_plugin.github_core.collectors.github_collector.gather import Gather
 from tap_plugin.github_core.collectors.github_collector.github_call import (
     ATTEMPTS_PER_CALL,
     CallContext,

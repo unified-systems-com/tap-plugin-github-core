@@ -40,6 +40,7 @@ from tap_cares.exceptions import (
     SecretValidationError,
 )
 
+from .github_call import RunBudget, Seam
 from .api_client import GithubAPIError, GithubClient
 from .app_jwt import GithubAppAuthError
 from .auth import PREFER_APP, PREFER_PAT, GithubAuth
@@ -107,6 +108,8 @@ logger = logging.getLogger(__name__)
 
 # Log site tokens for the recorder. Minted via scripts/log-site-id.
 _SITE_RUN_STARTED = "8fb5"
+#: Seam records (spec-github-core-reliability, req-…-observability): one site per code.
+_SEAM_SITES = {"RETRY": "f2d6", "PAGE_SIZE_REDUCED": "b800", "LAYER_DEGRADED": "4ca8", "TERMINAL": "695e", "RATE_LIMIT_LOW": "eacf", "RUN_BUDGET": "84fd", "INCOMPLETE_SURFACES": "06c1", "RUN_SKIPPED_CONCURRENT": "e33c"}
 _SITE_ABORT_SECRET = "64be"
 _SITE_ABORT_API = "54ce"
 _SITE_REPO_DONE = "d98c"
@@ -847,6 +850,41 @@ class GithubCollector(CollectorBase):
         self.record_error(site, code, message)
         raise GithubCollectorError(message)
 
+    class _SeamRecorder:
+        """Adapts the seam's records onto the collector's accumulator with one site token per code."""
+
+        def __init__(self, collector: "GithubCollector") -> None:
+            self._c = collector
+            self.degraded = 0
+
+        def info(self, code: str, message: str, data: dict[str, Any]) -> None:
+            self._c.record_info(_SEAM_SITES.get(code, "6a92"), code, message, message_data=data)
+
+        def warn(self, code: str, message: str, data: dict[str, Any]) -> None:
+            if code == "LAYER_DEGRADED":
+                self.degraded += 1
+            self._c.record_warn(_SEAM_SITES.get(code, "0002"), code, message, message_data=data)
+
+    def _open_seam(self) -> Seam:
+        """One budget and one recorder for the whole run (req-github-core-reliability-budget)."""
+        self._seam_recorder = self._SeamRecorder(self)
+        self._seam = Seam(budget=RunBudget(), recorder=self._seam_recorder)
+        self.record_info(_SEAM_SITES["RUN_BUDGET"], "RUN_BUDGET", "Run ceilings.", message_data=self._seam.budget.report())
+        return self._seam
+
+    def _close_seam(self) -> str:
+        """The end-of-run budget record and the summary suffix (`; N retries, M surfaces degraded`)."""
+        seam = getattr(self, "_seam", None)
+        if seam is None:
+            return ""
+        report = seam.budget.report()
+        report["degraded_surfaces"] = self._seam_recorder.degraded
+        self.record_info(_SEAM_SITES["RUN_BUDGET"], "RUN_BUDGET", "Run ceilings spent.", message_data=report)
+        retries, degraded = report["retries_used"], report["degraded_surfaces"]
+        if not retries and not degraded:
+            return ""
+        return f"; {retries} retr{'y' if retries == 1 else 'ies'}, {degraded} surface{'s' if degraded != 1 else ''} degraded"
+
     def run(self) -> None:
         self.record_info(
             _SITE_RUN_STARTED, "RUN_STARTED", "GitHub Core collection started."
@@ -857,6 +895,7 @@ class GithubCollector(CollectorBase):
         #: The collection_scope node's id once emitted; the installation edge lands later, beside
         #: the installation node it targets.
         self._scope_uuid: Any = None
+        seam = self._open_seam()
         # github_app nodes are singletons shared across repos; dedupe the node
         # emission across the whole run (the ENABLED_ON_REPOSITORY edges still fan in).
         self._emitted_app_ids: set[str] = set()
@@ -928,7 +967,8 @@ class GithubCollector(CollectorBase):
             message_data={"held": self._auth.held},
         )
 
-        client = GithubClient(token=token, api_base_url=api_base_url(data))
+        seam.credential_kind = "app" if self._auth.has_app else "pat"
+        client = GithubClient(token=token, api_base_url=api_base_url(data), seam=seam)
         # A second client bound to the personal access token, when one is in the envelope. It
         # exists for exactly one reason: GitHub returns a ruleset's bypass actors only to a caller
         # with write access to the ruleset, and an owner's PAT has it where a read-only App never
@@ -938,6 +978,7 @@ class GithubCollector(CollectorBase):
             GithubClient(
                 token=self._auth.token(prefer=PREFER_PAT),
                 api_base_url=api_base_url(data),
+                seam=seam,
             )
             if self._auth.has_pat
             else None
@@ -1269,7 +1310,7 @@ class GithubCollector(CollectorBase):
         self.summary = (
             f"Collected {len(repos)} repo(s): {len(nodes)} node(s), "
             f"{len(edges)} spine edge(s), "
-            f"{len(enrichment.edge_envelopes)} link edge(s)."
+            f"{len(enrichment.edge_envelopes)} link edge(s)." + self._close_seam()
         )
 
     # ---------- config layer (GraphQL) ----------
@@ -1279,7 +1320,7 @@ class GithubCollector(CollectorBase):
     ) -> dict[str, dict[str, Any]]:
         """Fetch every repository's configuration for ``owner`` in one query, keyed by full name."""
         gql = GithubGraphQLClient(
-            token=self._auth.token(), api_base_url=api_base_url(data)
+            token=self._auth.token(), api_base_url=api_base_url(data), seam=self._seam
         )
         repos, notes = gql.fetch_config_layer(owner)
         config = {str(r["nameWithOwner"]): r for r in repos if r.get("nameWithOwner")}
@@ -1316,7 +1357,7 @@ class GithubCollector(CollectorBase):
         leaves every key absent, so both read as `unobservable` downstream rather than as "no
         pull requests" (req-github-core-pull-requests).
         """
-        gql = GithubGraphQLClient(token=self._auth.token(), api_base_url=api_base_url(data))
+        gql = GithubGraphQLClient(token=self._auth.token(), api_base_url=api_base_url(data), seam=self._seam)
         try:
             by_repo, notes = gql.fetch_pull_request_layer(owner)
         except GithubGraphQLError as exc:

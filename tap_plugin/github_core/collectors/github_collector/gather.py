@@ -57,6 +57,7 @@ class Gather:
     rate_limit: RateLimitSnapshot = field(default_factory=RateLimitSnapshot)
     attempts: int = 1
     contains_signed_urls: bool = False
+    page_size: int | None = None  # the outermost GraphQL page the successful attempt used
 
     @property
     def digest(self) -> str:

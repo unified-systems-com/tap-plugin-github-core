@@ -42,7 +42,10 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from typing import Any
+
+from .github_call import CallContext, GraphQLErrors, HttpFailure, Seam, call
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +93,7 @@ class GithubGraphQLError(Exception):
 # The config-layer query. Deliberately does NOT request `branchProtectionRules`: it is admin-only
 # and its absence would add a FORBIDDEN error to every response for a read-only credential, which
 # would train us to ignore the errors array. Rulesets are the current mechanism anyway.
-_CONFIG_QUERY = """
+_CONFIG_QUERY_TEMPLATE = """
 query($login: String!, $cursor: String) {
   rateLimit { cost remaining }
   repositoryOwner(login: $login) {
@@ -185,16 +188,25 @@ fragment CommitSlice on Commit {
   committer { name email user { login } }
   signature { __typename isValid state wasSignedByGitHub signer { login } }
 }
-""" % {
-    "page": _REPO_PAGE_SIZE,
-    "rulesets": _RULESET_PAGE_SIZE,
-    "rules": _RULE_PAGE_SIZE,
-    "bypass": _BYPASS_ACTOR_PAGE_SIZE,
-    "envs": _ENVIRONMENT_PAGE_SIZE,
-    "refs": _REF_PAGE_SIZE,
-    "releases": _RELEASE_PAGE_SIZE,
-    "assets": _RELEASE_ASSET_PAGE_SIZE,
-}
+"""
+
+
+def config_query(page: int = _REPO_PAGE_SIZE) -> str:
+    """The config-layer query rendered for an outermost page of ``page`` repositories — the knob
+    the seam turns when GitHub says it could not respond in time (adaptive pages)."""
+    return _CONFIG_QUERY_TEMPLATE % {
+        "page": page,
+        "rulesets": _RULESET_PAGE_SIZE,
+        "rules": _RULE_PAGE_SIZE,
+        "bypass": _BYPASS_ACTOR_PAGE_SIZE,
+        "envs": _ENVIRONMENT_PAGE_SIZE,
+        "refs": _REF_PAGE_SIZE,
+        "releases": _RELEASE_PAGE_SIZE,
+        "assets": _RELEASE_ASSET_PAGE_SIZE,
+    }
+
+
+_CONFIG_QUERY = config_query()
 
 # Pull requests are a SECOND query, not more fields on the config layer. GitHub caps a query at
 # 500,000 possible nodes, computed from the page sizes multiplied down the tree, and the config
@@ -207,7 +219,7 @@ fragment CommitSlice on Commit {
 # the diff sizes and the rollup shaves a second or two), five is ~5 s. Five it is: five requests
 # for this organization, ~12,000 possible nodes each.
 _PULL_REQUEST_REPO_PAGE_SIZE = 5
-_PULL_REQUEST_QUERY = """
+_PULL_REQUEST_QUERY_TEMPLATE = """
 query($login: String!, $cursor: String) {
   rateLimit { cost remaining }
   repositoryOwner(login: $login) {
@@ -279,20 +291,32 @@ query($login: String!, $cursor: String) {
     }
   }
 }
-""" % {
-    "page": _PULL_REQUEST_REPO_PAGE_SIZE,
-    "pulls": _PULL_REQUEST_PAGE_SIZE,
-    "pr_labels": _PULL_REQUEST_LABEL_PAGE_SIZE,
-    "pr_reviews": _PULL_REQUEST_REVIEW_PAGE_SIZE,
-    "checks": _CHECK_CONTEXT_PAGE_SIZE,
-}
+"""
+
+
+def pull_request_query(page: int = _PULL_REQUEST_REPO_PAGE_SIZE) -> str:
+    """The pull-request-layer query for an outermost page of ``page`` repositories."""
+    return _PULL_REQUEST_QUERY_TEMPLATE % {
+        "page": page,
+        "pulls": _PULL_REQUEST_PAGE_SIZE,
+        "pr_labels": _PULL_REQUEST_LABEL_PAGE_SIZE,
+        "pr_reviews": _PULL_REQUEST_REVIEW_PAGE_SIZE,
+        "checks": _CHECK_CONTEXT_PAGE_SIZE,
+    }
+
+
+_PULL_REQUEST_QUERY = pull_request_query()
 
 
 class GithubGraphQLClient:
     """Minimal GraphQL client: one query, cursor pagination, partial-error surfacing."""
 
-    def __init__(self, *, token: str, api_base_url: str = "https://api.github.com") -> None:
+    def __init__(self, *, token: str, api_base_url: str = "https://api.github.com", seam: Seam | None = None) -> None:
         self._token = token
+        self._seam = seam or Seam.standalone()
+        #: Outermost page size per layer, as the seam last left it (a reduction sticks for the
+        #: rest of that layer in this run — req-github-core-reliability-adaptive-pages).
+        self.page_sizes: dict[str, int] = {"config_layer": _REPO_PAGE_SIZE, "pull_request_layer": _PULL_REQUEST_REPO_PAGE_SIZE}
         base = api_base_url.rstrip("/")
         # GitHub.com serves GraphQL at /graphql; GitHub Enterprise Server serves it at
         # /api/graphql while its REST base already ends in /api/v3.
@@ -301,32 +325,72 @@ class GithubGraphQLClient:
         self.last_remaining: int | None = None
 
     def _post(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        payload = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-        request = urllib.request.Request(
-            self._endpoint,
-            data=payload,
-            headers={
-                "Authorization": f"bearer {self._token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "tap-github-core-collector",
-            },
-            method="POST",
-        )
-        try:
-            # nosec B310 — the endpoint derives from the credential envelope's `api_base_url`,
-            # which GITHUB_PAT_SCHEMA constrains to https at resolve time (see secret.py).
-            with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # nosec B310
-                body = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            raise GithubGraphQLError(f"GraphQL HTTP {exc.code}: {exc.read()[:300]!r}", status=exc.code) from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise GithubGraphQLError(f"GraphQL transport failure: {exc}", status=0) from exc
+        """A fixed query (no page adaptation) through the seam; kept for callers that render their own."""
+        return self._post_layer("graphql", lambda _page: query, variables, page_size=None)
 
-        if body.get("data") is None:
-            # No data at all means the whole query failed — a real error, not a degraded field.
-            raise GithubGraphQLError(f"GraphQL returned no data: {json.dumps(body.get('errors'))[:300]}")
-        return body
+    def _post_layer(
+        self,
+        layer: str,
+        render: Callable[[int], str],
+        variables: dict[str, Any],
+        *,
+        page_size: int | None,
+    ) -> dict[str, Any]:
+        """One logical GraphQL POST through the seam (spec-github-core-reliability).
+
+        ``render(page)`` produces the query for an outermost page size; the seam halves the page on
+        a timeout-class failure and re-renders. HTTP errors, RATE_LIMITED, and a body with no
+        ``data`` are classified and retried by the seam; a body with ``data`` beside ``errors`` is
+        returned whole for the caller's `prune_errored_paths` (partial, not a failure). A refused
+        fetch raises `GithubGraphQLError`, the contract every caller already holds.
+        """
+        seam = self._seam
+        ctx = CallContext(
+            surface=f"graphql:{layer}",
+            scope=str(variables.get("login") or "account"),
+            endpoint=f"graphql:{layer}",
+            layer="graphql",
+            credential_kind=seam.credential_kind,
+            graphql=page_size is not None,
+            page_size=page_size,
+        )
+
+        def transport(params: dict[str, Any]) -> tuple[int, dict[str, str], bytes]:
+            page = params.get("page_size") or page_size or 0
+            payload = json.dumps({"query": render(page), "variables": variables}).encode("utf-8")
+            request = urllib.request.Request(
+                self._endpoint,
+                data=payload,
+                headers={
+                    "Authorization": f"bearer {self._token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "tap-github-core-collector",
+                },
+                method="POST",
+            )
+            try:
+                # nosec B310 — the endpoint derives from the credential envelope's `api_base_url`,
+                # which GITHUB_PAT_SCHEMA constrains to https at resolve time (see secret.py).
+                with urllib.request.urlopen(request, timeout=params.get("read_timeout") or _TIMEOUT_SECONDS) as response:  # nosec B310
+                    raw = response.read()
+                    headers = dict(response.headers.items())
+                    status = response.status
+            except urllib.error.HTTPError as exc:
+                raise HttpFailure(status=exc.code, headers=dict((exc.headers or {}).items()), body=exc.read() if exc.fp else b"") from exc
+            body = json.loads(raw.decode("utf-8"))
+            if body.get("data") is None:
+                # No data at all means the whole query failed — the seam classifies the error types
+                # (RATE_LIMITED, "couldn't respond in time" → smaller page, FORBIDDEN → terminal).
+                raise GraphQLErrors(errors=list(body.get("errors") or []), has_data=False)
+            return status, headers, raw
+
+        gather = call(transport, ctx, budget=seam.budget, recorder=seam.recorder)
+        if not gather.ok:
+            raise GithubGraphQLError(f"{layer}: {gather.failure_reason}", status=gather.status)
+        if gather.page_size:
+            self.page_sizes[layer] = gather.page_size
+        return gather.parsed if isinstance(gather.parsed, dict) else {}
 
     def fetch_config_layer(self, login: str) -> tuple[list[dict[str, Any]], list[str]]:
         """Return every repository under ``login`` with its config layer, plus partial-error notes.
@@ -341,7 +405,7 @@ class GithubGraphQLClient:
         cost = 0
 
         while True:
-            body = self._post(_CONFIG_QUERY, {"login": login, "cursor": cursor})
+            body = self._post_layer("config_layer", config_query, {"login": login, "cursor": cursor}, page_size=self.page_sizes["config_layer"])
             data = body["data"]
             errors = body.get("errors") or []
             for err in errors:
@@ -393,7 +457,7 @@ class GithubGraphQLClient:
         cursor: str | None = None
         cost = 0
         while True:
-            body = self._post(_PULL_REQUEST_QUERY, {"login": login, "cursor": cursor})
+            body = self._post_layer("pull_request_layer", pull_request_query, {"login": login, "cursor": cursor}, page_size=self.page_sizes["pull_request_layer"])
             data = body["data"]
             errors = body.get("errors") or []
             for err in errors:
