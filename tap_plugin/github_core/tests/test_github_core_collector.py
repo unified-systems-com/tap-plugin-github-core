@@ -170,13 +170,27 @@ class TestInstallationSelection:
         assert warn["message_code"] == "INSTALLATION_SELECTION_UNREADABLE_403"
         assert warn["message_data"] == {"credential": "app", "kind": "selected", "status": 403}
 
-    def test_classic_pat_is_all_and_fine_grained_pat_is_unknown_and_the_token_never_lands(self) -> None:
-        for token, kind in (("ghp_" + "x" * 36, "all"), ("github_pat_" + "y" * 22, "unknown")):
+    def test_a_missing_total_count_is_incomplete_not_complete(self) -> None:
+        """Codex on PR #144: an unreconcilable selection is not one absence may be weighed against."""
+        c = self._collector(self._Auth(app=True))
+        client = self._Client([{"id": 1}])
+        client.get = lambda path, *, params=None: {"repositories": client.rows}  # no total_count
+        c._collect_installation_selection(client)
+        (event,) = c.results["info"]
+        assert event["message_data"]["total_count"] is None and event["message_data"]["complete"] is False
+
+    def test_any_pat_is_unknown_reach_and_the_token_never_lands(self) -> None:
+        """Codex on PR #144: a classic token's scopes do not establish its effective reach (no
+        `repo`, outside the org, SSO-blocked), so `all` was a claim, not a measurement. Both token
+        kinds are unknown until the seam exposes `X-OAuth-Scopes`; the kind is recorded, the
+        value never is."""
+        for token, token_kind in (("ghp_" + "x" * 36, "classic"), ("github_pat_" + "y" * 22, "fine_grained")):
             c = self._collector(self._Auth(app=False, pat_token=token))
             c._collect_installation_selection(self._Client([]))
             (event,) = c.results["info"]
-            assert event["message_data"]["credential"] == "pat" and event["message_data"]["kind"] == kind
-            assert event["message_data"]["repository_ids"] is None
+            md = event["message_data"]
+            assert md["credential"] == "pat" and md["token_kind"] == token_kind and md["kind"] == "unknown"
+            assert md["repository_ids"] is None and md["complete"] is False
             assert token not in json.dumps(event)
 
 

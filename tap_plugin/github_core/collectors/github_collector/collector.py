@@ -5544,34 +5544,37 @@ class GithubCollector(CollectorBase):
 
         App: ``GET /installation/repositories`` answered by the installation token about itself,
         walked to the end and reconciled against ``total_count`` — a listed count that disagrees
-        with the walked count is ``complete: false``, never a quietly shorter list. PAT: a classic
-        token reaches whatever its scopes allow (``all`` by construction); a fine-grained token's
-        grant is not introspectable through any API, so its selection is ``unknown`` and a
-        falsifier treats unknown as cannot-weigh-in (fail closed). The token value is inspected
-        for its prefix only and never recorded.
+        with the walked count is ``complete: false``, never a quietly shorter list. PAT, classic or fine-grained: ``unknown`` — a fine-grained grant is not introspectable through any
+        API, and a classic token's scopes do not establish its effective reach — so a falsifier
+        treats it as cannot-weigh-in (fail closed). The token value is inspected for its prefix
+        only and never recorded.
         """
         if not self._auth.has_app:
-            token = self._auth.token(prefer=PREFER_PAT)
-            fine_grained = token.startswith("github_pat_")
-            kind = "unknown" if fine_grained else "all"
+            # A PAT's reach is UNKNOWN until measured, classic or fine-grained (Codex on PR #144):
+            # a classic token may lack `repo`, be outside the org, or be SSO-blocked, so "all by
+            # construction" was a claim about scopes, not about reach. Its scopes are in fact
+            # introspectable — every response carries `X-OAuth-Scopes` — but this client returns
+            # bodies only; reliability 1a's gather exposes headers, and that is where `all` can be
+            # earned. Until then: unknown, and a falsifier treats unknown as cannot-weigh-in.
+            token_kind = "fine_grained" if self._auth.token(prefer=PREFER_PAT).startswith("github_pat_") else "classic"
             self.record_info(
                 _SITE_INSTALLATION_SELECTION,
                 "INSTALLATION_SELECTION",
-                "Personal access token only: repository selection is "
+                f"Personal access token only ({token_kind}): repository selection is unknown — "
                 + (
-                    "unknown — a fine-grained token's grant is not introspectable, so absence "
-                    "cannot be weighed against it"
-                    if fine_grained
-                    else "`all` by construction (classic token)"
+                    "a fine-grained token's grant is not introspectable through any API"
+                    if token_kind == "fine_grained"
+                    else "a classic token's effective reach is not established by its scopes alone"
                 )
-                + ".",
+                + "; absence cannot be weighed against it.",
                 message_data={
                     "credential": "pat",
-                    "kind": kind,
+                    "token_kind": token_kind,
+                    "kind": "unknown",
                     "repository_ids": None,
                     "count": None,
                     "total_count": None,
-                    "complete": None,
+                    "complete": False,
                 },
             )
             return
@@ -5596,7 +5599,9 @@ class GithubCollector(CollectorBase):
         total = first.get("total_count") if isinstance(first, dict) else None
         ids = [int(r["id"]) for r in rows if isinstance(r, dict) and r.get("id") is not None]
         walk_complete = bool(client.last_walk_complete)
-        complete = walk_complete and (total is None or int(total) == len(ids))
+        # Fail closed (Codex on PR #144): a response without `total_count` cannot be reconciled,
+        # and an unreconciled selection is not one a tombstone pass may weigh absence against.
+        complete = walk_complete and isinstance(total, int) and total == len(ids)
         self.record_info(
             _SITE_INSTALLATION_SELECTION,
             "INSTALLATION_SELECTION",
