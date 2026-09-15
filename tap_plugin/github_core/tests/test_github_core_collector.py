@@ -398,10 +398,22 @@ class TestAccountScope:
         return c
 
     class _Client:
-        def __init__(self, org_repos=None, user_repos=None, complete=True):
+        def __init__(self, org_repos=None, user_repos=None, complete=True, repo_status=None):
             self.org_repos, self.user_repos, self.complete = org_repos, user_repos, complete
+            self.repo_status: dict[str, int] = repo_status or {}  # full_name -> HTTP status to raise
             self.calls: list[str] = []
             self.last_walk_complete = True
+
+        def get(self, path, *, params=None):
+            from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+
+            self.calls.append(path)
+            assert path.startswith("/repos/"), path
+            full_name = path[len("/repos/"):]
+            status = self.repo_status.get(full_name)
+            if status:
+                raise GithubAPIError(status=status, url=path, body='{"message":"nope"}')
+            return {"full_name": full_name, "id": abs(hash(full_name)) % 10**6}
 
         def get_paginated(self, path, *, params=None, item_path=None, max_pages=100):
             from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
@@ -417,11 +429,41 @@ class TestAccountScope:
                 return [{"full_name": n} for n in (self.user_repos or [])]
             raise AssertionError(path)
 
-    def test_repos_only_is_the_degenerate_scope(self) -> None:
+    def test_repos_only_is_the_degenerate_scope_and_is_resolved_up_front(self) -> None:
+        """github-core#140: the list IS the config, so each listed repo is resolved before the
+        loop; nothing is enumerated; the listing is recorded complete by construction."""
         c = self._collector()
         client = self._Client(org_repos=["x/should-not-be-touched"])
         assert c._resolve_repos(client, None, ["notgeorge/samsite"]) == ["notgeorge/samsite"]
-        assert client.calls == [] and c.results["info"] == []
+        assert client.calls == ["/repos/notgeorge/samsite"]
+        (event,) = c.results["info"]
+        assert event["message_code"] == "SCOPE_RESOLVED"
+        assert event["message_data"] == {"configured": 1, "unreadable": [], "complete": True, "filtered": False}
+        assert c.results["warn"] == [] and c.results["error"] == []
+
+    def test_repos_only_listed_repo_that_does_not_exist_aborts_as_a_config_error(self) -> None:
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollectorError
+
+        c = self._collector()
+        client = self._Client(repo_status={"notgeorge/typo": 404})
+        with pytest.raises(GithubCollectorError):
+            c._resolve_repos(client, None, ["notgeorge/samsite", "notgeorge/typo"])
+        (error,) = c.results["error"]
+        assert error["message_code"] == "SCOPE_REPO_NOT_FOUND" and "notgeorge/typo" in error["message"]
+        assert c.results["info"] == []  # no SCOPE_RESOLVED: the run stopped
+
+    def test_repos_only_listed_repo_this_credential_cannot_read_is_recorded_and_kept(self) -> None:
+        c = self._collector()
+        client = self._Client(repo_status={"notgeorge/private": 403})
+        assert c._resolve_repos(client, None, ["notgeorge/samsite", "notgeorge/private"]) == [
+            "notgeorge/samsite", "notgeorge/private",
+        ]
+        (warn,) = c.results["warn"]
+        assert warn["message_code"] == "SCOPE_REPO_UNREADABLE_403"
+        assert warn["message_data"] == {"repo": "notgeorge/private", "status": 403}
+        (event,) = c.results["info"]
+        assert event["message_data"]["unreadable"] == [{"repo": "notgeorge/private", "status": 403}]
+        assert event["message_data"]["complete"] is True
 
     def test_org_enumerated_and_recorded(self) -> None:
         c = self._collector()

@@ -120,6 +120,9 @@ _SITE_RUN_NOT_FOUND = "f938"
 _SITE_LOCAL_ACTION_DEFERRED = "b148"
 _SITE_DEPENDABOT_APP = "a7c1"
 _SITE_SCOPE_ENUMERATED = "462a"
+_SITE_SCOPE_RESOLVED = "7c72"
+_SITE_SCOPE_REPO_UNREADABLE = "6ed7"
+_SITE_SCOPE_REPO_NOT_FOUND = "49f5"
 _SITE_ABORT_SCOPE = "8d47"
 _SITE_FILTER_UNMATCHED = "d087"
 _SITE_GRAPHQL_CONFIG = "1de2"
@@ -1415,7 +1418,7 @@ class GithubCollector(CollectorBase):
         scope (the degenerate run config, tap#142) and nothing is enumerated.
         """
         if owner is None:
-            return list(explicit)
+            return self._resolve_explicit(client, explicit)
         if self._config:
             # Already enumerated by the config-layer query; do not walk REST again.
             enumerated = sorted(self._config)
@@ -1440,6 +1443,60 @@ class GithubCollector(CollectorBase):
         return self._apply_filter(
             owner, enumerated, explicit, account_kind=account_kind, complete=complete
         )
+
+    def _resolve_explicit(self, client: GithubClient, explicit: list[str]) -> list[str]:
+        """Resolve a repos-only scope BEFORE the per-repository loop (github-core#140).
+
+        Without an `owner` the explicit list IS the configuration, so a listed repository that
+        does not exist is a config error of the same class as "the org named in the envelope
+        cannot be found" — George's ruling (2026-09-14): error out and stop, do not degrade. The
+        per-repo loop's containment (`REPO_FAILED_<status>`, continue) is right for TRANSIENT
+        failures across a nineteen-repo org and wrong for a typo in the envelope, which it would
+        turn into a warning and a quietly smaller run.
+
+        One `GET /repos/{owner}/{repo}` per listed repository, up front — the root-of-trust step
+        for this scope shape: the tree still starts at the platform, the account is named from the
+        listed repos' owner, and each step records whether it could introspect. A 404 aborts,
+        naming the repository. Any other refusal (403: it exists, this credential cannot read it)
+        is recorded as unobservable and the repository stays in scope — the loop will record its
+        own refusal per surface. The listing is complete by construction and says so, which is
+        the assertion a tombstone pass reads (`req-github-core-reliability-absence`).
+        """
+        unreadable: list[dict[str, Any]] = []
+        for full_name in explicit:
+            try:
+                client.get(f"/repos/{full_name}")
+            except GithubAPIError as exc:
+                if exc.status == 404:
+                    self._abort(
+                        _SITE_SCOPE_REPO_NOT_FOUND,
+                        "SCOPE_REPO_NOT_FOUND",
+                        f"Configured repository {full_name} does not exist (404). The explicit "
+                        f"`repos` list is the collection scope; a listed repository that cannot be "
+                        f"found is a configuration error, not a transient failure — fix the "
+                        f"envelope and rerun.",
+                    )
+                unreadable.append({"repo": full_name, "status": exc.status})
+                self.record_warn(
+                    _SITE_SCOPE_REPO_UNREADABLE,
+                    f"SCOPE_REPO_UNREADABLE_{exc.status}",
+                    f"Configured repository {full_name} exists but this credential cannot read it "
+                    f"({exc.status}); it stays in scope and its surfaces will read as unobservable.",
+                    message_data={"repo": full_name, "status": exc.status},
+                )
+        self.record_info(
+            _SITE_SCOPE_RESOLVED,
+            "SCOPE_RESOLVED",
+            f"Resolved {len(explicit)} configured repositor{'y' if len(explicit) == 1 else 'ies'}"
+            f" (repos-only scope; complete by construction); {len(unreadable)} unreadable.",
+            message_data={
+                "configured": len(explicit),
+                "unreadable": unreadable,
+                "complete": True,
+                "filtered": False,
+            },
+        )
+        return list(explicit)
 
     def _apply_filter(
         self,
