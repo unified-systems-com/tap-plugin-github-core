@@ -5,6 +5,8 @@ Spec: plugins/github_core/specs/spec-github-core-v0.md
 
 from __future__ import annotations
 
+import json
+
 import jsonschema
 import pytest
 from tap_plugin.github_core.collectors.github_collector.identity import (
@@ -96,6 +98,102 @@ class TestManifests:
         assert rule["edge_type"] == "FEDERATES_VIA_PROVIDER__github_core"
 
 
+class TestInstallationSelection:
+    """github-core#141: what this run may weigh in on, recorded before it weighs in."""
+
+    @staticmethod
+    def _collector(auth):
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        c = GithubCollector.__new__(GithubCollector)
+        c.results = {"info": [], "warn": [], "error": []}
+        c._auth = auth
+        return c
+
+    class _Auth:
+        def __init__(self, *, app: bool, pat_token: str = "", selection: str = "selected"):
+            self.has_app, self.has_pat = app, bool(pat_token)
+            self._pat_token = pat_token
+            self.installation = {"id": 7, "repository_selection": selection} if app else None
+
+        def token(self, prefer=None):
+            return self._pat_token
+
+    class _Client:
+        def __init__(self, rows, total=None, status=None, complete=True):
+            self.rows, self.total, self.status, self.complete = rows, total, status, complete
+            self.calls: list[str] = []
+            self.last_walk_complete = True
+
+        def get(self, path, *, params=None):
+            from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+
+            self.calls.append(path)
+            if self.status:
+                raise GithubAPIError(status=self.status, url=path, body="{}")
+            return {"total_count": self.total if self.total is not None else len(self.rows), "repositories": self.rows}
+
+        def get_paginated(self, path, *, params=None, item_path=None, max_pages=100):
+            self.calls.append(path)
+            self.last_walk_complete = self.complete
+            return list(self.rows)
+
+    def test_selected_app_records_the_ids_and_reconciles_the_count(self) -> None:
+        c = self._collector(self._Auth(app=True))
+        client = self._Client([{"id": 1, "full_name": "o/a"}, {"id": 2, "full_name": "o/b"}])
+        c._collect_installation_selection(client)
+        (event,) = c.results["info"]
+        assert event["message_code"] == "INSTALLATION_SELECTION"
+        assert event["message_data"] == {
+            "credential": "app", "kind": "selected", "repository_ids": [1, 2], "count": 2, "total_count": 2, "complete": True,
+        }
+        assert client.calls == ["/installation/repositories", "/installation/repositories"]
+
+    def test_a_count_that_disagrees_with_the_walk_is_incomplete_not_shorter(self) -> None:
+        c = self._collector(self._Auth(app=True, selection="all"))
+        client = self._Client([{"id": 1}], total=3)
+        c._collect_installation_selection(client)
+        (event,) = c.results["info"]
+        assert event["message_data"]["complete"] is False and event["message_data"]["total_count"] == 3
+        assert "INCOMPLETE" in event["message"]
+
+    def test_a_capped_walk_is_incomplete(self) -> None:
+        c = self._collector(self._Auth(app=True))
+        client = self._Client([{"id": 1}], complete=False)
+        c._collect_installation_selection(client)
+        assert c.results["info"][0]["message_data"]["complete"] is False
+
+    def test_a_refused_listing_is_recorded_with_the_declared_kind(self) -> None:
+        c = self._collector(self._Auth(app=True))
+        client = self._Client([], status=403)
+        c._collect_installation_selection(client)
+        assert c.results["info"] == []
+        (warn,) = c.results["warn"]
+        assert warn["message_code"] == "INSTALLATION_SELECTION_UNREADABLE_403"
+        assert warn["message_data"] == {"credential": "app", "kind": "selected", "status": 403}
+
+    def test_a_missing_total_count_is_incomplete_not_complete(self) -> None:
+        """Codex on PR #144: an unreconcilable selection is not one absence may be weighed against."""
+        c = self._collector(self._Auth(app=True))
+        client = self._Client([{"id": 1}])
+        client.get = lambda path, *, params=None: {"repositories": client.rows}  # no total_count
+        c._collect_installation_selection(client)
+        (event,) = c.results["info"]
+        assert event["message_data"]["total_count"] is None and event["message_data"]["complete"] is False
+
+    def test_any_pat_is_unknown_reach_and_the_token_never_lands(self) -> None:
+        """Codex on PR #144: a classic token's scopes do not establish its effective reach (no
+        `repo`, outside the org, SSO-blocked), so `all` was a claim, not a measurement. Both token
+        kinds are unknown until the seam exposes `X-OAuth-Scopes`; the kind is recorded, the
+        value never is."""
+        for token, token_kind in (("ghp_" + "x" * 36, "classic"), ("github_pat_" + "y" * 22, "fine_grained")):
+            c = self._collector(self._Auth(app=False, pat_token=token))
+            c._collect_installation_selection(self._Client([]))
+            (event,) = c.results["info"]
+            md = event["message_data"]
+            assert md["credential"] == "pat" and md["token_kind"] == token_kind and md["kind"] == "unknown"
+            assert md["repository_ids"] is None and md["complete"] is False
+            assert token not in json.dumps(event)
 # Not key material: the same non-armour marker test_credential_shape.py uses, so no scanner
 # (ours or Codacy's gitleaks) reads a test fixture as a hard-coded credential.
 _APP = {"app_id": 1, "private_key": "-----BEGIN PEM-----"}

@@ -190,6 +190,8 @@ _SITE_RULE_SUITE_DEGRADED = "3095"
 _SITE_RULE_SUITE_FOUND = "3b60"
 _SITE_CACHES_TRUNCATED = "0f41"
 _SITE_INSTALLATIONS_UNREACHABLE = "1825"
+_SITE_INSTALLATION_SELECTION = "c6cc"
+_SITE_INSTALLATION_SELECTION_UNREADABLE = "cdea"
 _SITE_INSTALLATIONS_COLLECTED = "c3d0"
 _SITE_BYPASS_ACTOR_UNMODELLED = "5dd2"
 _SITE_AUTH_MODE = "3e4d"
@@ -923,6 +925,9 @@ class GithubCollector(CollectorBase):
             if self._auth.has_pat
             else None
         )
+        # What this run is ALLOWED to weigh in on, before it weighs in on anything: the App
+        # installation's repository selection, or the PAT's reach (github-core#141).
+        self._collect_installation_selection(client)
         # Per-run caches for objects shared across repositories: one organization ruleset applies
         # to every repository it matches, and re-fetching its detail per repo would be 19 identical
         # calls for one answer.
@@ -5608,6 +5613,92 @@ class GithubCollector(CollectorBase):
                 "head_branch": str(run.get("head_branch") or ""),
                 "configuration": {"workflow_run": run, "run_in_batch": in_batch},
                 "tags": {},
+            },
+        )
+
+    def _collect_installation_selection(self, client: GithubClient) -> None:
+        """Record which repositories this run's credential may reach (github-core#141).
+
+        The tombstone candidate rule is *fan-out from the account, minus observed this run, minus
+        outside the installation's selection*. The third term is a fact about THIS run's reach —
+        an operation, perceived-true-at-a-time, because an org owner can narrow the selection in
+        a settings page and nothing tells the collector — so it is recorded on the run rather
+        than on the account. It moves onto the ``collection_scope`` node when reliability 1b/1c
+        mints one; the record's shape is what that node will carry.
+
+        App: ``GET /installation/repositories`` answered by the installation token about itself,
+        walked to the end and reconciled against ``total_count`` — a listed count that disagrees
+        with the walked count is ``complete: false``, never a quietly shorter list. PAT, classic or fine-grained: ``unknown`` — a fine-grained grant is not introspectable through any
+        API, and a classic token's scopes do not establish its effective reach — so a falsifier
+        treats it as cannot-weigh-in (fail closed). The token value is inspected for its prefix
+        only and never recorded.
+        """
+        if not self._auth.has_app:
+            # A PAT's reach is UNKNOWN until measured, classic or fine-grained (Codex on PR #144):
+            # a classic token may lack `repo`, be outside the org, or be SSO-blocked, so "all by
+            # construction" was a claim about scopes, not about reach. Its scopes are in fact
+            # introspectable — every response carries `X-OAuth-Scopes` — but this client returns
+            # bodies only; reliability 1a's gather exposes headers, and that is where `all` can be
+            # earned. Until then: unknown, and a falsifier treats unknown as cannot-weigh-in.
+            token_kind = "fine_grained" if self._auth.token(prefer=PREFER_PAT).startswith("github_pat_") else "classic"
+            self.record_info(
+                _SITE_INSTALLATION_SELECTION,
+                "INSTALLATION_SELECTION",
+                f"Personal access token only ({token_kind}): repository selection is unknown — "
+                + (
+                    "a fine-grained token's grant is not introspectable through any API"
+                    if token_kind == "fine_grained"
+                    else "a classic token's effective reach is not established by its scopes alone"
+                )
+                + "; absence cannot be weighed against it.",
+                message_data={
+                    "credential": "pat",
+                    "token_kind": token_kind,
+                    "kind": "unknown",
+                    "repository_ids": None,
+                    "count": None,
+                    "total_count": None,
+                    "complete": False,
+                },
+            )
+            return
+        declared = str((self._auth.installation or {}).get("repository_selection") or "")
+        try:
+            first = client.get("/installation/repositories", params={"per_page": "100"})
+            rows = client.get_paginated(
+                "/installation/repositories",
+                params={"per_page": "100"},
+                item_path="repositories",
+            )
+        except GithubAPIError as exc:
+            self.record_warn(
+                _SITE_INSTALLATION_SELECTION_UNREADABLE,
+                f"INSTALLATION_SELECTION_UNREADABLE_{exc.status}",
+                f"Cannot list this installation's repositories ({exc.status}); the selection is "
+                f"declared {declared or 'unknown'} but its members are unobserved this run — "
+                f"absence cannot be weighed against it.",
+                message_data={"credential": "app", "kind": declared or "unknown", "status": exc.status},
+            )
+            return
+        total = first.get("total_count") if isinstance(first, dict) else None
+        ids = [int(r["id"]) for r in rows if isinstance(r, dict) and r.get("id") is not None]
+        walk_complete = bool(client.last_walk_complete)
+        # Fail closed (Codex on PR #144): a response without `total_count` cannot be reconciled,
+        # and an unreconciled selection is not one a tombstone pass may weigh absence against.
+        complete = walk_complete and isinstance(total, int) and total == len(ids)
+        self.record_info(
+            _SITE_INSTALLATION_SELECTION,
+            "INSTALLATION_SELECTION",
+            f"Installation reaches {len(ids)} repositor{'y' if len(ids) == 1 else 'ies'} "
+            f"(selection {declared or 'unknown'}; GitHub reports {total}; "
+            f"{'complete' if complete else 'INCOMPLETE — absence cannot be weighed against it'}).",
+            message_data={
+                "credential": "app",
+                "kind": declared or "unknown",
+                "repository_ids": ids,
+                "count": len(ids),
+                "total_count": total,
+                "complete": complete,
             },
         )
 
