@@ -96,7 +96,9 @@ class TestManifests:
         assert rule["edge_type"] == "FEDERATES_VIA_PROVIDER__github_core"
 
 
-_APP = {"app_id": 1, "private_key": "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----"}
+# Not key material: the same non-armour marker test_credential_shape.py uses, so no scanner
+# (ours or Codacy's gitleaks) reads a test fixture as a hard-coded credential.
+_APP = {"app_id": 1, "private_key": "-----BEGIN PEM-----"}
 
 
 class TestScopeRuleIsOneRuleForEveryKind:
@@ -122,6 +124,31 @@ class TestScopeRuleIsOneRuleForEveryKind:
     def test_combined_kind_owner_only_and_owner_with_filter_still_valid(self) -> None:
         jsonschema.validate({"app": _APP, "owner": "acme"}, GITHUB_SCHEMA)
         jsonschema.validate({"pat": {"token": "ghp_x"}, "owner": "acme", "repos": ["acme/x"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_without_owner_refuses_several_installations_before_collecting(self, monkeypatch) -> None:
+        """The relaxation is safe only because the runtime selector fails closed: a repos-only
+        envelope names no account, so an App installed into several accounts is refused rather
+        than guessed (auth.py `_mint_installation_token`). Proven here through the combined kind,
+        which the schema now admits — not only through the App-only kind the existing test uses."""
+        from tap_plugin.github_core.collectors.github_collector.auth import GithubAppAuthError, GithubAuth
+
+        auth = GithubAuth(kind="github", data={"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["a/x"]}, api_base_url="https://api.github.com")
+        monkeypatch.setattr(auth, "installations", lambda: [{"id": 1, "account": {"login": "a"}}, {"id": 2, "account": {"login": "b"}}])
+        with pytest.raises(GithubAppAuthError, match="several installations"):
+            auth.token()
+
+    def test_combined_kind_without_owner_takes_the_one_unambiguous_installation(self, monkeypatch) -> None:
+        from tap_plugin.github_core.collectors.github_collector.auth import GithubAuth
+
+        auth = GithubAuth(kind="github", data={"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["a/x"]}, api_base_url="https://api.github.com")
+        monkeypatch.setattr(auth, "installations", lambda: [{"id": 9, "account": {"login": "a"}}])
+        monkeypatch.setattr(
+            "tap_plugin.github_core.collectors.github_collector.auth.exchange_installation_token",
+            lambda base, jwt, installation_id: (f"token-for-{installation_id}", ""),
+        )
+        monkeypatch.setattr(auth, "app_jwt", lambda: "jwt")
+        assert auth.token() == "token-for-9"
+        assert auth.installation["account"]["login"] == "a"
 
     def test_the_scope_rule_is_derived_once(self) -> None:
         """Three schemas, one `_SCOPE_ANY_OF` — the file already drifted once (its own comment)."""
