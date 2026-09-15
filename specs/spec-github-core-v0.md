@@ -239,6 +239,7 @@ The **self-tier vocabulary** (added 2026-08-27, `spec-github-core-vocabulary.md`
 - `github_environment` — a named deployment target and the protection rules in front of it. See [Environments](#environments).
 - `actions_cache` — a stored cache entry and the ref scope that produced it. See [Caches](#caches).
 - `app_installation` — one account's installation of an App, with the permissions that account granted. See [App Installations](#app-installations).
+- `collection_scope` — one per collection run, on the operation side: what THIS run's credential was allowed to weigh in on. See [Collection Scope](#collection-scope).
 
 The OIDC issuer (`oidc_issuer`) is **no longer a github_core model** — it was
 extracted to the `identity_core` substrate plugin as the cross-cutting
@@ -275,6 +276,7 @@ Natural-key inputs:
 | `github_environment` | `owner/repo` + environment name |
 | `actions_cache` | `owner/repo` + cache id |
 | `app_installation` | GitHub's installation id (unique platform-wide) |
+| `collection_scope` | the `collection_job` entity id — one scope per run |
 
 Entity IDs are deterministic UUIDv5 values over the model type and natural key.
 
@@ -436,6 +438,8 @@ V0 edge types:
 | `SCOPED_TO_REF` | `actions_cache` -> `git_ref` | A cache entry belongs to an observed ref's scope; absence usually means a pull-request ref. |
 | `REGISTERS_INSTALLATION` | `github_app` -> `app_installation` | The application, and one installation of it. |
 | `INSTALLED_ON_ACCOUNT` | `app_installation` -> `github_account` | The account that granted the installation. |
+| `SCOPES_RUN` | `collection_scope` -> `collection_job` | The statement about one run — the target is tap_cares' core run record, addressed by its `ENTITY_TYPE` string. See [Collection Scope](#collection-scope). |
+| `DERIVED_FROM_INSTALLATION` | `collection_scope` -> `app_installation` | The grant a run's scope was derived from. Absent under a PAT, and absent (never guessed) when the App inventory could not be read. |
 | `ENABLED_ON_REPOSITORY` | `github_app` \| `app_installation` \| `identity_core__oidc_issuer` -> `github_repository` | A GitHub App, platform app, or the Actions OIDC issuer is enabled on the repo. Emitted during the per-repo walk. The issuer source type lives in `identity_core`. See [GitHub Apps](#github-apps). |
 
 Secret and variable reference edges (`REFERENCES_SECRET`, `REFERENCES_VARIABLE`)
@@ -1229,6 +1233,60 @@ repositories and then shows you one row about itself. Read-only, like everything
 | req-github-core-app-installations-2 | PAT Mode Claims Nothing | Implemented | Running as a token records that the inventory is unreachable rather than emitting an empty one. | An empty inventory is otherwise indistinguishable from a clean account. |
 | req-github-core-app-installations-4 | Account Inventory Preferred, Fallback Named | Implemented | The collector reads `/orgs/{owner}/installations` (which Apps reach this account) and falls back to `/app/installations` (its own installation) only when refused — warning that the absence of other Apps is then not evidence there are none, and recording which scope the answer came from. | Requires `organization:administration:read`; declared in the collection manifest so the App's permission set derives it rather than carrying it as an unexplained extra. |
 | req-github-core-app-installations-3 | Repository Selection Retained | Implemented | `repository_selection: all` is stored as-is: such an installation follows the account into new repositories without anyone granting it again. | |
+
+### Collection Scope
+----
+RID: `req-github-core-collection-scope`
+
+Status: `Implemented`
+
+A collector that did not see something has two different things to say about it — *it is not
+there*, or *I could not look* — and the grid renders both as an absent node. The tombstone
+candidate rule (tap#140) is *fan-out from the account, minus observed this run, minus outside the
+installation's selection*, and the third term is a fact about THIS run's reach. George ruled it a
+node (2026-09-14): an App's grants can be narrowed in a settings page and nothing tells the
+collector, so the reach is perceived-true-at-a-time like a runner execution, and belongs on the
+operation side (`github.observation: execution`) where it is immutable history. "When did we stop
+being able to see X" then falls out of the scope nodes ordered by `observed_at`.
+
+**One per run, before the walk.** `collection_scope` is keyed on the `collection_job` entity id
+and landed in its own GRIFT batch right after the installation selection is recorded, so it EXISTS
+while the run is in progress — reliability 1b patches a tier verdict onto it at each tier's end,
+and a run that dies mid-way leaves the earlier verdicts behind. `SCOPES_RUN` joins it to the run
+(a core type, named by its `ENTITY_TYPE` string in the edge's `targets`; the job exists before the
+collector starts, so the edge resolves under strict dangling-edge mode). `DERIVED_FROM_INSTALLATION`
+joins it to the installation whose grant it read, and lands with the main batch beside the
+installation node — absent under a PAT, and absent rather than dangling when the inventory was
+refused.
+
+**Three inputs, each versioned.** The scope is derived from the collection manifest (what TAP
+asked for), the installation grant (what the account allowed) and the account's plan (a scope
+input: the audit log is Enterprise-only). `configuration` records the manifest's version and
+SHA-256, the grant's permission map / selection / events / suspension as read, and where the plan
+came from — so a verdict that changes between two runs is attributable to "we asked for more"
+versus "they granted less" versus "the plan changed". `selection` is the `INSTALLATION_SELECTION`
+record verbatim: ONE dict, built once, placed on the run record and on the node.
+
+**Two declared, empty seams.** `visibility` (per entity type: `reachable` / `degraded` /
+`unreachable` / `unknown` + the failing permission triple) is where the visibility assessment
+(github-core#15) lands; `tiers` (per tier: `complete`, `reason`, `prerequisite`, `decided_at`,
+`count_check`, `surfaces`) is where reliability 1b's Confirm writes, through the service layer,
+once per tier. Both are emitted `{}` with their shape described in `FIELD_CRUD_SCHEMA`, and
+`reason` is a closed vocabulary — complete · truncated · forbidden · errored · filter_unverified ·
+count_mismatch · prerequisite_incomplete · not_attempted — verbatim, so that
+`WHERE s.tiers.T2.reason = "count_mismatch"` is a stable Gryphon question before either writer
+exists.
+
+This node is not the run. Scope facts never go on `collection_job`.
+
+#### Acceptance Criteria
+
+| ACID | Title | Status | Description | Notes |
+| --- | --- | :---: | --- | --- |
+| req-github-core-collection-scope-1 | One Per Run, Before The Walk | Implemented | A run lands exactly one `collection_scope`, keyed on its `collection_job` id, in its own batch after the installation selection and before any repository is read; `selection` equals the `INSTALLATION_SELECTION` record. | `tests/test_collection_scope.py::TestEmission`; proven live on the fixtures org 2026-09-15. |
+| req-github-core-collection-scope-2 | Joined To Run And Grant | Implemented | `SCOPES_RUN` targets the core `collection_job`; `DERIVED_FROM_INSTALLATION` targets the installation the App token was minted for, only when that installation's node was minted this run. | A PAT-only run has no installation edge — not applicable, not unobserved. |
+| req-github-core-collection-scope-3 | Seams Declared, Empty | Implemented | `visibility` and `tiers` are emitted `{}` with their shapes described per key; the tier `reason` enum is the agreed closed vocabulary. | A tier verdict in the agreed shape validates against the schema; a stray reason does not. |
+| req-github-core-collection-scope-4 | Inputs Versioned | Implemented | `configuration` carries the manifest version + digest, the grant as read, and the plan's provenance, so a changed verdict has an attributable cause. | `plan` is `unknown` with `plan_source` saying why whenever it could not be read. |
 
 ### Rule Suites — Who Actually Bypassed
 ----

@@ -1,0 +1,16 @@
+{
+  "slug": "DERIVED_FROM_INSTALLATION__github_core",
+  "name": "Derived From Installation",
+  "description": "The App installation whose grant a collection_scope was derived from — the configuration the run read, at the moment it read it. Absent in a PAT-only run, where there is no installation to derive from; absent also when the installation inventory could not be read, so the edge is never a guess. The scope is operation-side history and the installation is declaration-side configuration: this edge is the join between what was granted and what one run could therefore see (github-core#145).",
+  "sources": [
+    "github_core__collection_scope"
+  ],
+  "targets": [
+    "github_core__app_installation"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.surface": "apps",
+    "github.observation": "execution"
+  }
+}

@@ -11,7 +11,7 @@ import base64
 import fnmatch
 import logging
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, ClassVar, NamedTuple
 from urllib.parse import quote
 
@@ -59,6 +59,7 @@ from .identity import (
     code_scanning_alert_id,
     code_scanning_analysis_id,
     code_scanning_finding_id,
+    collection_scope_id,
     commit_observation_id,
     custom_property_id,
     edge_id,
@@ -82,7 +83,7 @@ from .identity import (
     workflow_id,
     workflow_job_id,
 )
-from .manifest import load_collection_manifest, load_link_manifest
+from .manifest import collection_manifest_digest, load_collection_manifest, load_link_manifest
 from .parser import (
     PIN_BRANCH,
     PIN_LOCAL,
@@ -192,6 +193,7 @@ _SITE_CACHES_TRUNCATED = "0f41"
 _SITE_INSTALLATIONS_UNREACHABLE = "1825"
 _SITE_INSTALLATION_SELECTION = "c6cc"
 _SITE_INSTALLATION_SELECTION_UNREADABLE = "cdea"
+_SITE_COLLECTION_SCOPE = "f895"
 _SITE_INSTALLATIONS_COLLECTED = "c3d0"
 _SITE_BYPASS_ACTOR_UNMODELLED = "5dd2"
 _SITE_AUTH_MODE = "3e4d"
@@ -389,6 +391,15 @@ _NOT_APPLICABLE = "not_applicable"
 #: policy keys below arrived, so the credential is not an owner / organization-administration
 #: reader. Distinct from `unobservable` (refused) and from `observed` (the policy is on the node).
 _PUBLIC_ONLY = "public_only"
+
+
+def plan_from_org_detail(detail: dict[str, Any] | None) -> str:
+    """The account's plan as the `collection_scope` node records it: GitHub's `plan.name`,
+    lower-cased (`enterprise` / `team` / `free`), or `unknown` when the detail carries no plan
+    — the key is owner-only, so a non-administrator credential never sees it (github-core#145)."""
+    plan = (detail or {}).get("plan")
+    name = plan.get("name") if isinstance(plan, dict) else plan
+    return str(name).strip().lower() if name else "unknown"
 
 # ---------- settings surfaces (req-github-core-settings) ----------
 #: Keys of `GET /orgs/{org}` copied VERBATIM onto `github_account.configuration`. GitHub's own
@@ -840,6 +851,12 @@ class GithubCollector(CollectorBase):
         self.record_info(
             _SITE_RUN_STARTED, "RUN_STARTED", "GitHub Core collection started."
         )
+        #: When this run's scope was established — the start of the run, before anything is
+        #: weighed in on (github-core#145). Stamped on the collection_scope node as `observed_at`.
+        self._scope_observed_at = datetime.now(UTC)
+        #: The collection_scope node's id once emitted; the installation edge lands later, beside
+        #: the installation node it targets.
+        self._scope_uuid: Any = None
         # github_app nodes are singletons shared across repos; dedupe the node
         # emission across the whole run (the ENABLED_ON_REPOSITORY edges still fan in).
         self._emitted_app_ids: set[str] = set()
@@ -926,8 +943,12 @@ class GithubCollector(CollectorBase):
             else None
         )
         # What this run is ALLOWED to weigh in on, before it weighs in on anything: the App
-        # installation's repository selection, or the PAT's reach (github-core#141).
-        self._collect_installation_selection(client)
+        # installation's repository selection, or the PAT's reach (github-core#141) — recorded on
+        # the run AND landed as this run's `collection_scope` node (github-core#145), the one
+        # statement every absence decision reads before it trusts a missing item.
+        owner = collection_owner(data)
+        selection = self._collect_installation_selection(client)
+        self._emit_collection_scope(client, owner, selection)
         # Per-run caches for objects shared across repositories: one organization ruleset applies
         # to every repository it matches, and re-fetching its detail per repo would be 19 identical
         # calls for one answer.
@@ -984,8 +1005,8 @@ class GithubCollector(CollectorBase):
         self._job_names: list[dict[str, Any]] = []
         self._checks_unobservable: list[dict[str, Any]] = []
 
-        # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope)
-        owner = collection_owner(data)
+        # --- scope resolution: the account's repositories, enumerated (req-github-core-org-scope).
+        # `owner` was derived once at the top of the run, beside the scope statement.
         # The configuration layer arrives in one GraphQL request per 100 repositories — metadata,
         # default branch, rulesets, environments and every workflow file's YAML inlined. It
         # replaces the enumeration walk, one metadata call per repo, and one Contents call per
@@ -1176,6 +1197,9 @@ class GithubCollector(CollectorBase):
         batch_dims = {"github.platform": "github.com"}
         if owner is not None:
             batch_dims["github.owner"] = owner
+        # The scope's join onto the installation it was derived from lands here, beside the
+        # installation node the inventory minted above (github-core#145).
+        self._append_scope_installation_edge(edges)
         github_batch = assemble_batch(
             batch_name=f"github_core collection: {scope_label}",
             description=f"GitHub Actions plumbing for {len(repos)} repo(s) in scope {scope_label}.",
@@ -5616,15 +5640,18 @@ class GithubCollector(CollectorBase):
             },
         )
 
-    def _collect_installation_selection(self, client: GithubClient) -> None:
+    def _collect_installation_selection(self, client: GithubClient) -> dict[str, Any]:
         """Record which repositories this run's credential may reach (github-core#141).
+
+        Returns the selection it recorded — the same dict, so the `collection_scope` node carries
+        it verbatim (derive a fact once; github-core#145).
 
         The tombstone candidate rule is *fan-out from the account, minus observed this run, minus
         outside the installation's selection*. The third term is a fact about THIS run's reach —
         an operation, perceived-true-at-a-time, because an org owner can narrow the selection in
         a settings page and nothing tells the collector — so it is recorded on the run rather
-        than on the account. It moves onto the ``collection_scope`` node when reliability 1b/1c
-        mints one; the record's shape is what that node will carry.
+        than on the account, and placed verbatim on this run's ``collection_scope`` node
+        (github-core#145).
 
         App: ``GET /installation/repositories`` answered by the installation token about itself,
         walked to the end and reconciled against ``total_count`` — a listed count that disagrees
@@ -5641,6 +5668,15 @@ class GithubCollector(CollectorBase):
             # bodies only; reliability 1a's gather exposes headers, and that is where `all` can be
             # earned. Until then: unknown, and a falsifier treats unknown as cannot-weigh-in.
             token_kind = "fine_grained" if self._auth.token(prefer=PREFER_PAT).startswith("github_pat_") else "classic"
+            selection: dict[str, Any] = {
+                "credential": "pat",
+                "token_kind": token_kind,
+                "kind": "unknown",
+                "repository_ids": None,
+                "count": None,
+                "total_count": None,
+                "complete": False,
+            }
             self.record_info(
                 _SITE_INSTALLATION_SELECTION,
                 "INSTALLATION_SELECTION",
@@ -5651,17 +5687,9 @@ class GithubCollector(CollectorBase):
                     else "a classic token's effective reach is not established by its scopes alone"
                 )
                 + "; absence cannot be weighed against it.",
-                message_data={
-                    "credential": "pat",
-                    "token_kind": token_kind,
-                    "kind": "unknown",
-                    "repository_ids": None,
-                    "count": None,
-                    "total_count": None,
-                    "complete": False,
-                },
+                message_data=selection,
             )
-            return
+            return selection
         declared = str((self._auth.installation or {}).get("repository_selection") or "")
         try:
             first = client.get("/installation/repositories", params={"per_page": "100"})
@@ -5671,35 +5699,201 @@ class GithubCollector(CollectorBase):
                 item_path="repositories",
             )
         except GithubAPIError as exc:
+            # The full selection shape, with every observed-nothing field null and `complete`
+            # false, so the node reads "declared X, members unobserved" rather than "no
+            # selection" — a refused listing must never look like an empty one.
+            selection = {
+                "credential": "app",
+                "kind": declared or "unknown",
+                "repository_ids": None,
+                "count": None,
+                "total_count": None,
+                "complete": False,
+                "status": exc.status,
+            }
             self.record_warn(
                 _SITE_INSTALLATION_SELECTION_UNREADABLE,
                 f"INSTALLATION_SELECTION_UNREADABLE_{exc.status}",
                 f"Cannot list this installation's repositories ({exc.status}); the selection is "
                 f"declared {declared or 'unknown'} but its members are unobserved this run — "
                 f"absence cannot be weighed against it.",
-                message_data={"credential": "app", "kind": declared or "unknown", "status": exc.status},
+                message_data=selection,
             )
-            return
+            return selection
         total = first.get("total_count") if isinstance(first, dict) else None
         ids = [int(r["id"]) for r in rows if isinstance(r, dict) and r.get("id") is not None]
         walk_complete = bool(client.last_walk_complete)
         # Fail closed (Codex on PR #144): a response without `total_count` cannot be reconciled,
         # and an unreconciled selection is not one a tombstone pass may weigh absence against.
         complete = walk_complete and isinstance(total, int) and total == len(ids)
+        selection = {
+            "credential": "app",
+            "kind": declared or "unknown",
+            "repository_ids": ids,
+            "count": len(ids),
+            "total_count": total,
+            "complete": complete,
+        }
         self.record_info(
             _SITE_INSTALLATION_SELECTION,
             "INSTALLATION_SELECTION",
             f"Installation reaches {len(ids)} repositor{'y' if len(ids) == 1 else 'ies'} "
             f"(selection {declared or 'unknown'}; GitHub reports {total}; "
             f"{'complete' if complete else 'INCOMPLETE — absence cannot be weighed against it'}).",
-            message_data={
-                "credential": "app",
-                "kind": declared or "unknown",
-                "repository_ids": ids,
-                "count": len(ids),
-                "total_count": total,
-                "complete": complete,
+            message_data=selection,
+        )
+        return selection
+
+    def _collect_plan(self, client: GithubClient, owner: str | None) -> tuple[str, str]:
+        """The account's plan and where it came from — a scope INPUT (the audit log is
+        Enterprise-only), read from the organization detail this run fetches once and reuses
+        when the account node is minted. `unknown` whenever it could not be read; the second
+        value says why (`observed` / `public_only` / `unobservable` / `not_applicable` /
+        `no_owner`) so unknown-because-refused and unknown-because-user-account never merge."""
+        if owner is None:
+            return "unknown", "no_owner"
+        if not self._account_type:
+            # Resolved once for the run; the Actions-policy read below reuses it. A user account
+            # has no organization detail and must not be asked for one. A refusal here leaves
+            # the kind unresolved for the later reads to handle as they always have — the scope
+            # node still lands, with the plan honestly unknown.
+            try:
+                self._account_type = str(self._fetch_account(client, owner).get("type") or "")
+            except GithubAPIError:
+                return "unknown", _UNOBSERVABLE
+        if self._account_type != "Organization":
+            return "unknown", _NOT_APPLICABLE
+        if self._org_detail_state == "":
+            self._org_detail, self._org_detail_state = self._fetch_org_detail(client, owner)
+        return plan_from_org_detail(self._org_detail), self._org_detail_state
+
+    def _emit_collection_scope(
+        self, client: GithubClient, owner: str | None, selection: dict[str, Any]
+    ) -> None:
+        """Land this run's `collection_scope` node before the walk (github-core#145).
+
+        Its own batch, submitted now rather than with the main batch at the end of the run,
+        because the node must EXIST while the run is in progress: reliability 1b (github-core#136)
+        patches a tier verdict onto it at each tier's end, and a run that dies mid-way must leave
+        the earlier verdicts behind. `SCOPES_RUN` targets the core `collection_job` entity, which
+        `run_collection` created before this collector started, so the edge resolves against the
+        grid under strict dangling-edge mode. The installation edge is NOT here: it lands with
+        the main batch, beside the installation node the inventory mints — and not at all when
+        that inventory could not be read, so it is never a guess.
+
+        `visibility` and `tiers` are emitted EMPTY: they are declared, described seams for the
+        visibility assessment (github-core#15) and reliability 1b, which write into them through
+        the service layer.
+        """
+        installation = self._auth.installation if self._auth.has_app else None
+        inst_id = (installation or {}).get("id")
+        plan, plan_source = self._collect_plan(client, owner)
+        manifest = load_collection_manifest()
+        sources = manifest.get("sources")
+        scope_uuid = collection_scope_id(self.config.collection_job_entity_id)
+        observed_at = self._scope_observed_at
+        node = node_envelope(
+            entity_id=scope_uuid,
+            entity_type="github_core__collection_scope",
+            name=f"collection scope @ {observed_at:%Y-%m-%dT%H:%M:%SZ}",
+            dimensions={**_PLATFORM_DIMENSIONS, "github.observation": "execution"},
+            fields={
+                "run_id": str(self.config.collection_job_entity_id),
+                "observed_at": observed_at.isoformat().replace("+00:00", "Z"),
+                "credential_kinds": list(self._auth.held),
+                "installation_id": int(inst_id) if inst_id is not None else None,
+                "selection": selection,
+                "plan": plan,
+                "visibility": {},
+                "tiers": {},
+                "configuration": {
+                    "manifest": {
+                        "version": str(manifest.get("manifest_version") or ""),
+                        "sha256": collection_manifest_digest(),
+                        "sources": len(sources) if isinstance(sources, list | dict) else 0,
+                    },
+                    "installation": (
+                        {
+                            "app_id": installation.get("app_id"),
+                            "permissions": dict(installation.get("permissions") or {}),
+                            "repository_selection": str(
+                                installation.get("repository_selection") or ""
+                            ),
+                            "events": list(installation.get("events") or []),
+                            "suspended": installation.get("suspended_at") is not None,
+                        }
+                        if installation is not None
+                        else None
+                    ),
+                    "plan_source": plan_source,
+                },
+                "tags": {},
             },
+        )
+        job_uuid = self.config.collection_job_entity_id
+        edge = edge_envelope(
+            entity_id=edge_id("SCOPES_RUN__github_core", scope_uuid, job_uuid),
+            edge_type="SCOPES_RUN__github_core",
+            source_id=scope_uuid,
+            target_id=job_uuid,
+            dimensions={**_PLATFORM_DIMENSIONS, "github.observation": "execution"},
+        )
+        batch_dims = {"github.platform": "github.com"}
+        if owner is not None:
+            batch_dims["github.owner"] = owner
+        self.submit_grift(
+            assemble_batch(
+                batch_name=f"github_core collection scope: {owner or 'explicit repositories'}",
+                description=(
+                    "What this run's credential was allowed to weigh in on, established before "
+                    "the walk (github-core#145)."
+                ),
+                nodes=[node],
+                edges=[edge],
+                batch_dimensions=batch_dims,
+            )
+        )
+        self._scope_uuid = scope_uuid
+        self.record_info(
+            _SITE_COLLECTION_SCOPE,
+            "COLLECTION_SCOPE_ESTABLISHED",
+            f"Scope established for this run: credentials {', '.join(self._auth.held) or 'none'}; "
+            f"selection {selection.get('kind')} "
+            f"({'complete' if selection.get('complete') else 'incomplete'}); plan {plan}.",
+            message_data={
+                "scope_id": str(scope_uuid),
+                "installation_id": int(inst_id) if inst_id is not None else None,
+                "selection_kind": selection.get("kind"),
+                "complete": bool(selection.get("complete")),
+                "plan": plan,
+                "plan_source": plan_source,
+            },
+        )
+
+    def _append_scope_installation_edge(self, edges: list[dict[str, Any]]) -> None:
+        """`DERIVED_FROM_INSTALLATION` from this run's scope to the installation whose grant it
+        read — only when that installation's node was minted this run, so the edge never dangles
+        and never guesses (github-core#145). PAT-only runs have no installation to derive from."""
+        if self._scope_uuid is None or not self._auth.has_app:
+            return
+        inst_id = (self._auth.installation or {}).get("id")
+        if inst_id is None:
+            return
+        inst_uuid = app_installation_id(inst_id)
+        if str(inst_uuid) not in self._emitted_installation_ids:
+            return
+        edges.append(
+            edge_envelope(
+                entity_id=edge_id("DERIVED_FROM_INSTALLATION__github_core", self._scope_uuid, inst_uuid),
+                edge_type="DERIVED_FROM_INSTALLATION__github_core",
+                source_id=self._scope_uuid,
+                target_id=inst_uuid,
+                dimensions={
+                    **_PLATFORM_DIMENSIONS,
+                    "github.surface": "apps",
+                    "github.observation": "execution",
+                },
+            )
         )
 
     def _collect_app_installations(

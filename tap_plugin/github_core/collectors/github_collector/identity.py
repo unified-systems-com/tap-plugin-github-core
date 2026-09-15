@@ -205,6 +205,16 @@ def app_installation_id(installation_id_int: int | str) -> UUID:
     return _id("github_core__app_installation", str(installation_id_int))
 
 
+def collection_scope_id(run_id: UUID | str) -> UUID:
+    """The scope statement about one collection run, keyed on the `collection_job` entity id.
+
+    Natural key: the run. One scope per run by construction — a re-run is a new job and so a new
+    scope, which is what makes "when did we stop being able to see X" answerable from history
+    (github-core#145).
+    """
+    return _id("github_core__collection_scope", str(run_id))
+
+
 def run_id(full_name: str, run_id_int: int | str) -> UUID:
     # v0 natural key is owner/repo + run_id (run_attempt deferred — see
     # req-github-core-backlog-run-attempts).

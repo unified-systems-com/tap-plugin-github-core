@@ -1,0 +1,15 @@
+{
+  "slug": "SCOPES_RUN__github_core",
+  "name": "Scopes Run",
+  "description": "A collection_scope node is the statement about one collection run: what that run's credential was allowed to weigh in on. Exactly one per run, emitted before the run weighs in on anything. The target is tap_cares' core collection_job entity, addressed by its entity id — the scope is a github_core fact ABOUT a core run, never a field on it (github-core#145).",
+  "sources": [
+    "github_core__collection_scope"
+  ],
+  "targets": [
+    "collection_job"
+  ],
+  "default_dimensions": {
+    "github.platform": "github.com",
+    "github.observation": "execution"
+  }
+}

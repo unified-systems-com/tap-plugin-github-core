@@ -8,6 +8,7 @@ loader raises `JsonFileError` with the offending path/location).
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -34,3 +35,12 @@ def load_collection_manifest() -> dict[str, Any]:
 def load_link_manifest() -> dict[str, Any]:
     """Load + validate the github_grid_link_manifest.json document."""
     return _load_validated(LINK_MANIFEST_PATH, LINK_MANIFEST_SCHEMA_PATH)
+
+
+def collection_manifest_digest() -> str:
+    """SHA-256 of the collection manifest file as shipped — the version of "what TAP asked for".
+
+    Recorded on the `collection_scope` node so a verdict that changes between runs can be
+    attributed to the manifest moving rather than to the grant moving (github-core#145).
+    """
+    return hashlib.sha256(COLLECTION_MANIFEST_PATH.read_bytes()).hexdigest()
