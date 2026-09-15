@@ -5,6 +5,8 @@ Spec: plugins/github_core/specs/spec-github-core-v0.md
 
 from __future__ import annotations
 
+import json
+
 import jsonschema
 import pytest
 from tap_plugin.github_core.collectors.github_collector.identity import (
@@ -92,6 +94,90 @@ class TestManifests:
         # The federation rule emits the dedicated FEDERATES_VIA_PROVIDER edge (not the
         # generic REFERENCES_RESOURCE) — repo -> aws_iam_oidc_provider.
         assert rule["edge_type"] == "FEDERATES_VIA_PROVIDER__github_core"
+
+
+class TestInstallationSelection:
+    """github-core#141: what this run may weigh in on, recorded before it weighs in."""
+
+    @staticmethod
+    def _collector(auth):
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        c = GithubCollector.__new__(GithubCollector)
+        c.results = {"info": [], "warn": [], "error": []}
+        c._auth = auth
+        return c
+
+    class _Auth:
+        def __init__(self, *, app: bool, pat_token: str = "", selection: str = "selected"):
+            self.has_app, self.has_pat = app, bool(pat_token)
+            self._pat_token = pat_token
+            self.installation = {"id": 7, "repository_selection": selection} if app else None
+
+        def token(self, prefer=None):
+            return self._pat_token
+
+    class _Client:
+        def __init__(self, rows, total=None, status=None, complete=True):
+            self.rows, self.total, self.status, self.complete = rows, total, status, complete
+            self.calls: list[str] = []
+            self.last_walk_complete = True
+
+        def get(self, path, *, params=None):
+            from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+
+            self.calls.append(path)
+            if self.status:
+                raise GithubAPIError(status=self.status, url=path, body="{}")
+            return {"total_count": self.total if self.total is not None else len(self.rows), "repositories": self.rows}
+
+        def get_paginated(self, path, *, params=None, item_path=None, max_pages=100):
+            self.calls.append(path)
+            self.last_walk_complete = self.complete
+            return list(self.rows)
+
+    def test_selected_app_records_the_ids_and_reconciles_the_count(self) -> None:
+        c = self._collector(self._Auth(app=True))
+        client = self._Client([{"id": 1, "full_name": "o/a"}, {"id": 2, "full_name": "o/b"}])
+        c._collect_installation_selection(client)
+        (event,) = c.results["info"]
+        assert event["message_code"] == "INSTALLATION_SELECTION"
+        assert event["message_data"] == {
+            "credential": "app", "kind": "selected", "repository_ids": [1, 2], "count": 2, "total_count": 2, "complete": True,
+        }
+        assert client.calls == ["/installation/repositories", "/installation/repositories"]
+
+    def test_a_count_that_disagrees_with_the_walk_is_incomplete_not_shorter(self) -> None:
+        c = self._collector(self._Auth(app=True, selection="all"))
+        client = self._Client([{"id": 1}], total=3)
+        c._collect_installation_selection(client)
+        (event,) = c.results["info"]
+        assert event["message_data"]["complete"] is False and event["message_data"]["total_count"] == 3
+        assert "INCOMPLETE" in event["message"]
+
+    def test_a_capped_walk_is_incomplete(self) -> None:
+        c = self._collector(self._Auth(app=True))
+        client = self._Client([{"id": 1}], complete=False)
+        c._collect_installation_selection(client)
+        assert c.results["info"][0]["message_data"]["complete"] is False
+
+    def test_a_refused_listing_is_recorded_with_the_declared_kind(self) -> None:
+        c = self._collector(self._Auth(app=True))
+        client = self._Client([], status=403)
+        c._collect_installation_selection(client)
+        assert c.results["info"] == []
+        (warn,) = c.results["warn"]
+        assert warn["message_code"] == "INSTALLATION_SELECTION_UNREADABLE_403"
+        assert warn["message_data"] == {"credential": "app", "kind": "selected", "status": 403}
+
+    def test_classic_pat_is_all_and_fine_grained_pat_is_unknown_and_the_token_never_lands(self) -> None:
+        for token, kind in (("ghp_" + "x" * 36, "all"), ("github_pat_" + "y" * 22, "unknown")):
+            c = self._collector(self._Auth(app=False, pat_token=token))
+            c._collect_installation_selection(self._Client([]))
+            (event,) = c.results["info"]
+            assert event["message_data"]["credential"] == "pat" and event["message_data"]["kind"] == kind
+            assert event["message_data"]["repository_ids"] is None
+            assert token not in json.dumps(event)
 
 
 class TestPATSchema:

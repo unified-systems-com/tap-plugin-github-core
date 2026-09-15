@@ -476,6 +476,21 @@
       "description": "Self-identification and fallback. A personal access token gets 404 here too."
     },
     {
+      "name": "installation_repositories",
+      "kind": "rest_endpoint",
+      "path": "/installation/repositories",
+      "query": {
+        "per_page": "100"
+      },
+      "item_path": "repositories[*]",
+      "fields": [
+        "id",
+        "full_name"
+      ],
+      "permission_not_applicable": "Answered by the installation token about ITSELF: the repositories this installation is allowed to reach. It is the App's own grant, not a permission over the account's resources, so no fine-grained triple applies (as for app_installation_self). A personal access token gets 404.",
+      "description": "The installation's repository selection, per run (github-core#141): `all` or the exact `selected` ids, with `total_count` reconciled against the walked count. This is the third term of the tombstone candidate rule — fan-out from the account minus observed minus OUTSIDE THE SELECTION — and it is an operation-side fact about this run's reach (dcom:operation), not a configuration of the account. Recorded as INSTALLATION_SELECTION on the run until the collection_scope node (reliability 1b/1c) exists to carry it. PAT-only runs record the selection as `all` (classic) or `unknown` (fine-grained: not introspectable; the falsifier treats unknown as cannot-weigh-in)."
+    },
+    {
       "name": "rule_suites",
       "kind": "rest_endpoint",
       "path": "/repos/{owner}/{repo}/rulesets/rule-suites",
