@@ -38,6 +38,7 @@ GitHub Actions deployment-plumbing models and the GitHub collector — account-s
 
 ## Read First
 
+- `specs/spec-github-core-reliability.md` — how every network call fails gracefully: taxonomy, retry within a budget, per-layer degradation, degradation-is-never-absence, and the recorded githubkit decision
 - `specs/spec-github-core-v0.md` — full design spec (12 Proposed + 2 Backlog
   requirements; design rationale preserved for both backlog items)
 - `tap_plugins/specs/spec-plugin-architecture.md` — plugin contract,
