@@ -74,6 +74,14 @@ _HTTPS_BASE_URL_PATTERN = r"^https://[^\s/@?#]+(/[^\s?#]*)?$"
 _ACCOUNT_LOGIN_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$"
 _OWNER_REPO_PATTERN = r"^[^/]+/[^/]+$"
 
+# The collection scope is `owner` (enumerate the account) OR `repos` (the explicit list IS the
+# scope — the degenerate run config, tap#142). One derivation for every credential kind: the
+# combined kind used to require `owner` while the single-credential kinds accepted either, so a
+# repos-only envelope was valid with a PAT alone or an App alone and invalid the moment both were
+# supplied (github-core#139). The App side already handles a repos-only envelope — one
+# installation is unambiguous, several are refused — so only the schema forbade it.
+_SCOPE_ANY_OF: list[dict[str, Any]] = [{"required": ["owner"]}, {"required": ["repos"]}]
+
 GITHUB_PAT_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -85,7 +93,7 @@ GITHUB_PAT_SCHEMA: dict[str, Any] = {
     ),
     "additionalProperties": False,
     "required": ["token"],
-    "anyOf": [{"required": ["owner"]}, {"required": ["repos"]}],
+    "anyOf": _SCOPE_ANY_OF,
     "properties": {
         "token": {
             "type": "string",
@@ -156,7 +164,7 @@ GITHUB_APP_SCHEMA: dict[str, Any] = {
     ),
     "additionalProperties": False,
     "required": ["app_id", "private_key"],
-    "anyOf": [{"required": ["owner"]}, {"required": ["repos"]}],
+    "anyOf": _SCOPE_ANY_OF,
     "properties": {
         "app_id": {
             "type": ["integer", "string"],
@@ -236,8 +244,10 @@ GITHUB_SCHEMA: dict[str, Any] = {
         "for each source, and records which credential a missing answer would have needed."
     ),
     "additionalProperties": False,
-    "anyOf": [{"required": ["app"]}, {"required": ["pat"]}],
-    "required": ["owner"],
+    "allOf": [
+        {"anyOf": [{"required": ["app"]}, {"required": ["pat"]}]},
+        {"anyOf": _SCOPE_ANY_OF},
+    ],
     "properties": {
         "owner": {
             "type": "string",
@@ -246,7 +256,8 @@ GITHUB_SCHEMA: dict[str, Any] = {
                 "Login of the organization or user whose repositories are the collection scope. "
                 "Also SELECTS the App installation to authenticate as: an App installed into "
                 "several accounts must be told which one, or it would collect one account's "
-                "repositories under another's name."
+                "repositories under another's name. Optional when `repos` is given: the App "
+                "then requires exactly one installation and refuses to guess between several."
             ),
         },
         "api_base_url": {
@@ -305,7 +316,11 @@ GITHUB_SCHEMA: dict[str, Any] = {
             "type": "array",
             "minItems": 1,
             "items": {"type": "string", "pattern": _OWNER_REPO_PATTERN, "minLength": 3},
-            "description": "Explicit `owner/repo` targets — an include-filter over the enumerated repositories.",
+            "description": (
+                "Explicit `owner/repo` targets. With `owner` present: an include-filter over the "
+                "enumerated repositories. Without `owner`: the scope itself — a single-repository "
+                "PAT or a personal App is a valid starting point (github-core#139)."
+            ),
         },
         "initial_run_limit": {
             "type": "integer",

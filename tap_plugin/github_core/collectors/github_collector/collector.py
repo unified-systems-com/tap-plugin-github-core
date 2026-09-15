@@ -120,6 +120,9 @@ _SITE_RUN_NOT_FOUND = "f938"
 _SITE_LOCAL_ACTION_DEFERRED = "b148"
 _SITE_DEPENDABOT_APP = "a7c1"
 _SITE_SCOPE_ENUMERATED = "462a"
+_SITE_SCOPE_RESOLVED = "7c72"
+_SITE_SCOPE_REPO_UNREADABLE = "6ed7"
+_SITE_SCOPE_REPO_NOT_FOUND = "49f5"
 _SITE_ABORT_SCOPE = "8d47"
 _SITE_FILTER_UNMATCHED = "d087"
 _SITE_GRAPHQL_CONFIG = "1de2"
@@ -1420,7 +1423,7 @@ class GithubCollector(CollectorBase):
         scope (the degenerate run config, tap#142) and nothing is enumerated.
         """
         if owner is None:
-            return list(explicit)
+            return self._resolve_explicit(client, explicit)
         if self._config:
             # Already enumerated by the config-layer query; do not walk REST again.
             enumerated = sorted(self._config)
@@ -1445,6 +1448,87 @@ class GithubCollector(CollectorBase):
         return self._apply_filter(
             owner, enumerated, explicit, account_kind=account_kind, complete=complete
         )
+
+    def _resolve_explicit(self, client: GithubClient, explicit: list[str]) -> list[str]:
+        """Resolve a repos-only scope BEFORE the per-repository loop (github-core#140).
+
+        Without an `owner` the explicit list IS the configuration, so a listed repository that
+        cannot be found is a config error of the same class as "the org named in the envelope
+        cannot be found" — George's ruling (2026-09-14): error out and stop, do not degrade. The
+        per-repo loop's containment (`REPO_FAILED_<status>`, continue) is right for TRANSIENT
+        failures across a nineteen-repo org and wrong for a typo in the envelope, which it would
+        turn into a warning and a quietly smaller run.
+
+        One `GET /repos/{owner}/{repo}` per listed repository, up front — the root-of-trust step
+        for this scope shape: the tree still starts at the platform, the account is named from the
+        listed repos' owner, and each step records whether it could introspect. Three answers:
+
+        - **404 aborts, naming the repository.** GitHub answers 404 both for a name that does not
+          exist and for a private repository this credential may not see — the two are
+          indistinguishable here, and BOTH mean the envelope and the credential disagree, which
+          is a configuration problem. The message says so; it never claims "does not exist".
+        - **403 is recorded and the repository kept**: it exists, this credential cannot read it,
+          and the loop will record its own refusal per surface.
+        - **Anything else (401, 429, 5xx) proves nothing** about the repository: recorded as
+          unresolved, kept in scope, and the resolve step's `complete` is FALSE — absence cannot be
+          weighed against a listing whose members could not all be established. Reliability 1a/1b
+          add retry-within-budget under this call; until then a transient failure here is honest
+          rather than retried.
+
+        `SCOPE_RESOLVED.complete` is the assertion a tombstone pass reads
+        (`req-github-core-reliability-absence`): true only when every listed repository answered.
+        """
+        unreadable: list[dict[str, Any]] = []
+        unresolved: list[dict[str, Any]] = []
+        for full_name in explicit:
+            try:
+                client.get(f"/repos/{full_name}")
+            except GithubAPIError as exc:
+                if exc.status == 404:
+                    self._abort(
+                        _SITE_SCOPE_REPO_NOT_FOUND,
+                        "SCOPE_REPO_NOT_FOUND",
+                        f"Configured repository {full_name} was not found (404): either it does "
+                        f"not exist or this credential is not allowed to see it — GitHub answers "
+                        f"404 for both. The explicit `repos` list is the collection scope, so the "
+                        f"envelope and the credential disagree; fix one and rerun.",
+                    )
+                if exc.status == 403:
+                    unreadable.append({"repo": full_name, "status": exc.status})
+                    self.record_warn(
+                        _SITE_SCOPE_REPO_UNREADABLE,
+                        f"SCOPE_REPO_UNREADABLE_{exc.status}",
+                        f"Configured repository {full_name} exists but this credential cannot read "
+                        f"it ({exc.status}); it stays in scope and its surfaces will read as "
+                        f"unobservable.",
+                        message_data={"repo": full_name, "status": exc.status},
+                    )
+                    continue
+                unresolved.append({"repo": full_name, "status": exc.status})
+                self.record_warn(
+                    _SITE_SCOPE_REPO_UNREADABLE,
+                    f"SCOPE_REPO_UNRESOLVED_{exc.status}",
+                    f"Configured repository {full_name} could not be resolved ({exc.status}: not "
+                    f"a statement about whether it exists); it stays in scope, and absence cannot "
+                    f"be weighed against this run's listing.",
+                    message_data={"repo": full_name, "status": exc.status},
+                )
+        complete = not unresolved
+        self.record_info(
+            _SITE_SCOPE_RESOLVED,
+            "SCOPE_RESOLVED",
+            f"Resolved {len(explicit)} configured repositor{'y' if len(explicit) == 1 else 'ies'}"
+            f" (repos-only scope): {len(unreadable)} unreadable, {len(unresolved)} unresolved; "
+            f"listing {'complete' if complete else 'INCOMPLETE — absence cannot be weighed against it'}.",
+            message_data={
+                "configured": len(explicit),
+                "unreadable": unreadable,
+                "unresolved": unresolved,
+                "complete": complete,
+                "filtered": False,
+            },
+        )
+        return list(explicit)
 
     def _apply_filter(
         self,

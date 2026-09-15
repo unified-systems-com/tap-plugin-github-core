@@ -24,7 +24,9 @@ from tap_plugin.github_core.collectors.github_collector.manifest import (
 )
 from tap_plugin.github_core.collectors.github_collector.parser import parse_workflow_yaml
 from tap_plugin.github_core.collectors.github_collector.secret import (
+    GITHUB_APP_SCHEMA,
     GITHUB_PAT_SCHEMA,
+    GITHUB_SCHEMA,
     api_base_url,
     initial_run_limit,
 )
@@ -192,6 +194,67 @@ class TestInstallationSelection:
             assert md["credential"] == "pat" and md["token_kind"] == token_kind and md["kind"] == "unknown"
             assert md["repository_ids"] is None and md["complete"] is False
             assert token not in json.dumps(event)
+# Not key material: the same non-armour marker test_credential_shape.py uses, so no scanner
+# (ours or Codacy's gitleaks) reads a test fixture as a hard-coded credential.
+_APP = {"app_id": 1, "private_key": "-----BEGIN PEM-----"}
+
+
+class TestScopeRuleIsOneRuleForEveryKind:
+    """github-core#139: a repos-only scope was valid with a PAT alone or an App alone and
+    invalid the moment both were supplied. Any token we are given is a valid starting point;
+    the schema must say so once, for every kind."""
+
+    @pytest.mark.parametrize("kind_schema", [GITHUB_PAT_SCHEMA, GITHUB_APP_SCHEMA, GITHUB_SCHEMA])
+    def test_neither_owner_nor_repos_is_rejected_by_every_kind(self, kind_schema) -> None:
+        credential = {"token": "ghp_x"} if kind_schema is GITHUB_PAT_SCHEMA else (_APP if kind_schema is GITHUB_APP_SCHEMA else {"pat": {"token": "ghp_x"}})
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(credential, kind_schema)
+
+    def test_combined_kind_accepts_repos_only(self) -> None:
+        jsonschema.validate({"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+        jsonschema.validate({"app": _APP, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+        jsonschema.validate({"pat": {"token": "ghp_x"}, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_still_needs_a_credential(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"owner": "acme", "repos": ["acme/x"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_owner_only_and_owner_with_filter_still_valid(self) -> None:
+        jsonschema.validate({"app": _APP, "owner": "acme"}, GITHUB_SCHEMA)
+        jsonschema.validate({"pat": {"token": "ghp_x"}, "owner": "acme", "repos": ["acme/x"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_without_owner_refuses_several_installations_before_collecting(self, monkeypatch) -> None:
+        """The relaxation is safe only because the runtime selector fails closed: a repos-only
+        envelope names no account, so an App installed into several accounts is refused rather
+        than guessed (auth.py `_mint_installation_token`). Proven here through the combined kind,
+        which the schema now admits — not only through the App-only kind the existing test uses."""
+        from tap_plugin.github_core.collectors.github_collector.auth import GithubAppAuthError, GithubAuth
+
+        auth = GithubAuth(kind="github", data={"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["a/x"]}, api_base_url="https://api.github.com")
+        monkeypatch.setattr(auth, "installations", lambda: [{"id": 1, "account": {"login": "a"}}, {"id": 2, "account": {"login": "b"}}])
+        with pytest.raises(GithubAppAuthError, match="several installations"):
+            auth.token()
+
+    def test_combined_kind_without_owner_takes_the_one_unambiguous_installation(self, monkeypatch) -> None:
+        from tap_plugin.github_core.collectors.github_collector.auth import GithubAuth
+
+        auth = GithubAuth(kind="github", data={"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["a/x"]}, api_base_url="https://api.github.com")
+        monkeypatch.setattr(auth, "installations", lambda: [{"id": 9, "account": {"login": "a"}}])
+        monkeypatch.setattr(
+            "tap_plugin.github_core.collectors.github_collector.auth.exchange_installation_token",
+            lambda base, jwt, installation_id: (f"token-for-{installation_id}", ""),
+        )
+        monkeypatch.setattr(auth, "app_jwt", lambda: "jwt")
+        assert auth.token() == "token-for-9"
+        assert auth.installation["account"]["login"] == "a"
+
+    def test_the_scope_rule_is_derived_once(self) -> None:
+        """Three schemas, one `_SCOPE_ANY_OF` — the file already drifted once (its own comment)."""
+        from tap_plugin.github_core.collectors.github_collector import secret as secret_mod
+
+        rule = secret_mod._SCOPE_ANY_OF
+        assert GITHUB_PAT_SCHEMA["anyOf"] is rule and GITHUB_APP_SCHEMA["anyOf"] is rule
+        assert any(clause.get("anyOf") is rule for clause in GITHUB_SCHEMA["allOf"])
 
 
 class TestPATSchema:
@@ -498,10 +561,22 @@ class TestAccountScope:
         return c
 
     class _Client:
-        def __init__(self, org_repos=None, user_repos=None, complete=True):
+        def __init__(self, org_repos=None, user_repos=None, complete=True, repo_status=None):
             self.org_repos, self.user_repos, self.complete = org_repos, user_repos, complete
+            self.repo_status: dict[str, int] = repo_status or {}  # full_name -> HTTP status to raise
             self.calls: list[str] = []
             self.last_walk_complete = True
+
+        def get(self, path, *, params=None):
+            from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
+
+            self.calls.append(path)
+            assert path.startswith("/repos/"), path
+            full_name = path[len("/repos/"):]
+            status = self.repo_status.get(full_name)
+            if status:
+                raise GithubAPIError(status=status, url=path, body='{"message":"nope"}')
+            return {"full_name": full_name, "id": abs(hash(full_name)) % 10**6}
 
         def get_paginated(self, path, *, params=None, item_path=None, max_pages=100):
             from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
@@ -517,11 +592,64 @@ class TestAccountScope:
                 return [{"full_name": n} for n in (self.user_repos or [])]
             raise AssertionError(path)
 
-    def test_repos_only_is_the_degenerate_scope(self) -> None:
+    def test_repos_only_is_the_degenerate_scope_and_is_resolved_up_front(self) -> None:
+        """github-core#140: the list IS the config, so each listed repo is resolved before the
+        loop; nothing is enumerated; the listing is recorded complete by construction."""
         c = self._collector()
         client = self._Client(org_repos=["x/should-not-be-touched"])
         assert c._resolve_repos(client, None, ["notgeorge/samsite"]) == ["notgeorge/samsite"]
-        assert client.calls == [] and c.results["info"] == []
+        assert client.calls == ["/repos/notgeorge/samsite"]
+        (event,) = c.results["info"]
+        assert event["message_code"] == "SCOPE_RESOLVED"
+        assert event["message_data"] == {
+            "configured": 1, "unreadable": [], "unresolved": [], "complete": True, "filtered": False,
+        }
+        assert c.results["warn"] == [] and c.results["error"] == []
+
+    def test_repos_only_listed_repo_not_found_aborts_as_a_config_error(self) -> None:
+        """404 is 'does not exist OR not visible to this credential' — GitHub answers it for both.
+        Either way the envelope and the credential disagree, and the message says exactly that."""
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollectorError
+
+        c = self._collector()
+        client = self._Client(repo_status={"notgeorge/typo": 404})
+        with pytest.raises(GithubCollectorError):
+            c._resolve_repos(client, None, ["notgeorge/samsite", "notgeorge/typo"])
+        (error,) = c.results["error"]
+        assert error["message_code"] == "SCOPE_REPO_NOT_FOUND" and "notgeorge/typo" in error["message"]
+        assert "not allowed to see it" in error["message"] and "does not exist" not in error["message"].split("either")[0]
+        assert c.results["info"] == []  # no SCOPE_RESOLVED: the run stopped
+
+    def test_repos_only_listed_repo_this_credential_cannot_read_is_recorded_and_kept(self) -> None:
+        c = self._collector()
+        client = self._Client(repo_status={"notgeorge/private": 403})
+        assert c._resolve_repos(client, None, ["notgeorge/samsite", "notgeorge/private"]) == [
+            "notgeorge/samsite", "notgeorge/private",
+        ]
+        (warn,) = c.results["warn"]
+        assert warn["message_code"] == "SCOPE_REPO_UNREADABLE_403"
+        assert warn["message_data"] == {"repo": "notgeorge/private", "status": 403}
+        (event,) = c.results["info"]
+        assert event["message_data"]["unreadable"] == [{"repo": "notgeorge/private", "status": 403}]
+        assert event["message_data"]["complete"] is True
+
+    @pytest.mark.parametrize("status", [401, 429, 500, 502])
+    def test_repos_only_statuses_that_prove_nothing_are_unresolved_and_the_listing_is_incomplete(self, status) -> None:
+        """Codex/Grok on PR #143: 401, 429 and 5xx do not establish that a repository exists, so
+        they must not read as 'exists but unreadable' and must not leave `complete: True` for a
+        tombstone pass to trust."""
+        c = self._collector()
+        client = self._Client(repo_status={"notgeorge/flaky": status})
+        assert c._resolve_repos(client, None, ["notgeorge/samsite", "notgeorge/flaky"]) == [
+            "notgeorge/samsite", "notgeorge/flaky",
+        ]
+        (warn,) = c.results["warn"]
+        assert warn["message_code"] == f"SCOPE_REPO_UNRESOLVED_{status}"
+        assert "not a statement about whether it exists" in warn["message"]
+        (event,) = c.results["info"]
+        assert event["message_data"]["unresolved"] == [{"repo": "notgeorge/flaky", "status": status}]
+        assert event["message_data"]["unreadable"] == []
+        assert event["message_data"]["complete"] is False and "INCOMPLETE" in event["message"]
 
     def test_org_enumerated_and_recorded(self) -> None:
         c = self._collector()
