@@ -22,7 +22,9 @@ from tap_plugin.github_core.collectors.github_collector.manifest import (
 )
 from tap_plugin.github_core.collectors.github_collector.parser import parse_workflow_yaml
 from tap_plugin.github_core.collectors.github_collector.secret import (
+    GITHUB_APP_SCHEMA,
     GITHUB_PAT_SCHEMA,
+    GITHUB_SCHEMA,
     api_base_url,
     initial_run_limit,
 )
@@ -92,6 +94,42 @@ class TestManifests:
         # The federation rule emits the dedicated FEDERATES_VIA_PROVIDER edge (not the
         # generic REFERENCES_RESOURCE) — repo -> aws_iam_oidc_provider.
         assert rule["edge_type"] == "FEDERATES_VIA_PROVIDER__github_core"
+
+
+_APP = {"app_id": 1, "private_key": "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----"}
+
+
+class TestScopeRuleIsOneRuleForEveryKind:
+    """github-core#139: a repos-only scope was valid with a PAT alone or an App alone and
+    invalid the moment both were supplied. Any token we are given is a valid starting point;
+    the schema must say so once, for every kind."""
+
+    @pytest.mark.parametrize("kind_schema", [GITHUB_PAT_SCHEMA, GITHUB_APP_SCHEMA, GITHUB_SCHEMA])
+    def test_neither_owner_nor_repos_is_rejected_by_every_kind(self, kind_schema) -> None:
+        credential = {"token": "ghp_x"} if kind_schema is GITHUB_PAT_SCHEMA else (_APP if kind_schema is GITHUB_APP_SCHEMA else {"pat": {"token": "ghp_x"}})
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(credential, kind_schema)
+
+    def test_combined_kind_accepts_repos_only(self) -> None:
+        jsonschema.validate({"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+        jsonschema.validate({"app": _APP, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+        jsonschema.validate({"pat": {"token": "ghp_x"}, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_still_needs_a_credential(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"owner": "acme", "repos": ["acme/x"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_owner_only_and_owner_with_filter_still_valid(self) -> None:
+        jsonschema.validate({"app": _APP, "owner": "acme"}, GITHUB_SCHEMA)
+        jsonschema.validate({"pat": {"token": "ghp_x"}, "owner": "acme", "repos": ["acme/x"]}, GITHUB_SCHEMA)
+
+    def test_the_scope_rule_is_derived_once(self) -> None:
+        """Three schemas, one `_SCOPE_ANY_OF` — the file already drifted once (its own comment)."""
+        from tap_plugin.github_core.collectors.github_collector import secret as secret_mod
+
+        rule = secret_mod._SCOPE_ANY_OF
+        assert GITHUB_PAT_SCHEMA["anyOf"] is rule and GITHUB_APP_SCHEMA["anyOf"] is rule
+        assert any(clause.get("anyOf") is rule for clause in GITHUB_SCHEMA["allOf"])
 
 
 class TestPATSchema:
