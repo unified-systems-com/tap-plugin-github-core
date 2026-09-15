@@ -96,6 +96,20 @@ _SELECTION_SCHEMA: dict[str, Any] = {
             "description": "The HTTP status that refused the listing, when one did.",
         },
     },
+    "required": ["credential", "kind", "repository_ids", "count", "total_count", "complete"],
+    "additionalProperties": False,
+    # Fail closed at the schema, not only in the collector (Codex on PR# 146): a selection that
+    # claims `complete` must carry the ids and the two counts it was reconciled from, and they
+    # must agree — a bare `{"complete": true}` is not a statement absence may be weighed against.
+    "if": {"properties": {"complete": {"const": True}}},
+    "then": {
+        "properties": {
+            "kind": {"enum": ["all", "selected"]},
+            "repository_ids": {"type": "array"},
+            "count": {"type": "integer"},
+            "total_count": {"type": "integer"},
+        },
+    },
 }
 
 _VISIBILITY_SCHEMA: dict[str, Any] = {
@@ -128,6 +142,8 @@ _VISIBILITY_SCHEMA: dict[str, Any] = {
                 ),
             },
         },
+        "required": ["state", "failing_permission"],
+        "additionalProperties": False,
     },
 }
 
@@ -147,6 +163,8 @@ _TIER_SURFACE_SCHEMA: dict[str, Any] = {
             "description": "The `owner/repo` scopes where this surface was NOT read in full.",
         },
     },
+    "required": ["complete", "reason", "incomplete_scopes"],
+    "additionalProperties": False,
 }
 
 _TIERS_SCHEMA: dict[str, Any] = {
@@ -158,9 +176,14 @@ _TIERS_SCHEMA: dict[str, Any] = {
         "here. `reason` is the closed vocabulary verbatim so that "
         "`WHERE s.tiers.T2.reason = \"count_mismatch\"` is a stable Gryphon question."
     ),
+    # Only the named tiers may appear (T0 … T5, T3a / T3b): a verdict under a key nobody
+    # defined would be a verdict nobody reads.
+    "propertyNames": {"pattern": "^T[0-5][ab]?$"},
     "additionalProperties": {
         "type": "object",
         "description": "One tier's verdict.",
+        "required": ["complete", "reason", "prerequisite", "decided_at"],
+        "additionalProperties": False,
         "properties": {
             "complete": {
                 "type": "boolean",
@@ -247,13 +270,16 @@ _CONFIGURATION_SCHEMA: dict[str, Any] = {
         "plan_source": {
             "type": "string",
             "description": (
-                "Where `plan` came from: `org_detail` (read from `/orgs/{login}`), `public_only` "
-                "(the org answered without the plan key — not an administrator), `unobservable` "
-                "(refused), `not_applicable` (a user account), or `no_owner` (a repos-only envelope "
-                "names no account)."
+                "Where `plan` came from — the organization-detail observability state the run "
+                "recorded, verbatim: `observed` (the policy block, plan included, was read from "
+                "`/orgs/{login}`), `public_only` (the org answered without its policy keys — not an "
+                "administrator, so no plan), `unobservable` (refused), `not_applicable` (a user "
+                "account), or `no_owner` (a repos-only envelope names no account)."
             ),
+            "enum": ["observed", "public_only", "unobservable", "not_applicable", "no_owner"],
         },
     },
+    "required": ["manifest", "installation", "plan_source"],
 }
 
 

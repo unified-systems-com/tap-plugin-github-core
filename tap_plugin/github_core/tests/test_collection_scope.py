@@ -187,6 +187,7 @@ class TestEmission:
             "suspended": False,
         }
         assert configuration["plan_source"] == "observed"
+        assert "observed" in CollectionScope.FIELD_CRUD_SCHEMA["configuration"]["properties"]["plan_source"]["enum"]
 
     def test_pat_only_has_no_installation_and_never_records_the_token(self) -> None:
         token = "github_pat_" + "A1" * 12  # token-SHAPED, built by concatenation; not a credential
@@ -316,6 +317,41 @@ class TestDeclaredSeams:
         jsonschema.validate(instance=verdicts, schema=schema)
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(instance={"T1": {"complete": False, "reason": "partial"}}, schema=schema)
+
+    def test_a_bare_complete_is_refused_everywhere(self) -> None:
+        """Codex on PR# 146: a seam that DESCRIBES a shape but does not REQUIRE it lets a bare
+        `{"complete": true}` persist as an apparently complete authority fact. Fail closed."""
+        sel = CollectionScope.FIELD_CRUD_SCHEMA["selection"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance={"complete": True}, schema=sel)
+        with pytest.raises(jsonschema.ValidationError):  # complete without reconciled ids/counts
+            jsonschema.validate(instance={**_SELECTED, "repository_ids": None, "count": None}, schema=sel)
+        with pytest.raises(jsonschema.ValidationError):  # complete cannot be claimed for an unknown reach
+            jsonschema.validate(instance={**_SELECTED, "kind": "unknown"}, schema=sel)
+        tiers = CollectionScope.FIELD_CRUD_SCHEMA["tiers"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance={"T2": {"complete": True}}, schema=tiers)
+        with pytest.raises(jsonschema.ValidationError):  # a tier nobody defined
+            jsonschema.validate(
+                instance={"T9": {"complete": True, "reason": "complete", "prerequisite": None, "decided_at": "2026-09-14T12:00:00Z"}},
+                schema=tiers,
+            )
+        with pytest.raises(jsonschema.ValidationError):  # a stray key on a verdict
+            jsonschema.validate(
+                instance={"T0": {"complete": True, "reason": "complete", "prerequisite": None, "decided_at": "2026-09-14T12:00:00Z", "note": "x"}},
+                schema=tiers,
+            )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance={"github_core__actions_secret": {"state": "reachable"}}, schema=CollectionScope.FIELD_CRUD_SCHEMA["visibility"])
+
+    def test_every_selection_shape_the_collector_emits_validates(self) -> None:
+        sel = CollectionScope.FIELD_CRUD_SCHEMA["selection"]
+        c, _ = _collector(_Auth(app=True, installation=_INSTALLATION))
+        jsonschema.validate(instance=c._collect_installation_selection(TestSelectionIsReturned._Client([{"id": 1}])), schema=sel)
+        c, _ = _collector(_Auth(app=True, installation=_INSTALLATION))
+        jsonschema.validate(instance=c._collect_installation_selection(TestSelectionIsReturned._Client([], status=403)), schema=sel)
+        c, _ = _collector(_Auth(app=False, pat_token="ghp_" + "d4" * 18))
+        jsonschema.validate(instance=c._collect_installation_selection(TestSelectionIsReturned._Client([])), schema=sel)
 
     def test_visibility_describes_the_four_states_and_the_failing_permission(self) -> None:
         schema = CollectionScope.FIELD_CRUD_SCHEMA["visibility"]
