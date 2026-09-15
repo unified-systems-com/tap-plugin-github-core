@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original glyph. A viewfinder: four corner brackets around what one run could see, with the
+     aperture in the middle. The scope is the frame, not the picture — what the credential was
+     allowed to weigh in on, not what it found. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24">
+  <title>Collection Scope</title>
+  <path fill="none" stroke="#1f2328" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+        d="M3.5 8.5v-3.5a1.5 1.5 0 0 1 1.5-1.5h3.5M15.5 3.5h3.5a1.5 1.5 0 0 1 1.5 1.5v3.5M20.5 15.5v3.5a1.5 1.5 0 0 1-1.5 1.5h-3.5M8.5 20.5h-3.5a1.5 1.5 0 0 1-1.5-1.5v-3.5"/>
+  <circle cx="12" cy="12" r="4.25" fill="none" stroke="#1f2328" stroke-width="1.5"/>
+  <circle cx="12" cy="12" r="1.5" fill="#1f2328"/>
+</svg>

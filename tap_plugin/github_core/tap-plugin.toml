@@ -38,6 +38,7 @@ github_core__github_custom_property = "tap_plugin.github_core.models.github_cust
 github_core__pull_request = "tap_plugin.github_core.models.pull_request.PullRequest"
 github_core__code_scanning_alert = "tap_plugin.github_core.models.code_scanning_alert.CodeScanningAlert"
 github_core__code_scanning_analysis = "tap_plugin.github_core.models.code_scanning_analysis.CodeScanningAnalysis"
+github_core__collection_scope = "tap_plugin.github_core.models.collection_scope.CollectionScope"
 
 [edges]
 HOSTS_ACCOUNT__github_core = "edges/HOSTS_ACCOUNT.edge.json"
@@ -88,6 +89,8 @@ BUILDS_PACKAGE_VERSION__github_core = "edges/BUILDS_PACKAGE_VERSION.edge.json"
 DETAILS_FINDING__github_core = "edges/DETAILS_FINDING.edge.json"
 ANALYZES_REPOSITORY__github_core = "edges/ANALYZES_REPOSITORY.edge.json"
 ANALYZES_COMMIT__github_core = "edges/ANALYZES_COMMIT.edge.json"
+SCOPES_RUN__github_core = "edges/SCOPES_RUN.edge.json"
+DERIVED_FROM_INSTALLATION__github_core = "edges/DERIVED_FROM_INSTALLATION.edge.json"
 
 [grift]
 repo-landing-page = "grift/repo-landing-page.grift.json"

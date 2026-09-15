@@ -29,7 +29,11 @@ EXECUTION_MODELS = {"GithubActionsRun", "GithubActionsJob", "ActionsCache", "Rul
                     "PullRequest",
                     # Code scanning (github-core#89): an analysis is a scanner RUN and an alert is what
                     # that run reported — outputs of execution, not configuration anyone wrote.
-                    "CodeScanningAlert", "CodeScanningAnalysis"}
+                    "CodeScanningAlert", "CodeScanningAnalysis",
+                    # A collection scope is a statement about ONE RUN — what its credential could
+                    # reach at that moment — perceived-true-at-a-time like a runner execution
+                    # (github-core#145). Configuration is the installation it points at.
+                    "CollectionScope"}
 # SCOPED_TO_REF is sourced on actions_cache, which is execution — the layer follows the
 # source model rather than a second map (req-github-core-dimensions-6).
 # TRIGGERED_EVALUATION / BYPASSED_RULE / EVALUATED_ON are all sourced on rule_suite, which is execution.
@@ -46,7 +50,10 @@ EXECUTION_EDGES = {"EXECUTES_WORKFLOW", "RUNS_JOB", "EXECUTED_ON_RUNNER", "SCOPE
                    # Code scanning edges follow their execution-layer source (github-core#89): the
                    # alert behind a finding, and the analysis's joins onto the repository and commit.
                    "DETAILS_FINDING", "ANALYZES_REPOSITORY", "ANALYZES_COMMIT",
-                   "PUBLISHES_PACKAGE_VERSION"}
+                   "PUBLISHES_PACKAGE_VERSION",
+                   # Scope edges follow their execution-layer source (github-core#145): the
+                   # statement about a run, and the grant it was derived from.
+                   "SCOPES_RUN", "DERIVED_FROM_INSTALLATION"}
 # Sources span both layers, so the layer belongs to the endpoint, not the edge
 # type; the collector sets it per emitted edge (req-github-core-dimensions-6).
 LAYER_SPANNING_EDGES = {"REFERENCES_RESOURCE"}

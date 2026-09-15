@@ -170,7 +170,12 @@ class TestInstallationSelection:
         assert c.results["info"] == []
         (warn,) = c.results["warn"]
         assert warn["message_code"] == "INSTALLATION_SELECTION_UNREADABLE_403"
-        assert warn["message_data"] == {"credential": "app", "kind": "selected", "status": 403}
+        # The full selection shape, observed-nothing fields null and `complete` false, so the
+        # scope node reads "declared selected, members unobserved" (github-core#145).
+        assert warn["message_data"] == {
+            "credential": "app", "kind": "selected", "repository_ids": None, "count": None,
+            "total_count": None, "complete": False, "status": 403,
+        }
 
     def test_a_missing_total_count_is_incomplete_not_complete(self) -> None:
         """Codex on PR #144: an unreconcilable selection is not one absence may be weighed against."""
