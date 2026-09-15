@@ -1448,7 +1448,7 @@ class GithubCollector(CollectorBase):
         """Resolve a repos-only scope BEFORE the per-repository loop (github-core#140).
 
         Without an `owner` the explicit list IS the configuration, so a listed repository that
-        does not exist is a config error of the same class as "the org named in the envelope
+        cannot be found is a config error of the same class as "the org named in the envelope
         cannot be found" — George's ruling (2026-09-14): error out and stop, do not degrade. The
         per-repo loop's containment (`REPO_FAILED_<status>`, continue) is right for TRANSIENT
         failures across a nineteen-repo org and wrong for a typo in the envelope, which it would
@@ -1456,13 +1456,25 @@ class GithubCollector(CollectorBase):
 
         One `GET /repos/{owner}/{repo}` per listed repository, up front — the root-of-trust step
         for this scope shape: the tree still starts at the platform, the account is named from the
-        listed repos' owner, and each step records whether it could introspect. A 404 aborts,
-        naming the repository. Any other refusal (403: it exists, this credential cannot read it)
-        is recorded as unobservable and the repository stays in scope — the loop will record its
-        own refusal per surface. The listing is complete by construction and says so, which is
-        the assertion a tombstone pass reads (`req-github-core-reliability-absence`).
+        listed repos' owner, and each step records whether it could introspect. Three answers:
+
+        - **404 aborts, naming the repository.** GitHub answers 404 both for a name that does not
+          exist and for a private repository this credential may not see — the two are
+          indistinguishable here, and BOTH mean the envelope and the credential disagree, which
+          is a configuration problem. The message says so; it never claims "does not exist".
+        - **403 is recorded and the repository kept**: it exists, this credential cannot read it,
+          and the loop will record its own refusal per surface.
+        - **Anything else (401, 429, 5xx) proves nothing** about the repository: recorded as
+          unresolved, kept in scope, and the resolve step's `complete` is FALSE — absence cannot be
+          weighed against a listing whose members could not all be established. Reliability 1a/1b
+          add retry-within-budget under this call; until then a transient failure here is honest
+          rather than retried.
+
+        `SCOPE_RESOLVED.complete` is the assertion a tombstone pass reads
+        (`req-github-core-reliability-absence`): true only when every listed repository answered.
         """
         unreadable: list[dict[str, Any]] = []
+        unresolved: list[dict[str, Any]] = []
         for full_name in explicit:
             try:
                 client.get(f"/repos/{full_name}")
@@ -1471,28 +1483,43 @@ class GithubCollector(CollectorBase):
                     self._abort(
                         _SITE_SCOPE_REPO_NOT_FOUND,
                         "SCOPE_REPO_NOT_FOUND",
-                        f"Configured repository {full_name} does not exist (404). The explicit "
-                        f"`repos` list is the collection scope; a listed repository that cannot be "
-                        f"found is a configuration error, not a transient failure — fix the "
-                        f"envelope and rerun.",
+                        f"Configured repository {full_name} was not found (404): either it does "
+                        f"not exist or this credential is not allowed to see it — GitHub answers "
+                        f"404 for both. The explicit `repos` list is the collection scope, so the "
+                        f"envelope and the credential disagree; fix one and rerun.",
                     )
-                unreadable.append({"repo": full_name, "status": exc.status})
+                if exc.status == 403:
+                    unreadable.append({"repo": full_name, "status": exc.status})
+                    self.record_warn(
+                        _SITE_SCOPE_REPO_UNREADABLE,
+                        f"SCOPE_REPO_UNREADABLE_{exc.status}",
+                        f"Configured repository {full_name} exists but this credential cannot read "
+                        f"it ({exc.status}); it stays in scope and its surfaces will read as "
+                        f"unobservable.",
+                        message_data={"repo": full_name, "status": exc.status},
+                    )
+                    continue
+                unresolved.append({"repo": full_name, "status": exc.status})
                 self.record_warn(
                     _SITE_SCOPE_REPO_UNREADABLE,
-                    f"SCOPE_REPO_UNREADABLE_{exc.status}",
-                    f"Configured repository {full_name} exists but this credential cannot read it "
-                    f"({exc.status}); it stays in scope and its surfaces will read as unobservable.",
+                    f"SCOPE_REPO_UNRESOLVED_{exc.status}",
+                    f"Configured repository {full_name} could not be resolved ({exc.status}: not "
+                    f"a statement about whether it exists); it stays in scope, and absence cannot "
+                    f"be weighed against this run's listing.",
                     message_data={"repo": full_name, "status": exc.status},
                 )
+        complete = not unresolved
         self.record_info(
             _SITE_SCOPE_RESOLVED,
             "SCOPE_RESOLVED",
             f"Resolved {len(explicit)} configured repositor{'y' if len(explicit) == 1 else 'ies'}"
-            f" (repos-only scope; complete by construction); {len(unreadable)} unreadable.",
+            f" (repos-only scope): {len(unreadable)} unreadable, {len(unresolved)} unresolved; "
+            f"listing {'complete' if complete else 'INCOMPLETE — absence cannot be weighed against it'}.",
             message_data={
                 "configured": len(explicit),
                 "unreadable": unreadable,
-                "complete": True,
+                "unresolved": unresolved,
+                "complete": complete,
                 "filtered": False,
             },
         )

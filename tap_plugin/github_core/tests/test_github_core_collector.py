@@ -438,10 +438,14 @@ class TestAccountScope:
         assert client.calls == ["/repos/notgeorge/samsite"]
         (event,) = c.results["info"]
         assert event["message_code"] == "SCOPE_RESOLVED"
-        assert event["message_data"] == {"configured": 1, "unreadable": [], "complete": True, "filtered": False}
+        assert event["message_data"] == {
+            "configured": 1, "unreadable": [], "unresolved": [], "complete": True, "filtered": False,
+        }
         assert c.results["warn"] == [] and c.results["error"] == []
 
-    def test_repos_only_listed_repo_that_does_not_exist_aborts_as_a_config_error(self) -> None:
+    def test_repos_only_listed_repo_not_found_aborts_as_a_config_error(self) -> None:
+        """404 is 'does not exist OR not visible to this credential' — GitHub answers it for both.
+        Either way the envelope and the credential disagree, and the message says exactly that."""
         from tap_plugin.github_core.collectors.github_collector.collector import GithubCollectorError
 
         c = self._collector()
@@ -450,6 +454,7 @@ class TestAccountScope:
             c._resolve_repos(client, None, ["notgeorge/samsite", "notgeorge/typo"])
         (error,) = c.results["error"]
         assert error["message_code"] == "SCOPE_REPO_NOT_FOUND" and "notgeorge/typo" in error["message"]
+        assert "not allowed to see it" in error["message"] and "does not exist" not in error["message"].split("either")[0]
         assert c.results["info"] == []  # no SCOPE_RESOLVED: the run stopped
 
     def test_repos_only_listed_repo_this_credential_cannot_read_is_recorded_and_kept(self) -> None:
@@ -464,6 +469,24 @@ class TestAccountScope:
         (event,) = c.results["info"]
         assert event["message_data"]["unreadable"] == [{"repo": "notgeorge/private", "status": 403}]
         assert event["message_data"]["complete"] is True
+
+    @pytest.mark.parametrize("status", [401, 429, 500, 502])
+    def test_repos_only_statuses_that_prove_nothing_are_unresolved_and_the_listing_is_incomplete(self, status) -> None:
+        """Codex/Grok on PR #143: 401, 429 and 5xx do not establish that a repository exists, so
+        they must not read as 'exists but unreadable' and must not leave `complete: True` for a
+        tombstone pass to trust."""
+        c = self._collector()
+        client = self._Client(repo_status={"notgeorge/flaky": status})
+        assert c._resolve_repos(client, None, ["notgeorge/samsite", "notgeorge/flaky"]) == [
+            "notgeorge/samsite", "notgeorge/flaky",
+        ]
+        (warn,) = c.results["warn"]
+        assert warn["message_code"] == f"SCOPE_REPO_UNRESOLVED_{status}"
+        assert "not a statement about whether it exists" in warn["message"]
+        (event,) = c.results["info"]
+        assert event["message_data"]["unresolved"] == [{"repo": "notgeorge/flaky", "status": status}]
+        assert event["message_data"]["unreadable"] == []
+        assert event["message_data"]["complete"] is False and "INCOMPLETE" in event["message"]
 
     def test_org_enumerated_and_recorded(self) -> None:
         c = self._collector()
