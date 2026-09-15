@@ -22,7 +22,9 @@ from tap_plugin.github_core.collectors.github_collector.manifest import (
 )
 from tap_plugin.github_core.collectors.github_collector.parser import parse_workflow_yaml
 from tap_plugin.github_core.collectors.github_collector.secret import (
+    GITHUB_APP_SCHEMA,
     GITHUB_PAT_SCHEMA,
+    GITHUB_SCHEMA,
     api_base_url,
     initial_run_limit,
 )
@@ -92,6 +94,69 @@ class TestManifests:
         # The federation rule emits the dedicated FEDERATES_VIA_PROVIDER edge (not the
         # generic REFERENCES_RESOURCE) — repo -> aws_iam_oidc_provider.
         assert rule["edge_type"] == "FEDERATES_VIA_PROVIDER__github_core"
+
+
+# Not key material: the same non-armour marker test_credential_shape.py uses, so no scanner
+# (ours or Codacy's gitleaks) reads a test fixture as a hard-coded credential.
+_APP = {"app_id": 1, "private_key": "-----BEGIN PEM-----"}
+
+
+class TestScopeRuleIsOneRuleForEveryKind:
+    """github-core#139: a repos-only scope was valid with a PAT alone or an App alone and
+    invalid the moment both were supplied. Any token we are given is a valid starting point;
+    the schema must say so once, for every kind."""
+
+    @pytest.mark.parametrize("kind_schema", [GITHUB_PAT_SCHEMA, GITHUB_APP_SCHEMA, GITHUB_SCHEMA])
+    def test_neither_owner_nor_repos_is_rejected_by_every_kind(self, kind_schema) -> None:
+        credential = {"token": "ghp_x"} if kind_schema is GITHUB_PAT_SCHEMA else (_APP if kind_schema is GITHUB_APP_SCHEMA else {"pat": {"token": "ghp_x"}})
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(credential, kind_schema)
+
+    def test_combined_kind_accepts_repos_only(self) -> None:
+        jsonschema.validate({"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+        jsonschema.validate({"app": _APP, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+        jsonschema.validate({"pat": {"token": "ghp_x"}, "repos": ["notgeorge/samsite"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_still_needs_a_credential(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"owner": "acme", "repos": ["acme/x"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_owner_only_and_owner_with_filter_still_valid(self) -> None:
+        jsonschema.validate({"app": _APP, "owner": "acme"}, GITHUB_SCHEMA)
+        jsonschema.validate({"pat": {"token": "ghp_x"}, "owner": "acme", "repos": ["acme/x"]}, GITHUB_SCHEMA)
+
+    def test_combined_kind_without_owner_refuses_several_installations_before_collecting(self, monkeypatch) -> None:
+        """The relaxation is safe only because the runtime selector fails closed: a repos-only
+        envelope names no account, so an App installed into several accounts is refused rather
+        than guessed (auth.py `_mint_installation_token`). Proven here through the combined kind,
+        which the schema now admits — not only through the App-only kind the existing test uses."""
+        from tap_plugin.github_core.collectors.github_collector.auth import GithubAppAuthError, GithubAuth
+
+        auth = GithubAuth(kind="github", data={"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["a/x"]}, api_base_url="https://api.github.com")
+        monkeypatch.setattr(auth, "installations", lambda: [{"id": 1, "account": {"login": "a"}}, {"id": 2, "account": {"login": "b"}}])
+        with pytest.raises(GithubAppAuthError, match="several installations"):
+            auth.token()
+
+    def test_combined_kind_without_owner_takes_the_one_unambiguous_installation(self, monkeypatch) -> None:
+        from tap_plugin.github_core.collectors.github_collector.auth import GithubAuth
+
+        auth = GithubAuth(kind="github", data={"app": _APP, "pat": {"token": "ghp_x"}, "repos": ["a/x"]}, api_base_url="https://api.github.com")
+        monkeypatch.setattr(auth, "installations", lambda: [{"id": 9, "account": {"login": "a"}}])
+        monkeypatch.setattr(
+            "tap_plugin.github_core.collectors.github_collector.auth.exchange_installation_token",
+            lambda base, jwt, installation_id: (f"token-for-{installation_id}", ""),
+        )
+        monkeypatch.setattr(auth, "app_jwt", lambda: "jwt")
+        assert auth.token() == "token-for-9"
+        assert auth.installation["account"]["login"] == "a"
+
+    def test_the_scope_rule_is_derived_once(self) -> None:
+        """Three schemas, one `_SCOPE_ANY_OF` — the file already drifted once (its own comment)."""
+        from tap_plugin.github_core.collectors.github_collector import secret as secret_mod
+
+        rule = secret_mod._SCOPE_ANY_OF
+        assert GITHUB_PAT_SCHEMA["anyOf"] is rule and GITHUB_APP_SCHEMA["anyOf"] is rule
+        assert any(clause.get("anyOf") is rule for clause in GITHUB_SCHEMA["allOf"])
 
 
 class TestPATSchema:
