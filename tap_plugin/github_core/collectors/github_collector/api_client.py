@@ -16,15 +16,15 @@ so real 404s still fail loudly with their explanatory body.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-import time
 from dataclasses import dataclass
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
+
+from .github_call import CallContext, HttpFailure, RetryPolicy, Seam, call, endpoint_template, scope_from_path
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +33,6 @@ _LINK_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 # Identifies our collector in GitHub's user-agent logs (req: API politeness).
 USER_AGENT = "tap-github-core-collector/0.1"
 
-# Empty-body-404 retry policy (see module docstring).
-_EMPTY_404_MAX_RETRIES = 5
-_EMPTY_404_INITIAL_BACKOFF_SECONDS = 0.5
 
 
 @dataclass(frozen=True)
@@ -66,10 +63,18 @@ class GithubClient:
         token: str,
         api_base_url: str = "https://api.github.com",
         retry_empty_404: bool = True,
+        seam: Seam | None = None,
+        credential_kind: str = "",
     ) -> None:
         self._token = token
         self._api_base_url = api_base_url.rstrip("/")
-        self._retry_empty_404 = retry_empty_404
+        # `retry_empty_404=False` is the self-test's "one attempt, surface a real 401/403 now"
+        # switch; under the seam it means a single-attempt policy for THIS client.
+        self._policy = RetryPolicy() if retry_empty_404 else RetryPolicy(attempts=1)
+        self._seam = seam or Seam.standalone()
+        #: This client's credential kind when it differs from the run's primary (the PAT-bound
+        #: ruleset client under an App run) — provenance names the token that actually asked.
+        self._credential_kind = credential_kind
 
     # Set by every `get_paginated` walk: did it reach the end of the Link chain?
     last_walk_complete: bool = True
@@ -116,34 +121,41 @@ class GithubClient:
         return urlunparse(parsed._replace(query=query))
 
     def _request(self, url: str) -> Any:
-        backoff = _EMPTY_404_INITIAL_BACKOFF_SECONDS
-        for attempt in range(_EMPTY_404_MAX_RETRIES + 1):
-            try:
-                return self._request_once(url)
-            except GithubAPIError as exc:
-                # Real 404s carry a JSON body explaining the failure. Empty-body
-                # 404 is GitHub's undocumented intermittent quirk — retry it
-                # (unless retry_empty_404 was disabled — see self-test path).
-                # See module docstring for evidence + reasoning.
-                if self._retry_empty_404 and exc.status == 404 and not exc.body and attempt < _EMPTY_404_MAX_RETRIES:
-                    logger.warning(
-                        "[c1d4] github empty-body 404 on %s (attempt %d/%d); " "retrying after %.2fs",
-                        url,
-                        attempt + 1,
-                        _EMPTY_404_MAX_RETRIES,
-                        backoff,
-                    )
-                    time.sleep(backoff)
-                    backoff *= 2
-                    continue
-                raise
-        raise GithubAPIError(
-            status=404,
-            url=url,
-            body=f"persistent empty-body 404 after {_EMPTY_404_MAX_RETRIES} retries",
-        )
+        """One logical GET through the seam (spec-github-core-reliability): retry, budget, records.
 
-    def _request_once(self, url: str) -> Any:
+        Call sites keep their contract — decoded JSON on success, `GithubAPIError` on a refused
+        fetch — so their three-state handling is unchanged; what changed is that a transient
+        failure is retried within the run's budget before it ever reaches them, and every retry or
+        degradation is a run record.
+        """
+        path = url[len(self._api_base_url):] if url.startswith(self._api_base_url) else url
+        ctx = CallContext(
+            surface=endpoint_template(path),
+            scope=scope_from_path(path),
+            endpoint=endpoint_template(path),
+            layer="rest",
+            credential_kind=self._credential_kind or self._seam.credential_kind,
+        )
+        seam = self._seam
+
+        def transport(params: dict[str, Any]) -> tuple[int, dict[str, str], bytes]:
+            return self._request_once(url, timeout=params.get("read_timeout") or 30.0)
+
+        gather = call(transport, ctx, budget=seam.budget, recorder=seam.recorder, policy=self._policy)
+        if not gather.ok:
+            # GitHub's own explanatory body when there was one (the contract callers hold), else
+            # the seam's reason (an exhausted transient has no single answer to quote).
+            body = gather.last_failure_body.decode("utf-8", errors="replace") or gather.failure_reason
+            raise GithubAPIError(status=gather.status or 0, url=url, body=body)
+        # Pagination state is set HERE, from the attempt that won — never inside the transport,
+        # which an abandoned attempt may still be running.
+        link = next((v for k, v in gather.headers.items() if k.lower() == "link"), "")
+        self._next_link = self._parse_next_link(link)
+        return gather.parsed if gather.body else {}
+
+    def _request_once(self, url: str, *, timeout: float = 30.0) -> tuple[int, dict[str, str], bytes]:
+        """ONE attempt: ``(status, headers, body)`` for 2xx; ``HttpFailure`` for any other status;
+        transport exceptions propagate for the seam to classify. Mutates nothing on the client."""
         req = Request(
             url,
             headers={
@@ -154,15 +166,14 @@ class GithubClient:
             },
         )
         try:
-            with urlopen(req, timeout=30) as resp:  # noqa: S310 - controlled hostname
-                body = resp.read().decode("utf-8")
-                self._next_link = self._parse_next_link(resp.headers.get("Link", ""))
-                return json.loads(body) if body else {}
+            # nosec B310 — `url` is built from the credential envelope's https api_base_url (secret.py).
+            with urlopen(req, timeout=timeout) as resp:  # noqa: S310 # nosec B310
+                body = resp.read()
+                headers = dict(resp.headers.items())
+                return resp.status, headers, body
         except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-            raise GithubAPIError(status=exc.code, url=url, body=body) from exc
-        except URLError as exc:
-            raise GithubAPIError(status=0, url=url, body=str(exc.reason)) from exc
+            body = exc.read() if exc.fp else b""
+            raise HttpFailure(status=exc.code, headers=dict((exc.headers or {}).items()), body=body) from exc
 
     @staticmethod
     def _parse_next_link(link_header: str) -> str | None:
