@@ -56,9 +56,42 @@ Every failure a network call can produce is one of three classes. The class deci
 
 | Class | Meaning | Signals |
 | --- | --- | --- |
-| **transient** | GitHub or the network failed to answer this time; the same request may succeed shortly | HTTP 500, 502, 503, 504; HTTP 429; HTTP 403 carrying `Retry-After` or a rate-limit body; connection refused / reset / closed without response; a truncated body (`IncompleteRead`, `RemoteProtocolError`); a client-side timeout; a GraphQL body whose only error is "couldn't respond to your request in time" or a `RATE_LIMITED` type; an HTTP 404 with an **empty** body (GitHub's undocumented quirk on `/actions/*` — a real 404 always carries `{"message": …}`) |
-| **terminal** | The answer is an answer; asking again changes nothing | HTTP 400, 401, 403 without `Retry-After` (a permission refusal), 404 with a body, 410, 422, 451; a GraphQL `FORBIDDEN` / `NOT_FOUND` / `INSUFFICIENT_SCOPES` error on a path |
+| **transient** | GitHub or the network failed to answer this time; the same request may succeed shortly | HTTP 500, 502, 503, 504; HTTP 429; **HTTP 403 carrying any rate-limit signal** — `x-ratelimit-remaining: 0`, a `Retry-After` header, or a rate-limit body (see the 403 rule below); connection refused / reset / closed without response; a truncated body (`IncompleteRead`, `RemoteProtocolError`); a client-side timeout; a GraphQL body whose only error is "couldn't respond to your request in time" or a `RATE_LIMITED` type; an HTTP 404 with an **empty** body (GitHub's undocumented quirk on `/actions/*` — a real 404 always carries `{"message": …}`) |
+| **terminal** | The answer is an answer; asking again changes nothing | HTTP 400, 401, **403 carrying no rate-limit signal at all** (a permission refusal — see the 403 rule below), 404 with a body, 410, 422, 451; a GraphQL `FORBIDDEN` / `NOT_FOUND` / `INSUFFICIENT_SCOPES` error on a path |
 | **partial** | GitHub answered, and part of the answer is missing or degraded | A 200 GraphQL response with `data` beside `errors[]` (a field the credential could not read arrives as `null` with an error entry); a REST listing whose walk stopped at the page cap |
+
+
+#### The 403 rule (classifier precedence)
+
+A 403 is the one status GitHub overloads across two unrelated meanings — *rate limited* and *not
+permitted* — so the classifier states its own precedence rather than leaving it to be inferred from
+two tables that can disagree.
+
+**`Retry-After` is not the discriminator.** GitHub sends `Retry-After` on *secondary* rate limits.
+A **primary** rate limit is `403` (or `429`) with `x-ratelimit-remaining: 0` and an
+`x-ratelimit-reset`, and it typically carries **no** `Retry-After` at all. An implementation that
+keys the split on `Retry-After` alone therefore classifies the ordinary primary-limit 403 as a
+permission refusal: never retried, never waited on, surfaced as `unobservable`. That is the common
+case rendered as the rare one, and it silently produces an absence claim from a credential that was
+merely throttled.
+
+Classify a 403 in this order, first match wins:
+
+| # | Signal present | Class | Then |
+| --- | --- | :---: | --- |
+| 1 | `x-ratelimit-remaining: 0` (with or without `Retry-After`) | **transient** | Primary limit — the Rate Limits table's Primary row governs the wait |
+| 2 | `Retry-After`, or a secondary-limit body | **transient** | Secondary limit — the Secondary row governs the wait |
+| 3 | A **rate-limit body** (defined below) with no rate-limit header | **transient** | Treat as secondary; wait ≥ 60 s |
+| 4 | None of the above | **terminal** | A genuine permission refusal |
+
+**"Rate-limit body" is defined**, because an undefined term in a classifier is a decision left to
+whoever implements it: a JSON body whose `message` contains `rate limit exceeded`,
+`secondary rate limit`, or `abuse detection mechanism` — GitHub's three documented phrasings.
+Matching is case-insensitive and substring-based; anything else is not a rate-limit body.
+
+**Precedence is explicit:** where this rule and the [Rate Limits](#rate-limits) table could both
+apply, this rule decides the *class* and the Rate Limits table decides the *wait*. They cannot
+disagree, because they are no longer answering the same question.
 
 Rules:
 
@@ -75,7 +108,10 @@ Rules:
 | --- | --- | :---: | --- | --- |
 | req-github-core-reliability-taxonomy-1 | One Classifier | Proposed | A single function maps any exception or response the client can produce to `transient` / `terminal` / `partial`; every signal in the table has a unit test. | |
 | req-github-core-reliability-taxonomy-2 | Empty-404 Folded In | Proposed | The empty-body 404 is one row of the transient class, retried by the general policy; the bespoke `_EMPTY_404_*` loop in `api_client.py:36–143` is removed. | Its detection rule (empty body vs `{"message"}` body) survives as the classifier's rule. |
-| req-github-core-reliability-taxonomy-3 | Terminal Never Retried | Proposed | A 401, a bodied 404, a 422 and a permission 403 each produce exactly one request in the proof harness. | |
+| req-github-core-reliability-taxonomy-3 | Terminal Never Retried | Proposed | A 401, a bodied 404, a 422 and a permission 403 (one carrying **no** rate-limit signal) each produce exactly one request in the proof harness. | |
+| req-github-core-reliability-taxonomy-5 | Primary-Limit 403 Is Transient | Proposed | A 403 with `x-ratelimit-remaining: 0` and `x-ratelimit-reset` and **no** `Retry-After` is classified transient and waits to the reset — it is never recorded as a permission refusal. | The common primary-limit shape; the failure this rule exists to prevent |
+| req-github-core-reliability-taxonomy-6 | Rate-Limit Body Recognised | Proposed | A 403 with no rate-limit header whose JSON `message` contains `rate limit exceeded`, `secondary rate limit` or `abuse detection mechanism` is classified transient. | Case-insensitive substring |
+| req-github-core-reliability-taxonomy-7 | Foundation Terminal Aborts | Proposed | A terminal 401 on credential resolution, and a permission 403 on the repository listing, each end the run FAILED — never a completed run reporting zero repositories. | The absence-contract hole |
 | req-github-core-reliability-taxonomy-4 | Closed By Defaults | Proposed | An unlisted status (e.g. 418), an unlisted transport exception and an unanticipated exception each take the default path in rule 5, and the run record names the unmapped signal. | |
 | req-github-core-reliability-taxonomy-5 | GraphQL Types Mapped | Proposed | Each GraphQL error type in rule 6 classifies as stated; a 200 with data and a `FORBIDDEN` path lands the data with the path pruned. | |
 
@@ -340,7 +376,23 @@ Composes with tap_cares' failure-mode convention (`req-tap-cares-collector-failu
 | --- | --- | --- |
 | **SUCCESSFUL** (clean) | Every layer complete | As today |
 | **SUCCESSFUL** (degraded) | Any non-foundation layer degraded, or any surface incomplete | Today's counts plus `; N retries, M surfaces degraded` and the `INCOMPLETE_SURFACES` record. No new `CollectionJob` status — a distinct status would touch tap_cares for every plugin; the count and the record are the marker |
-| **FAILED** | A foundation layer failed after budget; or an unclassified exception | `_abort` as today; partial batches linked additively; asserts nothing about absence |
+| **FAILED** | A foundation layer failed **for any reason** — terminal, exhausted-transient, or partial; or an unclassified exception | `_abort` as today; partial batches linked additively; asserts nothing about absence |
+
+**Foundation failure aborts regardless of class.** This is the one place the taxonomy does *not*
+decide what happens next, and it is stated here because reading the taxonomy alone gives the wrong
+answer. A terminal failure normally means "record it, mark the surface unobservable, carry on" — but
+on a foundation layer (credential resolution, the account listing, the repository listing) there is
+no surface left to carry on with. An unusable token (`401`), or a permission refusal on the
+repository listing (a `403` that reaches rule 4 of [The 403 rule](#the-403-rule-classifier-precedence)),
+would otherwise produce a run that lands zero repositories, completes, and reports `SUCCESSFUL
+(degraded)` — a run asserting the absence contract over data it never had the right to read. That is
+the most reassuring possible output from a credential that simply could not look.
+
+So: on a foundation layer, every failure class ends the run. `exhausted transient` aborts (Goal 1),
+`partial` aborts (`degrade` rule 1), and `terminal` aborts by this rule. A foundation layer has no
+degraded state, because there is no such thing as a partly-known repository set that is safe to
+scope a run with.
+
 
 **Single-flight, acquired atomically.** Mutual exclusion is an *acquisition*, not a check: at run start the seam takes a database lock on the collector's own row (`SELECT … FOR UPDATE` on the `Collector` node via the service layer) and, inside that lock, looks for a sibling job in `RUNNING` younger than the **orphan threshold** (`wall_clock + 5 min`, above the enforceable bound in `req-github-core-reliability-budget`). A fresh sibling → this run records `RUN_SKIPPED_CONCURRENT` and exits SUCCESSFUL with that summary. A sibling older than the threshold is presumed orphaned (tap#454): the skip is recorded with its age and this run proceeds. Two runs starting simultaneously serialize on the lock, so exactly one proceeds. The lock is held only for the check, never for the run. *Observed 2026-09-14:* a manual and a scheduled run overlapped for two minutes with no guard. If tap_cares lands a generic single-flight (tap#454), this requirement delegates to it and keeps only the threshold.
 
