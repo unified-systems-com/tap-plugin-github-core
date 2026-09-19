@@ -262,6 +262,12 @@ class EnvironmentFalsifier(_GithubFalsifier):
         return verdict_from_probe(candidate, expected, probe)
 
 
+#: The probe recorded when a file read yields neither a record nor a failure — unreachable by
+#: construction (``_workflow_file_at_head`` always returns one of the two), kept so the fail-closed
+#: branch needs no assertion that a production build would strip.
+_NO_ANSWER = Probe(status="errored", detail="the file read returned no answer")
+
+
 def _workflow_file_at_head(
     client: ProbeClient, full_name: str, path: str
 ) -> tuple[dict[str, Any] | None, Probe | None]:
@@ -310,8 +316,7 @@ class WorkflowFalsifier(_GithubFalsifier):
         expected = Expected(source_id=str(workflow_id), owner=owner, name=str(getattr(row, "name", "") or "") or None)
         record, failed = _workflow_file_at_head(client, full_name, path)
         if record is None:
-            assert failed is not None
-            return verdict_from_probe(candidate, expected, failed)
+            return verdict_from_probe(candidate, expected, failed or _NO_ANSWER)
         probe = Probe(
             status="found",
             source_id=str(record.get("id")) if record.get("id") is not None else None,
@@ -362,8 +367,7 @@ class WorkflowJobFalsifier(_GithubFalsifier):
                 files[key] = _workflow_file_at_head(client, full_name, path)
             record, failed = files[key]
             if record is None:
-                assert failed is not None
-                out.append(verdict_from_probe(candidate, expected, failed))
+                out.append(verdict_from_probe(candidate, expected, failed or _NO_ANSWER))
                 continue
             jobs = {
                 str(j.get("id") or ""): j for j in (parse_workflow_yaml(record.get("text") or "").get("jobs") or [])

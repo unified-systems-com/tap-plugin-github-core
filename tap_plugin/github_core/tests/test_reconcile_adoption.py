@@ -46,7 +46,9 @@ WORKFLOW_YAML = "name: ci\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-late
 
 class _Secret:
     kind = "github_pat"
-    data: dict[str, Any] = {"token": "ghp_" + "x" * 36, "owner": OWNER}
+    # Not token-shaped on purpose: a `ghp_` prefix plus 36 characters is what every secret scanner
+    # keys on, and the collector only reads the prefix to name the kind.
+    data: dict[str, Any] = {"token": "fixture-not-a-credential", "owner": OWNER}
 
 
 def _config_repo() -> dict[str, Any]:
