@@ -25,6 +25,12 @@ class GithubRuleset(BaseModel):
     lives here rather than on the `EXEMPTS_ACTOR` edge because when the answer is
     *none* or *unknown* there are no edges to carry it.
 
+    Reconciliation (github-core#14 shape B, github-core#151): enumerable per repository, but
+    NOT contained by any one of them — one organization ruleset protects many repositories and
+    ``PROTECTS_REPOSITORY`` points ruleset -> repository. No containment edge reaches it, so it
+    is not a retirement candidate under this vocabulary; declaring one would need an account- or
+    repository-owned edge INTO the ruleset (tracked under github-core#151's follow-ups).
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-rulesets)
     """
 

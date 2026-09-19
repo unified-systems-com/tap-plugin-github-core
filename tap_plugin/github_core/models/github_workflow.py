@@ -14,6 +14,15 @@ class GithubWorkflow(BaseModel):
     permissions, the raw YAML body (`configuration.raw_yaml`), and other
     extracted fields per req-github-core-workflow-parse.
 
+    Reconciliation (github-core#14 shape A, github-core#151): git-provable. The workflow is a
+    file under ``.github/workflows/`` at HEAD, so its removal is a commit — positive evidence,
+    not an inference from a listing. The falsifier reads the file at HEAD and resolves the
+    Actions workflow id behind it (``tap_plugin.github_core.falsifiers.WorkflowFalsifier``).
+
+    A workflow CONTAINS the jobs declared inside it (``DEFINES_JOB``): they are falsifiable at
+    the granularity of the file that declares them. Its runs are NOT contained — ``EXECUTES_WORKFLOW``
+    is run -> workflow, and a run is a shape-C immutable event that never retires on absence.
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-models)
     """
 
@@ -36,6 +45,16 @@ class GithubWorkflow(BaseModel):
             "colors": {"fill": "#DAFBE1", "border": "#1A7F37", "label": "#0A3622"},
         }
     }
+
+    # Edge permission (union with the edge definitions' own sources/targets): declared so the
+    # containment declaration below can name it (req-grid-service-delete-cascade-12). CALLS_WORKFLOW,
+    # TRIGGERS_WORKFLOW, REFERENCES_SECRET and the rest stay permitted by their `.edge.json` sources.
+    OUTBOUND_EDGES: ClassVar[list[dict[str, Any]]] = [
+        {"nodes": [{"type": "github_core__workflow_job"}], "edges": [{"type": "DEFINES_JOB__github_core"}]},
+    ]
+    #: The declared jobs retire with the file that declares them; `workflow.jobs` is the listing
+    #: surface the collector records completeness for under a workflow.
+    CONTAINMENT_EDGES: ClassVar[tuple[str, ...]] = ("DEFINES_JOB__github_core",)
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
         "full_name": {"type": "string", "minLength": 1},

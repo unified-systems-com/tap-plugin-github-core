@@ -13,6 +13,13 @@ class GithubActionsRun(BaseModel):
     v0 models a single observation per run_id (latest attempt). Multi-attempt
     tracking is deferred to req-github-core-backlog-run-attempts.
 
+    Reconciliation (github-core#14 shape C, github-core#151): an IMMUTABLE EVENT. The run
+    happened and does not stop having happened; absence from a listing means the retention
+    window expired, never that anything was deleted. Deliberately NOT a containment target
+    (no model declares an edge INTO it in ``CONTAINMENT_EDGES``) and it declares no falsifier —
+    so it is never a retirement candidate and never retired on absence. ``RUNS_JOB`` (run ->
+    job) is likewise not containment: the jobs are events of the same shape.
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-models)
     """
 

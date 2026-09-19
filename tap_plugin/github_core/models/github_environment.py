@@ -15,6 +15,13 @@ from tap_grid.models import BaseModel
 class GithubEnvironment(BaseModel):
     """A repository environment: reviewers, wait timer, and branch policy.
 
+    Reconciliation (github-core#14 shape B, github-core#151): contained by its repository
+    through ``DECLARES_ENVIRONMENT`` (declared on ``GithubRepository.CONTAINMENT_EDGES``) and
+    reconcilable only under a complete walk of ``repository.environments``. The falsifier
+    probes ``GET /repos/{owner}/{repo}/environments/{name}`` and compares the numeric id
+    (``tap_plugin.github_core.falsifiers.EnvironmentFalsifier``). Declares no containment of
+    its own: the secrets scoped to it are references.
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-environments)
     """
 

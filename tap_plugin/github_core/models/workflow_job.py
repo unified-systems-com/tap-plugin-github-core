@@ -23,6 +23,12 @@ class WorkflowJob(BaseModel):
     different forge declares jobs too, so this type moves to the neutral
     substrate when one is extracted. It lives in `github_core` until then.
 
+    Reconciliation (github-core#14 shape A, github-core#151): git-provable at the granularity
+    of the file that declares it — contained by its workflow through ``DEFINES_JOB`` (declared on
+    ``GithubWorkflow.CONTAINMENT_EDGES``). The falsifier reads the workflow file at HEAD and
+    looks for the job key (``tap_plugin.github_core.falsifiers.WorkflowJobFalsifier``). The
+    executions that instantiate it (``github_actions_job``, shape C) are not contained here.
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md
     (req-github-core-declared-jobs)
     """

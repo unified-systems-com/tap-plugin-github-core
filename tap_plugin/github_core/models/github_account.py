@@ -10,6 +10,13 @@ from tap_grid.models import BaseModel
 class GithubAccount(BaseModel):
     """A GitHub account (user or organization).
 
+    Reconciliation (github-core#14 shape D, github-core#151): an account is never retired on
+    absence — it stops mattering when its last repository does. It CONTAINS its repositories:
+    ``OWNS_REPO`` is the one edge the cascade, the collector's descent and the falsifier's
+    fan-out all read (``CONTAINMENT_EDGES``, req-grid-service-delete-cascade). Everything else
+    leaving an account (secrets, packages, custom properties) is a reference, not containment,
+    and stays live when the account goes.
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-models)
     """
 
@@ -30,6 +37,18 @@ class GithubAccount(BaseModel):
             "label": {"valign": "top", "halign": "center", "position": "outside"},
         }
     }
+
+    # Edge permission (union with the edge definitions' own sources/targets): declared so the
+    # containment declaration below can name it — containment is a subset of permission
+    # (req-grid-service-delete-cascade-12). Every other outbound edge type is still permitted by
+    # its `.edge.json` sources; this list constrains nothing it does not name.
+    OUTBOUND_EDGES: ClassVar[list[dict[str, Any]]] = [
+        {"nodes": [{"type": "github_core__github_repository"}], "edges": [{"type": "OWNS_REPO__github_core"}]},
+    ]
+    #: What retires with this account, and what the account's repository listing is a surface OF
+    #: (completeness `edge_type`, candidates fan-out). Shape B children: a repository is
+    #: reconcilable only under a proven-complete, unfiltered walk of `account.repositories`.
+    CONTAINMENT_EDGES: ClassVar[tuple[str, ...]] = ("OWNS_REPO__github_core",)
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
         "login": {"type": "string", "minLength": 1},

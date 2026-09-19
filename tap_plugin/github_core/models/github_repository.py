@@ -10,6 +10,26 @@ from tap_grid.models import BaseModel
 class GithubRepository(BaseModel):
     """A GitHub repository.
 
+    Reconciliation (github-core#14 shape B, github-core#151): an enumerable platform object.
+    Absence from the account's repository listing is evidence only under a proven-complete,
+    unfiltered walk, and even then it has four causes (deleted, made private, transferred,
+    access narrowed) — so the repository falsifier probes ``GET /repos/{owner}/{repo}`` and
+    compares the stable numeric id and the owner login before anything is concluded
+    (``tap_plugin.github_core.falsifiers.RepositoryFalsifier``).
+
+    A repository CONTAINS its workflow files (``DEFINES_WORKFLOW``, shape A: the file at HEAD)
+    and its deployment environments (``DECLARES_ENVIRONMENT``, shape B). Two relations #14
+    lists under the repository are deliberately NOT declared here:
+
+    - rulesets: ``PROTECTS_REPOSITORY`` points ruleset -> repository, and one organization
+      ruleset protects many repositories; it is not contained by any one of them.
+    - refs: a ref hangs off the neutral ``git_core__git_repository`` through git_core's own
+      ``DECLARES_REF`` — that containment is git_core's declaration, not this hosting record's.
+
+    Runs (``EXECUTES_WORKFLOW`` is run -> workflow, shape C), releases, artifacts, caches,
+    secrets, alerts and pull requests are references or immutable events: none retires with
+    the repository through the cascade, and none is a candidate surface.
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-models)
     """
 
@@ -35,6 +55,24 @@ class GithubRepository(BaseModel):
     CUSTOM_PROPERTIES_OBSERVED = "observed"
     #: The credential could not read them; `custom_properties` must not be rendered as "none set".
     CUSTOM_PROPERTIES_UNOBSERVABLE = "unobservable"
+
+    # Edge permission (union with the edge definitions' own sources/targets): declared so the
+    # containment declaration below can name them (req-grid-service-delete-cascade-12). Every
+    # other outbound edge type (HOSTS_REPOSITORY, DEFINES_SECRET, PUBLISHES_RELEASE, ...) is
+    # still permitted by its `.edge.json` sources; this list constrains nothing it does not name.
+    OUTBOUND_EDGES: ClassVar[list[dict[str, Any]]] = [
+        {"nodes": [{"type": "github_core__github_workflow"}], "edges": [{"type": "DEFINES_WORKFLOW__github_core"}]},
+        {
+            "nodes": [{"type": "github_core__github_environment"}],
+            "edges": [{"type": "DECLARES_ENVIRONMENT__github_core"}],
+        },
+    ]
+    #: What retires with this repository, and the two listing surfaces the collector records
+    #: completeness for under it: `repository.workflows` and `repository.environments`.
+    CONTAINMENT_EDGES: ClassVar[tuple[str, ...]] = (
+        "DEFINES_WORKFLOW__github_core",
+        "DECLARES_ENVIRONMENT__github_core",
+    )
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
         "full_name": {"type": "string", "minLength": 1},
