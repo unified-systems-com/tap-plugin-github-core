@@ -96,10 +96,20 @@ def probe_status_of(exc: GithubAPIError) -> str:
     return "errored"
 
 
+#: What a 404 from GitHub does and does not say, stated on the record itself: GitHub answers 404
+#: both for an object that is gone and for a private one this credential may not see. The verdict
+#: core derives from ``not_found`` is "gone from this credential's view" — which is all a listing
+#: under the same credential ever claimed — and the residual (access narrowed between the listing
+#: and the probe) is the reconcile verb's freshness fence to hold, not something a probe can tell.
+NOT_FOUND_DETAIL = "HTTP 404 (GitHub also answers 404 for a private object this credential may not see)"
+
+
 def _failed_probe(exc: GithubAPIError) -> Probe:
     """A probe that did not find, or could not answer. ``detail`` is the status line only:
     never the body (``Probe.detail`` contract)."""
-    return Probe(status=probe_status_of(exc), detail=f"HTTP {exc.status}")  # type: ignore[arg-type]
+    status = probe_status_of(exc)
+    detail = NOT_FOUND_DETAIL if status == "not_found" else f"HTTP {exc.status}"
+    return Probe(status=status, detail=detail)  # type: ignore[arg-type]
 
 
 def _created_at(payload: dict[str, Any]) -> datetime | None:
@@ -137,7 +147,7 @@ def _decode_file(payload: dict[str, Any]) -> str:
         return ""
     try:
         return base64.b64decode(encoded).decode("utf-8")
-    except ValueError, UnicodeDecodeError:
+    except (ValueError, UnicodeDecodeError):
         return ""
 
 

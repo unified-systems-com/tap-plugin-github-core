@@ -127,12 +127,8 @@ class TestOneRunAgainstTheFakeGithub:
         fake = _fake_rest()
         monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: _Secret())
         monkeypatch.setattr(collector_module, "GithubClient", lambda **kw: fake)
-        monkeypatch.setattr(
-            GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([_config_repo()], [])
-        )
-        monkeypatch.setattr(
-            GithubGraphQLClient, "fetch_pull_request_layer", lambda self, login: ({}, [])
-        )
+        monkeypatch.setattr(GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([_config_repo()], []))
+        monkeypatch.setattr(GithubGraphQLClient, "fetch_pull_request_layer", lambda self, login: ({}, []))
 
         job = run_collection(_register())
         job.refresh_from_db()
@@ -178,6 +174,59 @@ class TestOneRunAgainstTheFakeGithub:
         # NOT OBSERVED: the reconcile verb (tap#652) is not in this plugin's core pin, so no
         # verdict record exists to assert on. Recorded as absent, not as "no verdicts".
         assert verdicts_of(batch) is None
+
+
+@pytest.mark.django_db(transaction=True)
+class TestAFailedRepositoryDoesNotLeaveAnAdmittedSurface:
+    """Codex on PR# 154: a repository that lists its workflows and then fails part-way must not
+    leave a complete, admitted `repository.workflows` surface behind for candidates to be
+    derived from — its children never all reached the batch."""
+
+    @pytest.mark.spec("req-grid-reconcile-evidence-6")
+    def test_the_failed_repository_surfaces_are_not_admitted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        with isolated_registry(collector_registry):
+            self._run_and_assert(monkeypatch)
+
+    @staticmethod
+    def _run_and_assert(monkeypatch: pytest.MonkeyPatch) -> None:
+        fake = _fake_rest()
+        broken = "acme/broken"
+        fake.answer(
+            f"/repos/{broken}/actions/workflows",
+            {"workflows": [{"id": 200, "path": ".github/workflows/ci.yml", "name": "ci", "state": "active"}]},
+        )
+        fake.refuse(f"/repos/{broken}/actions/runs", 502)  # after the workflows listing, before the runs
+        second = {**_config_repo(), "nameWithOwner": broken, "name": "broken", "databaseId": 11}
+        monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: _Secret())
+        monkeypatch.setattr(collector_module, "GithubClient", lambda **kw: fake)
+        monkeypatch.setattr(
+            GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([_config_repo(), second], [])
+        )
+        monkeypatch.setattr(GithubGraphQLClient, "fetch_pull_request_layer", lambda self, login: ({}, []))
+
+        job = run_collection(_register())
+        job.refresh_from_db()
+        assert job.status == CollectionJobStatus.SUCCESSFUL.value, job.summary
+        statement = completeness_of(_lifecycle_batch(job))
+        assert statement is not None
+        by_key = {(s["relation"], s["subject"]): s for s in statement["surfaces"]}
+        healthy = by_key[("repository.workflows", str(repository_id(REPO)))]
+        failed = by_key[("repository.workflows", str(repository_id(broken)))]
+        assert healthy["admitted"] is True and healthy["reconcilable"] is True
+        assert failed["enumeration_complete"] is True, "the listing itself was read to the end"
+        assert failed["admitted"] is False and failed["reconcilable"] is False
+        assert failed["reasons"]["admitted"].startswith("collection_failed: acme/broken")
+        for relation in ("repository.environments", "workflow.jobs"):
+            broken_surfaces = [s for k, s in by_key.items() if k[0] == relation and s["admitted"] is False]
+            assert broken_surfaces, f"{relation}: the failed repository's surface is withdrawn too"
+        account = by_key[("account.repositories", str(account_id(OWNER)))]
+        assert account["admitted"] is False and account["reasons"]["admitted"].startswith("collection_partial")
+        record = candidates_of(_lifecycle_batch(job))
+        assert record is not None
+        skipped = {e["subject"]: e["reason"] for e in record["surfaces"] if e["outcome"] == "skipped"}
+        assert (
+            str(repository_id(broken)) in skipped and "surface_not_reconcilable" in skipped[str(repository_id(broken))]
+        )
 
 
 class TestListingContract:

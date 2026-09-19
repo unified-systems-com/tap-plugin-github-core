@@ -1104,6 +1104,7 @@ class GithubCollector(CollectorBase):
         # --- collection phase: per-repo walk ---
         failed: list[str] = []
         for full_name in repos:
+            listings_before = len(self._listing_state()["listings"])
             try:
                 self._collect_repo(
                     client, full_name, run_limit, nodes, edges, platform_uuid
@@ -1114,6 +1115,14 @@ class GithubCollector(CollectorBase):
                 # transient timeout is a certainty, and aborting throws away every repo that
                 # DID collect. The run continues and reports honestly instead.
                 failed.append(full_name)
+                # The surfaces this repository recorded before it failed were listed, but their
+                # children never all reached processing: not admitted, so nothing is derived
+                # from them (Codex on PR# 154 - tap-plugin-github-core).
+                self._withdraw_admission(
+                    listings_before,
+                    f"collection_failed: {full_name} failed after this listing was read (HTTP {exc.status}); "
+                    "its children did not all reach processing",
+                )
                 self.record_warn(
                     _SITE_REPO_FAILED,
                     f"REPO_FAILED_{exc.status}",
@@ -3692,6 +3701,18 @@ class GithubCollector(CollectorBase):
                 "reasons": reasons,
             }
         )
+
+    def _withdraw_admission(self, start: int, reason: str) -> None:
+        """Mark every surface recorded from index ``start`` on as not admitted, with ``reason``.
+
+        A listing that was read completely but whose walk then failed part-way did not pass its
+        gate: the observations it licensed never all reached the batch, and a candidate derived
+        against the ones that did would name children the run simply never got to.
+        """
+        for surface in self._listing_state()["listings"][start:]:
+            if surface["admitted"]:
+                surface["admitted"] = False
+                surface["reasons"]["admitted"] = reason
 
     def _listing_state(self) -> dict[str, Any]:
         """The completeness registers (`_listings`, `_config_interval`), created on first touch —

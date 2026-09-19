@@ -121,7 +121,7 @@ class TestRepositoryFalsifier:
         _assert_evidence_supports(verdicts)
         assert verdicts[CASE_PRESENT].expected == {"source_id": "1", "owner": "acme", "name": "acme/present"}
         assert _probe(verdicts[CASE_PRESENT])["owner"] == "acme"
-        assert _probe(verdicts[CASE_DROPPED])["detail"] == "HTTP 404"
+        assert _probe(verdicts[CASE_DROPPED])["detail"].startswith("HTTP 404 (GitHub also answers 404")
         assert sorted(fake.calls) == [
             "/repos/acme/dropped",
             "/repos/acme/forbidden",
