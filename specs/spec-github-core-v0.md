@@ -1314,6 +1314,14 @@ record says so rather than assuming the credential could look:
   introspect itself, and with no organization there is no org-side listing. Every 404 it receives
   stays undetermined, by design.
 
+**The residual, named rather than implied.** The reach is read at two points in a run and the
+source can change after the second one. Nothing a probe can do closes that: any check happens at
+some instant and the world moves afterwards. What the design does is make the last reading later
+than every probe it judges, so a change that could have caused any of the run's 404s is caught.
+A change that happens after the final reading is not caught, and the honest statement is that
+this is bounded rather than eliminated. The reconcile verb's own fence does not help here, for
+the reason recorded at `NOT_FOUND_DETAIL`.
+
 **Known gap, and the gate it must pass before arming.** Repository membership does not prove
 permission to read what is INSIDE the repository. An installation can keep `metadata` and lose
 `actions`, and where GitHub conceals that with a 404 rather than a 403, the parent probe answers
@@ -1330,7 +1338,7 @@ refused → the child says nothing.
 
 | RID | Requirement | Status | Behaviour | Verification |
 | --- | --- | --- | --- | --- |
-| req-github-core-falsifier-reach-1 | Reach Resolved Per Run | In Development | The falsifier resolves the credential's reach once per run; an App reads `repository_selection` and, when `selected`, walks `/installation/repositories`. A refused or failed walk is `unknown`, never an empty set. | `reach.py` unit assertions: a failed walk yields `unknown`; `selected` compares by numeric id and by lower-cased `owner/name`. |
+| req-github-core-falsifier-reach-1 | Reach Resolved Per Run | In Development | The falsifier resolves the credential's reach once per run; an App reads `repository_selection` and, when `selected`, walks `/installation/repositories`. A refused or failed walk is `unknown`, never an empty set — an empty listing is an observation and a refusal is not, and the two must not resolve alike. | `tests/test_falsifiers.py::TestReachWalk`: a refused walk and a raising walk each yield `unknown` with no repository set; an empty successful walk yields `selected` with an empty set that answers no rather than cannot-say; a walked listing compares by numeric id and by lower-cased `owner/name`. |
 | req-github-core-falsifier-reach-2 | Outside The Reach Never Drops | In Development | A `not_found` on a repository the reach does not hold is `UNDETERMINED(scope_unknown)`, never `DROPPED_FROM_OBSERVATION`. | `tests/test_falsifiers.py::TestReachJudgement::test_out_of_reach_a_404_is_undetermined_not_dropped`. |
 | req-github-core-falsifier-reach-3 | An Unobservable Reach Never Drops | In Development | Where the reach could not be read at all — a PAT run today, a user-owned fine-grained token forever — every 404 is `UNDETERMINED(scope_unknown)`, with the reason on the note. | `TestReachJudgement::test_an_unobservable_reach_never_drops`; `::test_a_falsifier_with_no_credential_behind_its_client_has_no_reach` proves the default is fail-closed. |
 | req-github-core-falsifier-reach-5 | `all` Is One Account's Boundary | In Development | An installation reporting `repository_selection: all` holds every repository of the account it is installed on, and no other. A repository under a different owner is outside the installation, so its 404 is not evidence of absence. An installation that reports `all` but names no account has no boundary to test and its reach is `unknown`. | `tests/test_falsifiers.py::TestReachBoundary`. Introduced on PR# 161. |

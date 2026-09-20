@@ -672,3 +672,62 @@ class TestReachIsReadAgainAfterTheProbe:
         verdicts = falsifier.batch_falsify(candidates, _context())
         assert [v.verdict for v in verdicts] == [DROPPED_FROM_OBSERVATION] * 2
         assert not sessions, "one opening session and one second reading, for two absences"
+
+
+class TestReachWalk:
+    """A failed walk is not an empty reach — the distinction the whole gate rests on.
+
+    `_walk_installation_repositories` returns None on failure and `resolve_reach` turns that into
+    `unknown`. If it instead produced an empty selected set, every repository would read as out of
+    reach, which is fail-closed and merely wrong — but the inverse framing matters more: an empty
+    set is an OBSERVATION, and conflating it with a refusal is how "we could not look" becomes a
+    statement about the world. These cases assert the two resolve differently.
+    """
+
+    class _Selected:
+        has_app = True
+        has_pat = False
+        installation = {"repository_selection": "selected", "account": {"login": "acme"}}
+
+    def test_a_refused_walk_is_unknown_not_empty(self) -> None:
+        fake = FakeGithub()
+        fake.refuse("/installation/repositories", 403)
+        reach = resolve_reach(self._Selected(), fake)
+        assert reach.selection == SELECTION_UNKNOWN
+        assert reach.repository_ids is None, "unobserved, never an empty set"
+        assert reach.holds_repository(full_name="acme/app") is None, "cannot say, not no"
+
+    def test_a_broken_walk_is_unknown(self) -> None:
+        """Anything the walk raises resolves to unobserved; a reach that could not be read must
+        not become a reach that is empty."""
+
+        class _Broken:
+            def get_paginated(self, path: str, **kwargs: Any) -> Any:
+                raise RuntimeError("connection reset")
+
+        reach = resolve_reach(self._Selected(), _Broken())
+        assert reach.selection == SELECTION_UNKNOWN
+        assert reach.repository_ids is None
+
+    def test_an_empty_successful_walk_is_observed_and_holds_nothing(self) -> None:
+        """The other side of the same distinction: an installation that names no repositories is
+        an observation, and it answers no rather than cannot-say."""
+        fake = FakeGithub()
+        fake.answer("/installation/repositories", {"repositories": [], "total_count": 0})
+        reach = resolve_reach(self._Selected(), fake)
+        assert reach.selection == SELECTION_SELECTED
+        assert reach.repository_ids == frozenset()
+        assert reach.holds_repository(full_name="acme/app", github_id=1) is False
+
+    def test_a_walked_listing_is_compared_by_id_and_by_lower_cased_name(self) -> None:
+        fake = FakeGithub()
+        fake.answer(
+            "/installation/repositories",
+            {"repositories": [{"id": 7, "full_name": "Acme/App"}, {"id": None, "full_name": ""}]},
+        )
+        reach = resolve_reach(self._Selected(), fake)
+        assert reach.repository_ids == frozenset({7})
+        assert reach.repository_names == frozenset({"acme/app"})
+        assert reach.holds_repository(github_id=7) is True
+        assert reach.holds_repository(full_name="acme/app") is True
+        assert reach.holds_repository(full_name="acme/other") is False
