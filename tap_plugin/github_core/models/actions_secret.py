@@ -51,7 +51,7 @@ class ActionsSecret(BaseModel):
     ENTITY_ICON: ClassVar[str] = "github-secret"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "secrets",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

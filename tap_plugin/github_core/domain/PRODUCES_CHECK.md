@@ -57,4 +57,4 @@ Emitted only toward a [`status_check`](status_check.md) node (a context some rul
 
 - **Source:** `github_core__github_workflow` — the workflow declaring the producing job.
 - **Target:** `github_core__status_check` — the required context.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration`, plus the workflow's own `github.owner` / `github.repo` — the production is that repository's fact, which is what lets a query find the repositories where a shared requirement has no producer.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: declaration`, plus the workflow's own `github.owner` / `github.repo` — the production is that repository's fact, which is what lets a query find the repositories where a shared requirement has no producer.

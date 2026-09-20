@@ -55,5 +55,5 @@ Observed 2026-09-10 on `unified-systems-com`: **5 edges** — 2 from the account
 
 - **Sources:** `github_core__github_repository`, `github_core__github_account`, `github_core__github_environment` — the three things that can hold an Actions secret.
 - **Target:** `github_core__actions_secret`.
-- **Dimensions:** `github.platform`, `github.surface: secrets`, `github.observation: declaration`.
+- **Dimensions:** `git.host`, `github.surface: secrets`, `github.observation: declaration`.
 - **Properties:** none. The scope lives on the node, where it is part of identity, rather than being derived a second time here.

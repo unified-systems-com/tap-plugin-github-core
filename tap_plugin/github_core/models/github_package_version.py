@@ -29,7 +29,7 @@ class GithubPackageVersion(BaseModel):
     )
     ENTITY_ICON: ClassVar[str] = "github-package-version"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "packages",
         "github.observation": "execution",
     }

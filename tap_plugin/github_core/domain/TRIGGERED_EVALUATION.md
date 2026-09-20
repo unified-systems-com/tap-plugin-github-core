@@ -54,5 +54,5 @@ Populated from the rule-suite listing at **`repository:administration:read`**: `
 
 - **Source:** `github_core__github_account` — the account that pushed.
 - **Target:** `github_core__rule_suite` — the evaluation its push triggered.
-- **Dimensions:** `github.platform`, `github.surface: rules`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: rules`, `github.observation: execution`.
 - **Properties:** `actor_id` — GitHub's numeric account id at the time of the push, so a login rename is detectable.

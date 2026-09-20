@@ -50,4 +50,4 @@ Not covered: the enterprise account that may sit between an instance and an orga
 
 - **Source:** `github_core__github_platform` — the instance.
 - **Target:** `github_core__github_account` — the user or organization.
-- **Dimensions:** `github.platform`, `github.observation: declaration`. No `github.surface`, because containment is not a fact about any one product surface.
+- **Dimensions:** `git.host`, `github.observation: declaration`. No `github.surface`, because containment is not a fact about any one product surface.

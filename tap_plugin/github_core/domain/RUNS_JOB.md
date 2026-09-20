@@ -54,4 +54,4 @@ Derived from `GET /repos/{o}/{r}/actions/runs/{run_id}/jobs` at **`repository:ac
 
 - **Source:** `github_core__github_actions_run`.
 - **Target:** `github_core__github_actions_job`.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: execution`.

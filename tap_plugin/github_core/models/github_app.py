@@ -35,7 +35,7 @@ class GithubApp(BaseModel):
     )
     ENTITY_ICON: ClassVar[str] = "github-app"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "apps",
         "github.observation": "declaration",
     }

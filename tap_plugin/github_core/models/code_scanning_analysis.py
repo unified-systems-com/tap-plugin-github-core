@@ -36,7 +36,7 @@ class CodeScanningAnalysis(BaseModel):
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         # A scanner RAN: an execution in the same category as a workflow run.
         "github.observation": "execution",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "security",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

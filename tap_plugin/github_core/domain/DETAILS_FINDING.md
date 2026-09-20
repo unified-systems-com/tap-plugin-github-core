@@ -53,5 +53,5 @@ Emitted by the collector from the same alert read that minted both endpoints (`r
 
 - **Source:** `github_core__code_scanning_alert` (v0; `dependabot_alert` and a secret-scanning detail join the source list when built)
 - **Target:** `compliance_core__compliance_finding`
-- **Dimensions:** `github.platform`, `github.surface: security`, `github.observation: execution` — the alert is a scanner's recorded assertion, an event, not a declared configuration.
+- **Dimensions:** `git.host`, `github.surface: security`, `github.observation: execution` — the alert is a scanner's recorded assertion, an event, not a declared configuration.
 - **Properties:** none — 1:1 by construction; the facts are on the two nodes.

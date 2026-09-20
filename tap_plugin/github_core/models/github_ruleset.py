@@ -46,7 +46,7 @@ class GithubRuleset(BaseModel):
     ENTITY_ICON: ClassVar[str] = "github-ruleset"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "rules",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

@@ -47,5 +47,5 @@ Emitted from the analyses read (`repository:security_events:read`) for every ana
 
 - **Source:** `github_core__code_scanning_analysis`
 - **Target:** `github_core__github_repository`
-- **Dimensions:** `github.platform`, `github.surface: security`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: security`, `github.observation: execution`.
 - **Properties:** none — the ref, commit, tool and category are on the analysis node.

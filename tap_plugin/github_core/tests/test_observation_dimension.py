@@ -127,10 +127,10 @@ class TestLinkEdgeDerivation:
         """req-github-core-dimensions-6: derived from the source model, not a second map."""
         from tap_plugin.github_core.collectors.github_collector.enrichment import _dimensions_for_rule
 
-        base = {"github.platform": "github.com"}
+        base = {"git.host": "github.com"}
         declaration = _dimensions_for_rule(base, "github_core__github_workflow")
         execution = _dimensions_for_rule(base, "github_core__github_actions_run")
 
         assert declaration["github.observation"] == "declaration"
         assert execution["github.observation"] == "execution"
-        assert base == {"github.platform": "github.com"}, "the base dimensions must not be mutated"
+        assert base == {"git.host": "github.com"}, "the base dimensions must not be mutated"

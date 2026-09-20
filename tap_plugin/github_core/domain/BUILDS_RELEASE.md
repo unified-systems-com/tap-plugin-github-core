@@ -51,5 +51,5 @@ Derived after the run window and the config layer are both in hand, at no extra 
 
 - **Source:** `github_core__github_actions_run` — the run inferred to have produced the release.
 - **Target:** `github_core__github_release` — the release.
-- **Dimensions:** `github.platform`, `github.surface: releases`, `github.observation: execution` — the layer follows the source, which is an execution.
+- **Dimensions:** `git.host`, `github.surface: releases`, `github.observation: execution` — the layer follows the source, which is an execution.
 - **Properties:** `match_kind` (`tag_ref` | `same_commit` — how the run was matched), `head_sha` (the run's commit at match time, so the edge is checkable without re-reading either node).

@@ -54,4 +54,4 @@ Under account scope the pairing follows the enumeration walk (`GET /orgs/{owner}
 
 - **Source:** `github_core__github_account` — user or organization.
 - **Target:** `github_core__github_repository`.
-- **Dimensions:** `github.platform`, `github.observation: declaration`. No `github.surface` — ownership is not a fact about any one product surface.
+- **Dimensions:** `git.host`, `github.observation: declaration`. No `github.surface` — ownership is not a fact about any one product surface.

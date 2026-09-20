@@ -9,7 +9,7 @@
     "github_core__github_ruleset"
   ],
   "default_dimensions": {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.surface": "rules",
     "github.observation": "execution"
   },

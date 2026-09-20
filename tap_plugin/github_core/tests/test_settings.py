@@ -338,7 +338,7 @@ def _emit(c: GithubCollector, client: Any, full_name: str) -> tuple[list[dict[st
     c._emit_environments(
         full_name,
         repository_id(full_name),
-        {"github.platform": "github.com", "github.owner": _ORG, "github.repo": "widget"},
+        {"git.host": "github.com", "github.owner": _ORG, "github.repo": "widget"},
         nodes,
         edges,
         client=client,

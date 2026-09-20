@@ -28,7 +28,6 @@ tap_plugin/github_core/domain/app_installation.md::node:github_core__app_install
 tap_plugin/github_core/domain/DEFINES_JOB.md::edge:DEFINES_JOB__github_core::missing-article
 tap_plugin/github_core/domain/DEPENDS_ON_JOB.md::edge:DEPENDS_ON_JOB__github_core::missing-article
 tap_plugin/github_core/domain/dimensions/github.surface.md::dimension:github.surface::undocumented-value:deployments
-tap_plugin/github_core/domain/dimensions/github.surface.md::dimension:github.surface::undocumented-value:git
 tap_plugin/github_core/domain/github_app.md::node:github_core__github_app::undocumented-field:client_id
 tap_plugin/github_core/domain/github_environment.md::node:github_core__github_environment::missing-article
 tap_plugin/github_core/domain/STORES_CACHE.md::edge:STORES_CACHE__github_core::missing-article

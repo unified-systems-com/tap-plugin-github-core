@@ -44,5 +44,5 @@ Emitted from the config-layer read; present when the head commit was emitted in 
 
 - **Source:** `github_core__pull_request`
 - **Target:** `git_core__git_commit`
-- **Dimensions:** `github.platform`, `github.surface: pulls`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: pulls`, `github.observation: execution`.
 - **Properties:** none — the head SHA lives on the pull request and the commit carries its own facts; an edge property would be a third copy.

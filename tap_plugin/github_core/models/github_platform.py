@@ -28,7 +28,7 @@ class GithubPlatform(BaseModel):
     )
     ENTITY_ICON: ClassVar[str] = "github-platform"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.observation": "declaration",
     }
     # GitHub family palette: a cool blue/neutral scheme that reads as "external

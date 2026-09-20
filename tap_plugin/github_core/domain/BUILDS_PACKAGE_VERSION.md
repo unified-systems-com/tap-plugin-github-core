@@ -50,5 +50,5 @@ Derived after the packages pass, against the run index of the repository GitHub 
 
 - **Source:** `github_core__github_actions_run` — the run derived to have built the version.
 - **Target:** `github_core__github_package_version` — the version.
-- **Dimensions:** `github.platform`, `github.surface: packages`, `github.observation: execution` — the layer follows the source, which is an execution.
+- **Dimensions:** `git.host`, `github.surface: packages`, `github.observation: execution` — the layer follows the source, which is an execution.
 - **Properties:** `match_kind` (`tag_sha` — the only derivation implemented), `attested` (`true` | `false` | `null`; null until an attestation surface reads it — never `false` by default, which would be a claim).

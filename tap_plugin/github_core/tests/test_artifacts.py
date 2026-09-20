@@ -83,7 +83,7 @@ def _collect(client: _Client, runs_in_batch: set[int]) -> tuple[GithubCollector,
     nodes: list[dict] = []
     edges: list[dict] = []
     run_index = [{"run_id": r, "uuid": run_id("o/r", r), "head_sha": "", "head_branch": "", "event": ""} for r in runs_in_batch]
-    c._collect_artifacts(client, "o/r", repository_id("o/r"), {"github.platform": "github.com"}, run_index, nodes, edges, {})  # type: ignore[arg-type]
+    c._collect_artifacts(client, "o/r", repository_id("o/r"), {"git.host": "github.com"}, run_index, nodes, edges, {})  # type: ignore[arg-type]
     return c, nodes, edges
 
 

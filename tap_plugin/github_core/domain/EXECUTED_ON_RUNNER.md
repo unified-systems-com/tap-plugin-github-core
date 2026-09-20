@@ -62,4 +62,4 @@ This is the same failure shape the corpus settled empirically for ruleset bypass
 
 - **Source:** `github_core__github_actions_job` — the execution that observed a runner.
 - **Target:** `github_core__github_runner` — the durable registration.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: execution`.

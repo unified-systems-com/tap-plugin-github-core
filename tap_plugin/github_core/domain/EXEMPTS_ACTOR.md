@@ -68,5 +68,5 @@ Three things follow, and only the first was previously understood:
 
 - **Source:** `github_core__github_ruleset` — the gate that declares the exemption.
 - **Target:** `github_core__github_app` (and other actor types as they gain nodes) — the actor it exempts.
-- **Dimensions:** `github.platform`, `github.surface: rules`, `github.observation: declaration`.
+- **Dimensions:** `git.host`, `github.surface: rules`, `github.observation: declaration`.
 - **Properties:** `actor_type`, `bypass_mode` (`always` or `pull_request`), `observable` (whether the list was actually read), `source` (which transport answered).

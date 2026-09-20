@@ -51,7 +51,7 @@ _LEDGER = json.loads((_COLLECTOR / "github_app_permissions.json").read_text())
 
 _REPO = "unified-systems-com/tap"
 _DIMS = {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.owner": "unified-systems-com",
     "github.repo": "tap",
     "github.surface": "security",

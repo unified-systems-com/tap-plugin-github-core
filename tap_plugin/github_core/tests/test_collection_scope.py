@@ -173,7 +173,7 @@ class TestEmission:
         job = c.config.collection_job_entity_id
         assert node["entity"]["entity_type"] == "github_core__collection_scope"
         assert envelope_key(node) == str(collection_scope_id(job))
-        assert node["entity"]["dimensions"] == {"github.platform": "github.com", "github.observation": "execution"}
+        assert node["entity"]["dimensions"] == {"git.host": "github.com", "github.observation": "execution"}
         assert node["node"]["run_id"] == str(job)
         assert node["node"]["observed_at"] == "2026-09-14T12:00:00Z"
         assert node["node"]["credential_kinds"] == ["app"]
@@ -182,7 +182,7 @@ class TestEmission:
         assert edge["edge"]["edge_type"] == "SCOPES_RUN__github_core"
         assert edge_from(edge) == envelope_key(node)
         assert edge_to(edge) == str(job)
-        assert batch["batch_entity"]["dimensions"] == {"github.platform": "github.com", "github.owner": "acme"}
+        assert batch["batch_entity"]["dimensions"] == {"git.host": "github.com", "github.owner": "acme"}
         # The id is core's, not the collector's: what the collector keeps is what the import
         # result told it the ref became, and that is a UUIDv7 nothing here can predict.
         assert isinstance(c._scope_uuid, UUID) and c._scope_uuid.version == 7

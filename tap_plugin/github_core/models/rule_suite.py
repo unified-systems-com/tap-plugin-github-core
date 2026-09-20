@@ -46,7 +46,7 @@ class RuleSuite(BaseModel):
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         # An execution, not a declaration: this is something that HAPPENED, like a run.
         "github.observation": "execution",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "rules",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

@@ -44,5 +44,5 @@ Emitted from the config-layer read; present only when `headRepository.nameWithOw
 
 - **Source:** `github_core__pull_request`
 - **Target:** `git_core__git_ref`
-- **Dimensions:** `github.platform`, `github.surface: pulls`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: pulls`, `github.observation: execution`.
 - **Properties:** `ref_name` — the branch name as the pull request names it, without the `refs/heads/` prefix, so the edge reads without dereferencing the ref.

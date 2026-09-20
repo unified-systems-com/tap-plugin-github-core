@@ -300,7 +300,7 @@ class CollectionScope(BaseModel):
     ENTITY_ICON: ClassVar[str] = "collection-scope"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "execution",
-        "github.platform": "github.com",
+        "git.host": "github.com",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {
         "tap_viz": {

@@ -54,4 +54,4 @@ The resolution is exact, not inferred: the run names the numeric workflow id, an
 
 - **Source:** `github_core__github_actions_run` — the execution.
 - **Target:** `github_core__github_workflow` — the declaration.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: execution`. The observation dimension is the machine-legible marker that this edge's source is an observed event rather than a declared structure.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: execution`. The observation dimension is the machine-legible marker that this edge's source is an observed event rather than a declared structure.

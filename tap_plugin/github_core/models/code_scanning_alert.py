@@ -43,7 +43,7 @@ class CodeScanningAlert(BaseModel):
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         # An alert is the OUTPUT of a scanner run — something that happened, like a run.
         "github.observation": "execution",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "security",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

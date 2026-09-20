@@ -54,5 +54,5 @@ Derived from two reads the run already makes — the installation chosen at toke
 
 - **Source:** `github_core__collection_scope`.
 - **Target:** `github_core__app_installation`.
-- **Dimensions:** `github.platform`, `github.surface: apps`, `github.observation: execution` — the layer follows the source (a run's statement), the surface follows the target.
+- **Dimensions:** `git.host`, `github.surface: apps`, `github.observation: execution` — the layer follows the source (a run's statement), the surface follows the target.
 - **Properties:** none. The grant as read lives on the scope; the grant as it is lives on the installation.
