@@ -67,6 +67,7 @@ from tap_plugin.github_core.collectors.github_collector.parser import parse_work
 from tap_plugin.github_core.collectors.github_collector.secret import api_base_url, resolve_github_secret
 
 from tap_grid.falsifiers import (
+    DROPPED_FROM_OBSERVATION,
     UNDETERMINED,
     Candidate,
     Expected,
@@ -296,7 +297,8 @@ class _GithubFalsifier(Falsifier):
             logger.warning("[dffc] %s: %s", type(self).__name__, note)
             return [_undetermined(c, "errored", note) for c in candidates]
         self._resolve_reach(client)
-        return self.judge_all(client, list(candidates))
+        ordered = list(candidates)
+        return self.confirm_retirements(client, ordered, self.judge_all(client, ordered))
 
     def _begin_run(self, batch_id: str) -> None:
         """Start a new run: the batch id keys the per-run parent-probe cache, and a session this
@@ -396,21 +398,63 @@ class _GithubFalsifier(Falsifier):
                     f"the containing repository {full_name} did not answer the probe ({parent.detail}), so a "
                     "404 on the object inside it says nothing about the object",
                 )
-        else:
-            # No parent to probe, so the reach is read a second time instead — see
-            # `_reach_after_probe`. Both readings must hold before a repository is retired.
-            after = self._reach_after_probe(client)
-            if after.holds_repository(full_name=full_name, github_id=github_id) is not True:
-                return _undetermined(
-                    candidate,
-                    "scope_unknown",
-                    "the reach was read again after the probe and no longer holds this repository, so the "
-                    f"404 is attributable to the change in reach ({after.note})",
-                )
+        # A candidate with no parent to probe is confirmed against a reach read after EVERY probe
+        # of the run — see `confirm_retirements`, which runs once the judgements are in.
         return verdict_from_probe(candidate, expected, probe)
 
     def judge_all(self, client: ProbeClient, candidates: list[Candidate]) -> list[Verdict]:
         return [self.judge(client, c) for c in candidates]
+
+    def confirm_retirements(
+        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
+    ) -> list[Verdict]:
+        """Last word on this run's retirements. Default: none needed.
+
+        A type whose absence is confirmed by a probe of its parent is already judged against
+        something taken at judgement time. A type with no parent overrides this.
+        """
+        return verdicts
+
+    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
+        """The repository this candidate names, as (full_name, github_id). Overridden per type."""
+        return "", None
+
+    def _confirm_against_reach_after_every_probe(
+        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
+    ) -> list[Verdict]:
+        """Downgrade every retirement this run would make if the reach moved underneath it.
+
+        The reading is taken AFTER every probe of the run, which is what makes it complete: a
+        narrowing that could have caused any of these 404s necessarily happened before this read,
+        so it is caught for all of them rather than only for the ones probed after it. Reading at
+        the first absence and caching — the earlier shape — left every later candidate judged
+        against a snapshot that predated its own probe (found in review, PR# 161).
+
+        Conservative on purpose. A narrowing downgrades every retirement in the run, including
+        ones that may genuinely be gone, because after the reach moves there is no longer evidence
+        that separates them.
+        """
+        if not any(v.verdict == DROPPED_FROM_OBSERVATION for v in verdicts):
+            return verdicts
+        after = self._reach_after_probe(client)
+        out: list[Verdict] = []
+        for candidate, verdict in zip(candidates, verdicts, strict=True):
+            if verdict.verdict != DROPPED_FROM_OBSERVATION:
+                out.append(verdict)
+                continue
+            full_name, github_id = self._locator_of(candidate)
+            if after.holds_repository(full_name=full_name, github_id=github_id) is True:
+                out.append(verdict)
+                continue
+            out.append(
+                _undetermined(
+                    candidate,
+                    "scope_unknown",
+                    "the reach was read again after every probe of this run and no longer holds this "
+                    f"repository, so the 404 is attributable to the change in reach ({after.note})",
+                )
+            )
+        return out
 
     def judge(self, client: ProbeClient, candidate: Candidate) -> Verdict:
         raise NotImplementedError
@@ -434,6 +478,19 @@ class RepositoryFalsifier(_GithubFalsifier):
     (RELOCATED, ends the ownership edge, retires nothing); a found object with a different id
     at the same name is REIDENTIFIED.
     """
+
+    def confirm_retirements(
+        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
+    ) -> list[Verdict]:
+        """A repository has no parent to probe, so the reach is its only gate and it gets a second
+        reading taken after every probe of the run."""
+        return self._confirm_against_reach_after_every_probe(client, candidates, verdicts)
+
+    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
+        row = _row_of(candidate.entity_id)
+        if row is None:
+            return "", None
+        return str(getattr(row, "full_name", "") or ""), getattr(row, "github_id", None)
 
     def judge(self, client: ProbeClient, candidate: Candidate) -> Verdict:
         row = _row_of(candidate.entity_id)

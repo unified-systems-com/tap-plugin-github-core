@@ -596,7 +596,7 @@ class TestReachIsReadAgainAfterTheProbe:
             "the reach that opened the run held the repository; the reach read after the probe "
             "does not, so the 404 is attributable to the narrowing"
         )
-        assert "read again after the probe" in verdict.note
+        assert "after every probe" in verdict.note
         assert not sessions, "the second reading minted its own session rather than reusing the first"
 
     @pytest.mark.spec("req-grid-reconcile-absence-states")
@@ -613,6 +613,36 @@ class TestReachIsReadAgainAfterTheProbe:
 
         [verdict] = falsifier.batch_falsify([candidate], _context())
         assert verdict.verdict == DROPPED_FROM_OBSERVATION
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_a_narrowing_after_the_first_absence_still_refuses(self) -> None:
+        """The reading is taken after EVERY probe, not at the first absence.
+
+        Caching at the first absence left every later candidate judged against a snapshot that
+        predated its own probe: the first 404 warmed the cache with `all`, and a narrowing before
+        the second probe then sailed through it. The whole run is downgraded, including the first
+        candidate, because once the reach has moved there is no evidence left that separates a
+        repository that is gone from one that merely became invisible.
+        """
+        candidates = [
+            _candidate(
+                _create(REPOSITORY, {"full_name": f"acme/{name}", "owner_login": "acme", "github_id": i}),
+                REPOSITORY,
+                None,
+            )
+            for i, name in enumerate(("one", "two"), start=1)
+        ]
+        fake = FakeGithub()
+        for name in ("one", "two"):
+            fake.refuse(f"/repos/acme/{name}", 404)
+        fake.answer("/installation/repositories", {"repositories": [], "total_count": 0})
+
+        sessions = [(fake, self._auth("all")), (fake, self._auth("selected"))]
+        falsifier = RepositoryFalsifier(session_factory=lambda: sessions.pop(0))
+
+        verdicts = falsifier.batch_falsify(candidates, _context())
+        assert [(v.verdict, v.reason) for v in verdicts] == [(UNDETERMINED, "scope_unknown")] * 2
+        assert "after every probe" in verdicts[0].note
 
     @pytest.mark.spec("req-grid-reconcile-absence-states")
     def test_the_second_reading_happens_once_per_run(self) -> None:
