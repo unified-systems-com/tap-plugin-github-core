@@ -14,7 +14,7 @@ core's to assign; the recipe here only has to name the same source object the sa
 The recipes are unchanged: a ref is exactly the string the old ``_id`` hashed, so every
 docstring below still describes the identity inputs and the reasoning behind them.
 
-Two things deliberately stay derived:
+What deliberately stays derived:
 
 - **Edge ids.** The importer never substitutes an edge envelope's id (edges are ``KEYLESS``
   and keep their assignment), so :func:`edge_id` remains the plugin's cross-run edge
@@ -22,9 +22,20 @@ Two things deliberately stay derived:
   Its endpoints are hashed through :func:`_endpoint_token`, which reproduces the node id each
   ref used to derive as, so every edge id is UNCHANGED by this adoption and an existing grid
   gains no duplicates. Edge identity under assigned nodes is Issue# 690 - tap.
-- **``commit_observation``.** Its recipe keys on the platform HOST, which the model has no
-  field for, so its declaration cannot say what the recipe says. It keeps an explicit derived
-  id until that is ruled on — see :func:`commit_observation_id`.
+- **Three node types, HELD BACK.** Each declares a ``NATURAL_KEY``, but nothing resolves
+  against it while the type is addressed by an explicit id — so the declaration is inert and
+  still free to change, which is the whole reason to hold back rather than guess. A natural
+  key is a one-way door only once a node's id has been assigned under it.
+
+  * :func:`code_scanning_finding_id` mints a ``compliance_core__compliance_finding`` — another
+    plugin's type, which declares nothing, so a ref to it would be refused outright.
+  * :func:`commit_observation_id` keys on the platform HOST, which its model has no field for
+    (Issue# 164 - github-core).
+  * :func:`actions_secret_id` case-folds the name, which a declared search cannot
+    (Issue# 165 - github-core).
+
+  Every ``git_core__*`` and ``identity_core__*`` node this collector emits likewise keeps the
+  id its own plugin's identity module derives.
 """
 
 from __future__ import annotations
