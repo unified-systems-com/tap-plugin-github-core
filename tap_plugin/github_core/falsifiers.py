@@ -123,10 +123,18 @@ def probe_status_of(exc: GithubAPIError) -> str:
 
 
 #: What a 404 from GitHub does and does not say, stated on the record itself: GitHub answers 404
-#: both for an object that is gone and for a private one this credential may not see. The verdict
-#: core derives from ``not_found`` is "gone from this credential's view" — which is all a listing
-#: under the same credential ever claimed — and the residual (access narrowed between the listing
-#: and the probe) is the reconcile verb's freshness fence to hold, not something a probe can tell.
+#: both for an object that is gone and for a private one this credential may not see.
+#:
+#: This wording is kept for the human reading a verdict; the JUDGEMENT no longer rests on it. A
+#: ``not_found`` only becomes a retirement inside the credential's provable reach, and for a
+#: repository the reach is read again after the probe (``_reach_after_probe``).
+#:
+#: An earlier version of this note said the residual — access narrowed between the listing and the
+#: probe — was the reconcile verb's freshness fence to hold. That was checked in review on PR# 161
+#: and is FALSE: the verb rejects a verdict whose target was RE-OBSERVED since the candidate record
+#: was derived, and a repository that left the credential's reach is precisely the one this run
+#: cannot observe, so nothing re-observes it and the fence never fires. The residual is held here,
+#: not there.
 NOT_FOUND_DETAIL = "HTTP 404 (GitHub also answers 404 for a private object this credential may not see)"
 
 
