@@ -74,7 +74,7 @@ class Reach:
     selection: str
     #: The account login the installation is ON, lower-cased. ``all`` means "every repository of
     #: THIS account", never "every repository on GitHub", so without the account the ``all``
-    #: branch has no boundary to test and answers *cannot say* (Grok seat, PR# 161).
+    #: branch has no boundary to test and answers *cannot say* (found in review, PR# 161).
     account: str | None = None
     #: GitHub's numeric ids the installation listed about itself; None when unobserved.
     repository_ids: frozenset[int] | None = None

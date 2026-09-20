@@ -467,7 +467,7 @@ class TestReachJudgement:
 
 
 class TestReachBoundary:
-    """`all` is a statement about ONE account, not about GitHub (Grok seat, PR# 161)."""
+    """`all` is a statement about ONE account, not about GitHub (found in review, PR# 161)."""
 
     @staticmethod
     def _all(account: str | None) -> Reach:
@@ -499,47 +499,60 @@ class TestReachBoundary:
 
 @pytest.mark.django_db
 class TestReachIsScopedToTheRun:
-    """A reach RESOLVED from the credential belongs to the run it was resolved for.
+    """A reach belongs to the RUN it was read for, and so does the credential behind it.
 
-    An installation can be narrowed between two runs. A falsifier instance that outlived the
-    first run must not carry the first run's selection into the second, or it authorizes exactly
-    the retirement this gate exists to refuse (Codex seat, PR# 161).
+    An installation can be narrowed between two runs. Re-resolving the reach is not enough on its
+    own: `GithubAuth` records the installation once, when the token is minted, and never re-reads
+    it — so an `all` selection re-derived from that frozen record would keep authorizing exactly
+    the retirement this gate exists to refuse. The falsifier therefore throws away a session it
+    owns at the start of each run (found in review, PR# 161).
+
+    The test drives that through the session factory rather than by mutating a cached record, so
+    it proves the production refresh path and not a hand-written one.
     """
 
-    class _Auth:
-        """A credential whose installation narrows between runs."""
+    @staticmethod
+    def _auth(selection: str) -> Any:
+        class _Auth:
+            has_app = True
+            has_pat = False
+            installation = {"repository_selection": selection, "account": {"login": "acme"}}
 
-        has_app = True
-        has_pat = False
-
-        def __init__(self) -> None:
-            self.installation: dict[str, Any] = {
-                "repository_selection": "all",
-                "account": {"login": "acme"},
-            }
-
-        def narrow(self) -> None:
-            self.installation = {"repository_selection": "selected", "account": {"login": "acme"}}
+        return _Auth()
 
     @pytest.mark.spec("req-grid-reconcile-absence-states")
-    def test_a_reused_falsifier_re_reads_the_installation_on_a_new_run(self) -> None:
+    def test_a_new_run_mints_a_fresh_credential_and_re_reads_the_installation(self) -> None:
         rid = _create(REPOSITORY, {"full_name": "acme/app", "owner_login": "acme", "github_id": 1})
         candidate = _candidate(rid, REPOSITORY, None)
         fake = FakeGithub()
         fake.refuse("/repos/acme/app", 404)
-        # The narrowed installation names no repositories, so the walk answers an empty list.
+        # The narrowed installation names no repositories, so the walk answers an empty listing —
+        # an observation, not a failure.
         fake.answer("/installation/repositories", {"repositories": [], "total_count": 0})
 
-        auth = self._Auth()
-        falsifier = RepositoryFalsifier(client=fake)
-        falsifier._auth = auth  # the credential the reach is read from; injected for the test
+        sessions = [(fake, self._auth("all")), (fake, self._auth("selected"))]
+        falsifier = RepositoryFalsifier(session_factory=lambda: sessions.pop(0))
 
         [first] = falsifier.batch_falsify([candidate], _context())
         assert first.verdict == DROPPED_FROM_OBSERVATION, "run one: acme/app is inside `all` on acme"
 
-        auth.narrow()
         [second] = falsifier.batch_falsify([candidate], _context())
         assert (second.verdict, second.reason) == (UNDETERMINED, "scope_unknown"), (
-            "run two: the installation no longer names acme/app, and the same instance must not "
-            "reuse run one's reach"
+            "run two: a fresh credential reports a narrowed installation that does not name "
+            "acme/app, and the same falsifier instance must not reuse run one's session"
         )
+        assert not sessions, "the second run minted its own session rather than reusing the first"
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_an_injected_client_is_never_thrown_away(self) -> None:
+        """A caller that supplied a client owns its lifetime; a pinned credential stays pinned."""
+        rid = _create(REPOSITORY, {"full_name": "acme/app", "owner_login": "acme", "github_id": 1})
+        candidate = _candidate(rid, REPOSITORY, None)
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/app", 404)
+        falsifier = RepositoryFalsifier(client=fake, reach=_reach())
+
+        for _ in range(2):
+            [verdict] = falsifier.batch_falsify([candidate], _context())
+            assert verdict.verdict == DROPPED_FROM_OBSERVATION
+        assert falsifier._client is fake, "the injected client survived the run boundary"

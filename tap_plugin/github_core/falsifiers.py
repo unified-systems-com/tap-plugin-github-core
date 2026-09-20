@@ -227,16 +227,21 @@ class _GithubFalsifier(Falsifier):
         client: ProbeClient | None = None,
         client_factory: Callable[[], ProbeClient] | None = None,
         reach: Reach | None = None,
+        session_factory: Callable[[], tuple[ProbeClient, Any]] | None = None,
     ) -> None:
         self._client = client
         self._auth: Any = None
         self._client_factory = client_factory
+        self._session_factory = session_factory or _default_session
+        #: True when this falsifier builds its own credential, which is the production case and
+        #: the only one where it may throw the session away and mint a fresh one per run.
+        self._owns_session = client is None and client_factory is None
         #: A reach handed in by a caller (tests) pins the answer and is never re-resolved.
         self._injected_reach = reach
         #: A reach RESOLVED from the credential is scoped to the run it was resolved for: an
         #: installation can be narrowed between runs, and a falsifier instance that outlived the
         #: first run would otherwise carry the old selection into the second and authorize
-        #: exactly the retirement this gate exists to refuse (Codex seat, PR# 161).
+        #: exactly the retirement this gate exists to refuse (found in review, PR# 161).
         self._resolved_reach: Reach | None = None
         self._resolved_for = ""
         self._batch_id = ""
@@ -246,7 +251,7 @@ class _GithubFalsifier(Falsifier):
             if self._client_factory is not None:
                 self._client = self._client_factory()
             else:
-                self._client, self._auth = _default_session()
+                self._client, self._auth = self._session_factory()
         return self._client
 
     def _resolve_reach(self, client: ProbeClient) -> Reach:
@@ -271,17 +276,35 @@ class _GithubFalsifier(Falsifier):
         return self._resolved_reach
 
     def batch_falsify(self, candidates: Sequence[Candidate], context: FalsifyContext) -> list[Verdict]:
+        self._begin_run(context.batch_id)
         try:
             client = self._resolve_client()
         except Exception as exc:  # noqa: BLE001 — a missing credential is an answer, not a crash
             note = f"credential unavailable: {type(exc).__name__}"
             logger.warning("[dffc] %s: %s", type(self).__name__, note)
             return [_undetermined(c, "errored", note) for c in candidates]
-        # The batch id keys the per-run parent-probe cache, so every type's falsifier shares one
-        # probe of a given repository.
-        self._batch_id = context.batch_id
         self._resolve_reach(client)
         return self.judge_all(client, list(candidates))
+
+    def _begin_run(self, batch_id: str) -> None:
+        """Start a new run: the batch id keys the per-run parent-probe cache, and a session this
+        falsifier owns is thrown away so the next probe mints a fresh one.
+
+        Re-resolving the reach was not enough on its own. ``GithubAuth`` records the installation
+        once, when the token is minted, and never re-reads it — so an ``all`` selection would be
+        re-derived from a frozen record and a narrowed installation would keep authorizing
+        retirements (found in review, PR# 161). Nothing here touches an injected client: a
+        caller that supplied one owns its lifetime, and a test's pinned credential must stay
+        pinned.
+        """
+        if batch_id == self._batch_id:
+            return
+        self._batch_id = batch_id
+        if self._owns_session:
+            self._client = None
+            self._auth = None
+        self._resolved_reach = None
+        self._resolved_for = ""
 
     def _absence_verdict(
         self,
