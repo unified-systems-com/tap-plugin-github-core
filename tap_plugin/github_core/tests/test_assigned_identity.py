@@ -43,20 +43,18 @@ from tap_plugin.github_core.models.github_platform import GithubPlatform
 from tap_plugin.github_core.models.github_repository import GithubRepository
 from tap_plugin.github_core.models.github_workflow import GithubWorkflow
 from tap_plugin.github_core.models.workflow_job import WorkflowJob
-from tap_plugin.github_core.tests.fake_github import FakeGithub
 
 from tap.pytest_harness import isolated_registry
 from tap_cares.models import CollectionJobStatus, Collector
-from tap_cares.registry import collector_registry, reconcile_collector_nodes, register_collector
+from tap_cares.registry import collector_registry
 from tap_cares.services import run_collection
 from tap_grid.models import Entity
 
-OWNER = "acme"
-REPO = "acme/app"
-WORKFLOW_YAML = "name: ci\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps: []\n"
+from .fake_estate import OWNER, REPO, Secret, config_repo, fake_rest, register
 
-#: The source objects this run observes, each named by the natural key its model declares.
-#: One row per model, so a declaration that cannot find its own row is caught by name.
+#: The source objects one run over the shared fake estate observes, each named by the natural
+#: key its model declares. One row per model, so a declaration that cannot find its own row is
+#: caught by name.
 SOURCE_OBJECTS: list[tuple[str, Any, dict[str, Any]]] = [
     ("platform", GithubPlatform, {"host": "github.com"}),
     ("account", GithubAccount, {"login": OWNER}),
@@ -66,80 +64,17 @@ SOURCE_OBJECTS: list[tuple[str, Any, dict[str, Any]]] = [
     ("declared job", WorkflowJob, {"full_name": REPO, "workflow_id": 100, "job_key": "build"}),
 ]
 
-
-class _Secret:
-    kind = "github_pat"
-    data: dict[str, Any] = {"token": "fixture-not-a-credential", "owner": OWNER}
-
-
-def _config_repo() -> dict[str, Any]:
-    return {
-        "nameWithOwner": REPO,
-        "name": "app",
-        "databaseId": 10,
-        "isArchived": False,
-        "isFork": False,
-        "visibility": "PUBLIC",
-        "url": f"https://github.com/{REPO}",
-        "defaultBranchRef": {"name": "main", "target": {"oid": "a" * 40}},
-        "rulesets": {"nodes": []},
-        "environments": {"nodes": [{"databaseId": 1, "name": "production", "protectionRules": {"nodes": []}}]},
-        "branchRefs": {"totalCount": 0, "nodes": []},
-        "tagRefs": {"totalCount": 0, "nodes": []},
-        "releases": {"totalCount": 0, "nodes": []},
-        "object": {
-            "entries": [
-                {
-                    "name": "ci.yml",
-                    "path": ".github/workflows/ci.yml",
-                    "object": {"byteSize": len(WORKFLOW_YAML), "isTruncated": False, "text": WORKFLOW_YAML},
-                }
-            ]
-        },
-    }
-
-
-def _fake_rest() -> FakeGithub:
-    fake = FakeGithub()
-    fake.answer(
-        f"/users/{OWNER}",
-        {"login": OWNER, "id": 1, "type": "Organization", "html_url": f"https://github.com/{OWNER}"},
-    )
-    fake.answer(
-        f"/repos/{REPO}/actions/workflows",
-        {"workflows": [{"id": 100, "path": ".github/workflows/ci.yml", "name": "ci", "state": "active"}]},
-    )
-    fake.answer(f"/repos/{REPO}/actions/runs", {"workflow_runs": []})
-    fake.answer(f"/repos/{REPO}/actions/runners", {"runners": []})
-    fake.answer(f"/repos/{REPO}/environments/production", {"id": 1, "name": "production"})
-    return fake
-
-
-def _register() -> Collector:
-    register_collector(
-        key="github_core",
-        scope="github_core",
-        cls=GithubCollector,
-        name="GitHub Core Collector",
-        description="fixture",
-    )
-    reconcile_collector_nodes()
-    collector = Collector.objects.get(collector_registry="github_core:github_core")
-    assert isinstance(collector, Collector)
-    return collector
-
-
 def _run(monkeypatch: pytest.MonkeyPatch, collector: Collector | None = None) -> Collector:
     """One collection run against the fake GitHub, through the task body.
 
     Returns the registered collector so a second run can reuse it: the registry refuses a
     duplicate key, and running twice is the whole point here.
     """
-    collector = collector or _register()
-    fake = _fake_rest()
-    monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: _Secret())
+    collector = collector or register(GithubCollector)
+    fake = fake_rest()
+    monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: Secret())
     monkeypatch.setattr(collector_module, "GithubClient", lambda **kw: fake)
-    monkeypatch.setattr(GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([_config_repo()], []))
+    monkeypatch.setattr(GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([config_repo()], []))
     monkeypatch.setattr(GithubGraphQLClient, "fetch_pull_request_layer", lambda self, login: ({}, []))
     job = run_collection(collector)
     job.refresh_from_db()
