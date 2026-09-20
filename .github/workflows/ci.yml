@@ -18,9 +18,11 @@ permissions:
 
 jobs:
   tap:
-    # tap#365 / PR# 373 - tap: plugin-ci fails closed and tests the declared floor. Move
-    # this pin to the SHA of tap main once PR# 373 merges (Renovate does not track it).
-    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@f64030e0ba5376ff6e2121bc7dd1ceddbbda1b96
+    # Pinned to tap v0.2.0 (Renovate does not track it): the validation logic must know the
+    # manifest keys the floor's core knows — the [falsifiers] table arrived with the
+    # reconciliation primitives this plugin adopts (github-core#151), and an older tooling
+    # checkout refuses it at manifest parse whatever the harness resolves to.
+    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@77f5d953b810c76cec964ea4a2c778e8984f1c2a
     with:
       plugin_slug: github_core
     secrets:
