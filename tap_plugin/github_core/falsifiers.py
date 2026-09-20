@@ -244,6 +244,10 @@ class _GithubFalsifier(Falsifier):
         #: exactly the retirement this gate exists to refuse (found in review, PR# 161).
         self._resolved_reach: Reach | None = None
         self._resolved_for = ""
+        #: A SECOND reading of the reach, taken after a probe and before a repository retirement
+        #: is allowed to stand. One per run, on that path only.
+        self._confirmed_reach: Reach | None = None
+        self._confirmed_for = ""
         self._batch_id = ""
 
     def _resolve_client(self) -> ProbeClient:
@@ -305,6 +309,44 @@ class _GithubFalsifier(Falsifier):
             self._auth = None
         self._resolved_reach = None
         self._resolved_for = ""
+        self._confirmed_reach = None
+        self._confirmed_for = ""
+
+    def _reach_after_probe(self, client: ProbeClient) -> Reach:
+        """The reach read AGAIN, after the probe, for the one case that has no other freshness
+        check (found in review, PR# 161).
+
+        A child's 404 is confirmed by a probe of its parent made at judgement time, so it is
+        already judged against something fresh. A REPOSITORY has no parent to probe: its only
+        gate is the reach, and that was read once near the start of the run. An installation
+        narrowed in between would leave a stale `all` authorizing a retirement.
+
+        Core's reconcile verb rejects a verdict whose target was RE-OBSERVED since the candidate
+        record was derived, which does not help here: a repository that left the reach is exactly
+        the one this run cannot observe. So the second reading happens here.
+
+        It mints its own session, because ``GithubAuth`` records the installation once and a
+        second read against the same credential would return the same frozen answer. One extra
+        mint per run, on the path where something is about to be retired, and never for an
+        injected credential whose lifetime belongs to its caller.
+        """
+        if self._injected_reach is not None:
+            return self._injected_reach
+        if self._confirmed_reach is not None and self._confirmed_for == self._batch_id:
+            return self._confirmed_reach
+        confirmed: Reach
+        if self._owns_session:
+            try:
+                fresh_client, fresh_auth = self._session_factory()
+                confirmed = resolve_reach(fresh_auth, fresh_client)
+            except Exception:  # noqa: BLE001 — an unreadable reach is an answer, not a crash
+                logger.warning("[5d41] the reach could not be re-read after the probe; refusing to retire")
+                confirmed = unobservable("none", "the reach could not be re-read after the probe")
+        else:
+            confirmed = self._resolve_reach(client)
+        self._confirmed_reach = confirmed
+        self._confirmed_for = self._batch_id
+        return confirmed
 
     def _absence_verdict(
         self,
@@ -345,6 +387,17 @@ class _GithubFalsifier(Falsifier):
                     reason,
                     f"the containing repository {full_name} did not answer the probe ({parent.detail}), so a "
                     "404 on the object inside it says nothing about the object",
+                )
+        else:
+            # No parent to probe, so the reach is read a second time instead — see
+            # `_reach_after_probe`. Both readings must hold before a repository is retired.
+            after = self._reach_after_probe(client)
+            if after.holds_repository(full_name=full_name, github_id=github_id) is not True:
+                return _undetermined(
+                    candidate,
+                    "scope_unknown",
+                    "the reach was read again after the probe and no longer holds this repository, so the "
+                    f"404 is attributable to the change in reach ({after.note})",
                 )
         return verdict_from_probe(candidate, expected, probe)
 

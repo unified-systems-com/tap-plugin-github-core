@@ -556,3 +556,82 @@ class TestReachIsScopedToTheRun:
             [verdict] = falsifier.batch_falsify([candidate], _context())
             assert verdict.verdict == DROPPED_FROM_OBSERVATION
         assert falsifier._client is fake, "the injected client survived the run boundary"
+
+
+@pytest.mark.django_db
+class TestReachIsReadAgainAfterTheProbe:
+    """A repository has no parent to probe, so its reach is read twice (found in review, PR# 161).
+
+    A child's 404 is confirmed against a probe of its parent made at judgement time. A repository
+    has no such second check: its only gate is the reach, read once near the start of the run. An
+    installation narrowed in between would leave a stale `all` authorizing a retirement, and
+    core's verb cannot catch it — the verb rejects a verdict whose target was RE-OBSERVED, and a
+    repository that left the reach is exactly the one this run cannot observe.
+    """
+
+    @staticmethod
+    def _auth(selection: str) -> Any:
+        class _Auth:
+            has_app = True
+            has_pat = False
+            installation = {"repository_selection": selection, "account": {"login": "acme"}}
+
+        return _Auth()
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_a_narrowing_between_the_reach_and_the_probe_refuses_the_retirement(self) -> None:
+        rid = _create(REPOSITORY, {"full_name": "acme/app", "owner_login": "acme", "github_id": 1})
+        candidate = _candidate(rid, REPOSITORY, None)
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/app", 404)
+        fake.answer("/installation/repositories", {"repositories": [], "total_count": 0})
+
+        # Session one opens the run with a whole-account installation; session two is the second
+        # reading, taken after the probe, and reports the narrowing.
+        sessions = [(fake, self._auth("all")), (fake, self._auth("selected"))]
+        falsifier = RepositoryFalsifier(session_factory=lambda: sessions.pop(0))
+
+        [verdict] = falsifier.batch_falsify([candidate], _context())
+        assert (verdict.verdict, verdict.reason) == (UNDETERMINED, "scope_unknown"), (
+            "the reach that opened the run held the repository; the reach read after the probe "
+            "does not, so the 404 is attributable to the narrowing"
+        )
+        assert "read again after the probe" in verdict.note
+        assert not sessions, "the second reading minted its own session rather than reusing the first"
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_a_stable_reach_still_drops(self) -> None:
+        """The second reading is a freshness check, not a second obstacle: an installation that
+        did not move retires exactly as before."""
+        rid = _create(REPOSITORY, {"full_name": "acme/app", "owner_login": "acme", "github_id": 1})
+        candidate = _candidate(rid, REPOSITORY, None)
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/app", 404)
+
+        sessions = [(fake, self._auth("all")), (fake, self._auth("all"))]
+        falsifier = RepositoryFalsifier(session_factory=lambda: sessions.pop(0))
+
+        [verdict] = falsifier.batch_falsify([candidate], _context())
+        assert verdict.verdict == DROPPED_FROM_OBSERVATION
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_the_second_reading_happens_once_per_run(self) -> None:
+        """Two repository absences in one run cost one extra mint, not two."""
+        candidates = [
+            _candidate(
+                _create(REPOSITORY, {"full_name": f"acme/{name}", "owner_login": "acme", "github_id": i}),
+                REPOSITORY,
+                None,
+            )
+            for i, name in enumerate(("one", "two"), start=1)
+        ]
+        fake = FakeGithub()
+        for name in ("one", "two"):
+            fake.refuse(f"/repos/acme/{name}", 404)
+
+        sessions = [(fake, self._auth("all")), (fake, self._auth("all"))]
+        falsifier = RepositoryFalsifier(session_factory=lambda: sessions.pop(0))
+
+        verdicts = falsifier.batch_falsify(candidates, _context())
+        assert [v.verdict for v in verdicts] == [DROPPED_FROM_OBSERVATION] * 2
+        assert not sessions, "one opening session and one second reading, for two absences"
