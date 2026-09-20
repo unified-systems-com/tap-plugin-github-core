@@ -22,6 +22,7 @@ positively on all three halves:
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 from uuid import UUID, uuid5
 
@@ -210,7 +211,7 @@ class TestTheDocumentItself:
         # Edge ids stay derived on purpose (edges are KEYLESS, and the id is the plugin's
         # cross-run edge idempotency), so they are excluded by name rather than by accident.
         edge_recipes = {"edge_id", "uses_action_edge_id"}
-        minted: dict[str, Any] = {}
+        minted: dict[str, str] = {}
         for name in dir(identity_module):
             if not name.endswith("_id") or name.startswith("_") or name in edge_recipes:
                 continue
@@ -218,10 +219,15 @@ class TestTheDocumentItself:
             if not callable(fn):
                 continue
             hints = getattr(fn, "__annotations__", {})
-            if hints.get("return") in ("Ref", Ref):
-                continue
-            minted[name] = hints.get("return")
-        assert minted == {}, f"these node recipes do not return a Ref: {minted}"
+            if hints.get("return") not in ("Ref", Ref):
+                minted[name] = f"annotated {hints.get('return')!r}"
+            elif "_uuid5_id" in inspect.getsource(fn):
+                # The annotation alone would be a presence test: a function annotated `-> Ref`
+                # that returned the pre-assignment derivation would pass it (Codex on PR# 166 -
+                # github-core). `_uuid5_id` IS that derivation, and reaching it is the realistic
+                # way a node recipe regresses, so the body is read too.
+                minted[name] = "annotated Ref but reaches the uuid5 derivation"
+        assert minted == {}, f"these node recipes do not name a ref: {minted}"
 
         # The three that were released, named so the set cannot silently regrow.
         assert isinstance(code_scanning_finding_id(REPO, 7), Ref)
