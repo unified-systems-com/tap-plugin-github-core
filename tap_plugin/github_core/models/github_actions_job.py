@@ -14,6 +14,10 @@ class GithubActionsJob(BaseModel):
     in v0). The `configuration` carries `runs_on`, `needs`, `uses`, the full
     parsed step list, and observed runner fields.
 
+    Reconciliation (github-core#14 shape C, github-core#151): an IMMUTABLE EVENT, like the run
+    that contains it operationally. Absence from a run's job listing is retention, not deletion.
+    Deliberately NOT a containment target and NOT falsified: never a candidate, never retired.
+
     Spec: plugins/github_core/specs/spec-github-core-v0.md (req-github-core-models)
     """
 

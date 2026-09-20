@@ -49,7 +49,7 @@ from .batch import (
     node_envelope,
 )
 from .enrichment import resolve_links
-from .graphql_client import GithubGraphQLClient, GithubGraphQLError
+from .graphql_client import _ENVIRONMENT_PAGE_SIZE, GithubGraphQLClient, GithubGraphQLError
 from .identity import (
     account_id,
     actions_artifact_id,
@@ -1001,6 +1001,18 @@ class GithubCollector(CollectorBase):
         self._pending_calls: list[dict[str, Any]] = []
         self._pending_triggers: list[dict[str, Any]] = []
         self._collected_repos: set[str] = set()
+        #: Completeness surfaces (req-grid-reconcile-evidence; github-core#151): one entry per
+        #: listing this run walked, authored by `_note_listing` and recorded through
+        #: `record_surface` at submission, once the collection batch's id is known to cite as
+        #: `applied_batches`. Sourced from the walk itself (`last_walk_complete`, the config
+        #: layer's caps, the file read) — the reliability seam (github-core#131/#136) is not
+        #: merged, so there is no admit/degrade state to read yet.
+        self._listings: list[dict[str, Any]] = []
+        #: When the config layer (GraphQL) was read: the observation interval of every surface
+        #: that arrives in it (environments, and the workflow files a job listing is read from).
+        self._config_interval: tuple[datetime, datetime] | None = None
+        #: The account listing as `_apply_filter` saw it, for the `account.repositories` surface.
+        self._repo_listing: dict[str, Any] | None = None
         self._required_checks: dict[tuple[str, str], dict[str, Any]] = {}
         self._job_names: list[dict[str, Any]] = []
         self._checks_unobservable: list[dict[str, Any]] = []
@@ -1014,6 +1026,7 @@ class GithubCollector(CollectorBase):
         # cost of 1 rate-limit point (req-github-core-graphql-config). REST still serves the
         # operation layer below, because GraphQL exposes no workflow runs or jobs.
         self._config: dict[str, dict[str, Any]] = {}
+        listing_first = datetime.now(UTC)
         if owner is not None:
             try:
                 self._config = self._fetch_config_layer(data, owner)
@@ -1023,6 +1036,7 @@ class GithubCollector(CollectorBase):
                     "GITHUB_GRAPHQL_FAILED",
                     f"config-layer fetch failed: {exc}",
                 )
+            self._config_interval = (listing_first, datetime.now(UTC))
             # Pull requests: a second query merged into the same map (node-limit measurement in
             # the client). Its failure degrades the surface and never aborts the run.
             self._fetch_pull_request_layer(data, owner)
@@ -1034,6 +1048,7 @@ class GithubCollector(CollectorBase):
                 f"GITHUB_SCOPE_{exc.status}",
                 f"scope enumeration failed: {exc}",
             )
+        listing_last = datetime.now(UTC)
 
         # --- manifests (load-time JSON Schema validation; errors abort) ---
         load_collection_manifest()  # validates; engine is procedural in v0
@@ -1089,6 +1104,7 @@ class GithubCollector(CollectorBase):
         # --- collection phase: per-repo walk ---
         failed: list[str] = []
         for full_name in repos:
+            listings_before = len(self._listing_state()["listings"])
             try:
                 self._collect_repo(
                     client, full_name, run_limit, nodes, edges, platform_uuid
@@ -1099,6 +1115,14 @@ class GithubCollector(CollectorBase):
                 # transient timeout is a certainty, and aborting throws away every repo that
                 # DID collect. The run continues and reports honestly instead.
                 failed.append(full_name)
+                # The surfaces this repository recorded before it failed were listed, but their
+                # children never all reached processing: not admitted, so nothing is derived
+                # from them (Codex on PR# 154 - tap-plugin-github-core).
+                self._withdraw_admission(
+                    listings_before,
+                    f"collection_failed: {full_name} failed after this listing was read (HTTP {exc.status}); "
+                    "its children did not all reach processing",
+                )
                 self.record_warn(
                     _SITE_REPO_FAILED,
                     f"REPO_FAILED_{exc.status}",
@@ -1123,6 +1147,38 @@ class GithubCollector(CollectorBase):
         # ACCOUNT surface read once after the walk so every repository envelope is in hand to be
         # stamped (req-github-core-custom-properties).
         self._collect_custom_properties(client, owner, nodes)
+
+        # The account's repository listing as a completeness surface (github-core#14 shape B:
+        # absence is evidence only under a proven-complete, unfiltered walk). A repos-only scope
+        # enumerated nothing, so it records no such surface — three states, not two.
+        if owner is not None and self._repo_listing is not None:
+            listing = self._repo_listing
+            reasons: dict[str, str] = {}
+            complete: bool | None = bool(listing["complete"])
+            if listing["filtered"]:
+                complete = False
+                reasons["enumeration_complete"] = (
+                    f"client_filter: the `repos` include-filter narrowed the walk to "
+                    f"{listing['collecting']} of {listing['enumerated']} enumerated repositories"
+                )
+            elif not complete:
+                reasons["enumeration_complete"] = "walk_capped: the paginated walk stopped before the end of the chain"
+            if failed:
+                reasons["admitted"] = (
+                    f"collection_partial: {len(failed)} of {len(repos)} repositories failed to collect; "
+                    "absence within this run is not evidence of deletion"
+                )
+            self._note_listing(
+                "account.repositories",
+                "OWNS_REPO__github_core",
+                account_id(owner),
+                listing_first,
+                last=listing_last,
+                complete=complete,
+                count=listing["enumerated"],
+                admitted=not failed,
+                reasons=reasons,
+            )
 
         if failed and len(failed) == len(repos):
             # Everything failed: that is not a transient blip, it is a broken credential or a
@@ -1207,6 +1263,15 @@ class GithubCollector(CollectorBase):
             edges=edges,
             batch_dimensions=batch_dims,
         )
+        # Every listing this run walked is recorded against the batch that carries its
+        # observations; `applied` is derived by the recorder from that batch's commit. A run that
+        # walked no listing at all says so (a statement with zero surfaces, not no statement).
+        collection_batch_id = str(github_batch["batches"][0]["batch_entity"]["entity_id"])
+        listings = self._listing_state()["listings"]
+        for listing in listings:
+            self.record_surface(**listing, applied_batches=[collection_batch_id])
+        if not listings:
+            self.declare_no_surfaces()
         self.submit_grift(github_batch)
         self.record_info(
             _SITE_BATCH_SUBMITTED,
@@ -1576,6 +1641,12 @@ class GithubCollector(CollectorBase):
                     f"{len(unmatched)} filtered repo(s) not found under {owner}: {', '.join(unmatched)}",
                     message_data={"owner": owner, "unmatched": unmatched},
                 )
+        self._repo_listing = {
+            "complete": complete,
+            "filtered": bool(explicit),
+            "enumerated": len(enumerated),
+            "collecting": len(repos),
+        }
         self.record_info(
             _SITE_SCOPE_ENUMERATED,
             "SCOPE_ENUMERATED",
@@ -1795,9 +1866,35 @@ class GithubCollector(CollectorBase):
         # dropped) when those were not seen.
         self._emit_pull_requests(full_name, repo_envelope, git_repo_uuid, repo_dims, nodes, edges)
 
-        # workflows + workflow YAML
-        workflows = client.get_paginated(
-            f"/repos/{full_name}/actions/workflows", item_path="workflows"
+        # workflows + workflow YAML. The listing is a completeness surface of the repository
+        # (github-core#14 shape A children): a refusal is recorded on the run before it
+        # propagates, so a repository that fails here still says what it could not list.
+        workflows_first = datetime.now(UTC)
+        try:
+            workflows = client.get_paginated(
+                f"/repos/{full_name}/actions/workflows", item_path="workflows"
+            )
+        except GithubAPIError as exc:
+            self._note_listing(
+                "repository.workflows",
+                "DEFINES_WORKFLOW__github_core",
+                repo_uuid,
+                workflows_first,
+                refused=exc.status,
+            )
+            raise
+        self._note_listing(
+            "repository.workflows",
+            "DEFINES_WORKFLOW__github_core",
+            repo_uuid,
+            workflows_first,
+            complete=bool(client.last_walk_complete),
+            count=len(workflows),
+            reasons=(
+                {}
+                if client.last_walk_complete
+                else {"enumeration_complete": "walk_capped: the paginated walk stopped before the end of the chain"}
+            ),
         )
         for wf in workflows:
             path = wf.get("path", "")
@@ -1819,6 +1916,7 @@ class GithubCollector(CollectorBase):
                 continue
 
             wf_uuid = workflow_id(full_name, wf["id"])
+            file_first = datetime.now(UTC)
             raw_yaml, parsed_config = self._workflow_config(
                 client, full_name, wf.get("path", "")
             )
@@ -1931,6 +2029,8 @@ class GithubCollector(CollectorBase):
                 nodes,
                 edges,
                 client=client,
+                file_read=bool(raw_yaml),
+                listing_first=file_first,
             )
             # Local-action surfacing per req-github-core-workflow-parse-3.
             for ref in parsed_config.get("local_action_refs") or []:
@@ -3174,6 +3274,34 @@ class GithubCollector(CollectorBase):
                     deploy_dims,
                 )
             )
+        # The listing as a completeness surface of the repository (github-core#14 shape B). The
+        # config query caps the connection at _ENVIRONMENT_PAGE_SIZE without a totalCount, so a
+        # full page cannot say whether it was the last one; a degraded (pruned) field was refused.
+        envs = GithubGraphQLClient.environments(gql)
+        answered = "environments" in gql
+        capped = answered and len(envs) >= _ENVIRONMENT_PAGE_SIZE
+        env_reasons: dict[str, str] = {}
+        if not answered:
+            env_reasons["scope_authorized"] = "graphql_field_degraded: the credential could not read `environments`"
+            env_reasons["enumeration_complete"] = "graphql_field_degraded: nothing was listed"
+            env_reasons["admitted"] = "graphql_field_degraded: nothing to process"
+        elif capped:
+            env_reasons["enumeration_complete"] = (
+                f"capped: the config query lists at most {_ENVIRONMENT_PAGE_SIZE} environments and reports no total"
+            )
+        first, last = self._listing_state()["config_interval"] or (datetime.now(UTC), datetime.now(UTC))
+        self._note_listing(
+            "repository.environments",
+            "DECLARES_ENVIRONMENT__github_core",
+            repo_uuid,
+            first,
+            last=last,
+            complete=None if capped else answered,
+            count=len(envs) if answered else None,
+            authorized=answered,
+            admitted=answered,
+            reasons=env_reasons,
+        )
         if refused:
             self.record_warn(
                 _SITE_ENVIRONMENT_DETAIL_UNOBSERVABLE,
@@ -3197,6 +3325,8 @@ class GithubCollector(CollectorBase):
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
         client: GithubClient | None = None,
+        file_read: bool = True,
+        listing_first: datetime | None = None,
     ) -> None:
         """Emit one `workflow_job` per job declared in the file, plus its `needs:` graph.
 
@@ -3212,6 +3342,32 @@ class GithubCollector(CollectorBase):
             "github.observation": "declaration",
         }
         jobs = parsed_config.get("jobs") or []
+        # The file's job table is a completeness surface of the workflow (github-core#14 shape A:
+        # complete by construction once the file was read; nothing listed when it was not).
+        config_interval = self._listing_state()["config_interval"]
+        first, last = (
+            config_interval
+            if config_interval is not None and getattr(self, "_config", {}).get(full_name)
+            else (listing_first or datetime.now(UTC), datetime.now(UTC))
+        )
+        self._note_listing(
+            "workflow.jobs",
+            "DEFINES_JOB__github_core",
+            wf_uuid,
+            first,
+            last=last,
+            complete=True if file_read else False,
+            count=len(jobs) if file_read else None,
+            admitted=file_read,
+            reasons=(
+                {}
+                if file_read
+                else {
+                    "enumeration_complete": "workflow_yaml_missing: the file was not read, so no job was listed",
+                    "admitted": "workflow_yaml_missing: nothing to process",
+                }
+            ),
+        )
         uuid_by_key: dict[str, Any] = {}
         for order, job in enumerate(jobs):
             job_key = str(job.get("id") or "")
@@ -3488,6 +3644,84 @@ class GithubCollector(CollectorBase):
             },
         )
         return PIN_UNRESOLVED, "", "in_scope"
+
+    def _note_listing(
+        self,
+        relation: str,
+        edge_type: str,
+        subject: Any,
+        first: datetime,
+        *,
+        last: datetime | None = None,
+        complete: bool | None = None,
+        count: int | None = None,
+        authorized: bool | None = True,
+        admitted: bool = True,
+        refused: int | None = None,
+        reasons: dict[str, str] | None = None,
+    ) -> None:
+        """Author one completeness surface for a listing this run walked (req-grid-reconcile-evidence).
+
+        `subject` is the parent's grid entity id and `edge_type` the containment edge its
+        relation maps to, so candidate derivation can fan out from it. `refused` is the HTTP
+        status a listing was refused with: 401/403 is "not authorized", anything else "not
+        determinable" — in both cases nothing was enumerated or admitted. `source_consistent`
+        is always "unknown": GitHub promises no snapshot across pages (req-grid-reconcile-evidence-2).
+        The surfaces are recorded at submission, once the batch they were applied by has an id.
+        """
+        reasons = dict(reasons or {})
+        if refused is not None:
+            authorized = False if refused in (401, 403) else None
+            complete = False
+            admitted = False
+            count = None
+            reasons.setdefault("scope_authorized", f"http_{refused}: the listing was refused")
+            reasons.setdefault("enumeration_complete", f"http_{refused}: nothing was listed")
+            reasons.setdefault("admitted", f"http_{refused}: nothing to process")
+        reasons.setdefault("source_consistent", "no_promise: GitHub makes no snapshot promise across pages")
+        if complete is None:
+            reasons.setdefault(
+                "enumeration_complete", "not_determinable: the walk cannot say whether it reached the end"
+            )
+        if authorized is None:
+            reasons.setdefault(
+                "scope_authorized", "not_determinable: the credential's permission for this surface is unknown"
+            )
+        self._listing_state()["listings"].append(
+            {
+                "relation": relation,
+                "edge_type": edge_type,
+                "subject": str(subject),
+                "interval": {"first": first.isoformat(), "last": (last or datetime.now(UTC)).isoformat()},
+                "scope_authorized": authorized,
+                "enumeration_complete": complete,
+                "source_consistent": "unknown",
+                "admitted": admitted,
+                "count_observed": count,
+                "reasons": reasons,
+            }
+        )
+
+    def _withdraw_admission(self, start: int, reason: str) -> None:
+        """Mark every surface recorded from index ``start`` on as not admitted, with ``reason``.
+
+        A listing that was read completely but whose walk then failed part-way did not pass its
+        gate: the observations it licensed never all reached the batch, and a candidate derived
+        against the ones that did would name children the run simply never got to.
+        """
+        for surface in self._listing_state()["listings"][start:]:
+            if surface["admitted"]:
+                surface["admitted"] = False
+                surface["reasons"]["admitted"] = reason
+
+    def _listing_state(self) -> dict[str, Any]:
+        """The completeness registers (`_listings`, `_config_interval`), created on first touch —
+        lazy for the same reason as `_walk_state`."""
+        if getattr(self, "_listings", None) is None:
+            self._listings = []
+        if not hasattr(self, "_config_interval"):
+            self._config_interval = None
+        return {"listings": self._listings, "config_interval": self._config_interval}
 
     def _walk_state(self) -> dict[str, Any]:
         """The run-wide registers the workflow-chain post-pass reads, created on first touch.

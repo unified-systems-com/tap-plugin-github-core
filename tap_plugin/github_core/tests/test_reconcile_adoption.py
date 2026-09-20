@@ -1,0 +1,308 @@
+"""Phase 3 proof (github-core#151): one run against the fake GitHub records a completeness
+statement with a surface per listing walked, and a candidate record beside it.
+
+Through `run_collection`, exactly as the worker runs it: the collector reads the account
+listing (config layer), each repository's workflows, environments and declared jobs, submits
+its GRIFT batch, and records one surface per listing against that batch
+(req-grid-reconcile-evidence); the task body derives the candidates from those surfaces
+(req-grid-reconcile-candidates) with authority off. Verdicts are NOT OBSERVED here: the
+reconcile verb (tap#652) is not in the core this plugin is pinned against, and this test says
+so rather than asserting either way.
+
+The listing helper's own contract is checked directly below: what a refused listing, a capped
+walk and an unread file each record.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+from tap_plugin.github_core.collectors.github_collector import collector as collector_module
+from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
+from tap_plugin.github_core.collectors.github_collector.identity import (
+    account_id,
+    repository_id,
+    workflow_id,
+)
+from tap_plugin.github_core.tests.fake_github import FakeGithub
+
+from tap.pytest_harness import isolated_registry
+from tap_cares.models import CollectionJobStatus, Collector
+from tap_cares.registry import collector_registry, reconcile_collector_nodes, register_collector
+from tap_cares.services import LIFECYCLE_BATCH_SOURCE, run_collection
+from tap_grid.candidates import candidates_of
+from tap_grid.completeness import completeness_of
+from tap_grid.falsifiers import verdicts_of
+from tap_grid.models import Batch, Edge
+
+OWNER = "acme"
+REPO = "acme/app"
+WORKFLOW_YAML = "name: ci\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps: []\n"
+
+
+class _Secret:
+    kind = "github_pat"
+    # Not token-shaped on purpose: a `ghp_` prefix plus 36 characters is what every secret scanner
+    # keys on, and the collector only reads the prefix to name the kind.
+    data: dict[str, Any] = {"token": "fixture-not-a-credential", "owner": OWNER}
+
+
+def _config_repo() -> dict[str, Any]:
+    """One repository as the GraphQL config layer shapes it: a workflow file, an environment."""
+    return {
+        "nameWithOwner": REPO,
+        "name": "app",
+        "databaseId": 10,
+        "isArchived": False,
+        "isFork": False,
+        "visibility": "PUBLIC",
+        "url": f"https://github.com/{REPO}",
+        "defaultBranchRef": {"name": "main", "target": {"oid": "a" * 40}},
+        "rulesets": {"nodes": []},
+        "environments": {"nodes": [{"databaseId": 1, "name": "production", "protectionRules": {"nodes": []}}]},
+        "branchRefs": {"totalCount": 0, "nodes": []},
+        "tagRefs": {"totalCount": 0, "nodes": []},
+        "releases": {"totalCount": 0, "nodes": []},
+        "object": {
+            "entries": [
+                {
+                    "name": "ci.yml",
+                    "path": ".github/workflows/ci.yml",
+                    "object": {"byteSize": len(WORKFLOW_YAML), "isTruncated": False, "text": WORKFLOW_YAML},
+                }
+            ]
+        },
+    }
+
+
+def _fake_rest() -> FakeGithub:
+    fake = FakeGithub()
+    fake.answer(
+        f"/users/{OWNER}", {"login": OWNER, "id": 1, "type": "Organization", "html_url": f"https://github.com/{OWNER}"}
+    )
+    fake.answer(
+        f"/repos/{REPO}/actions/workflows",
+        {"workflows": [{"id": 100, "path": ".github/workflows/ci.yml", "name": "ci", "state": "active"}]},
+    )
+    fake.answer(f"/repos/{REPO}/actions/runs", {"workflow_runs": []})
+    fake.answer(f"/repos/{REPO}/actions/runners", {"runners": []})
+    fake.answer(f"/repos/{REPO}/environments/production", {"id": 1, "name": "production"})
+    return fake
+
+
+def _register() -> Collector:
+    register_collector(
+        key="github_core", scope="github_core", cls=GithubCollector, name="GitHub Core Collector", description="fixture"
+    )
+    reconcile_collector_nodes()
+    collector = Collector.objects.get(collector_registry="github_core:github_core")
+    assert isinstance(collector, Collector)
+    return collector
+
+
+def _lifecycle_batch(job: Any) -> Batch:
+    edge = Edge.objects.filter(edge_type="HAS_COLLECTION_JOB", to_entity_id=job.entity_id).first()
+    assert edge is not None
+    batch = Batch.objects.filter(source=LIFECYCLE_BATCH_SOURCE, entity_id=edge.batch_id).first()
+    assert isinstance(batch, Batch), "the job's HAS_COLLECTION_JOB edge rides its lifecycle batch"
+    return batch
+
+
+@pytest.mark.django_db(transaction=True)
+class TestOneRunAgainstTheFakeGithub:
+    @pytest.mark.spec("req-grid-reconcile-evidence-1")
+    @pytest.mark.spec("req-grid-reconcile-candidates-1")
+    def test_the_run_records_a_surface_per_listing_and_a_candidate_record(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with isolated_registry(collector_registry):
+            self._run_and_assert(monkeypatch)
+
+    @staticmethod
+    def _run_and_assert(monkeypatch: pytest.MonkeyPatch) -> None:
+        fake = _fake_rest()
+        monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: _Secret())
+        monkeypatch.setattr(collector_module, "GithubClient", lambda **kw: fake)
+        monkeypatch.setattr(GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([_config_repo()], []))
+        monkeypatch.setattr(GithubGraphQLClient, "fetch_pull_request_layer", lambda self, login: ({}, []))
+
+        job = run_collection(_register())
+        job.refresh_from_db()
+        assert job.status == CollectionJobStatus.SUCCESSFUL.value, job.summary
+
+        batch = _lifecycle_batch(job)
+        statement = completeness_of(batch)
+        assert statement is not None, "the run recorded a completeness statement"
+        by_relation = {(s["relation"], s["subject"]): s for s in statement["surfaces"]}
+        assert {r for r, _ in by_relation} == {
+            "account.repositories",
+            "repository.workflows",
+            "repository.environments",
+            "workflow.jobs",
+        }
+        repos = by_relation[("account.repositories", str(account_id(OWNER)))]
+        workflows = by_relation[("repository.workflows", str(repository_id(REPO)))]
+        environments = by_relation[("repository.environments", str(repository_id(REPO)))]
+        jobs = by_relation[("workflow.jobs", str(workflow_id(REPO, 100)))]
+        assert repos["edge_type"] == "OWNS_REPO__github_core" and repos["count_observed"] == 1
+        assert workflows["edge_type"] == "DEFINES_WORKFLOW__github_core" and workflows["count_observed"] == 1
+        assert environments["edge_type"] == "DECLARES_ENVIRONMENT__github_core" and environments["count_observed"] == 1
+        assert jobs["edge_type"] == "DEFINES_JOB__github_core" and jobs["count_observed"] == 1
+        for surface in statement["surfaces"]:
+            # Every listing cites the collection batch; the recorder derived `applied` from its commit.
+            assert surface["applied"] is True, surface
+            assert surface["reconcilable"] is True, surface
+            assert surface["source_consistent"] == "unknown" and "source_consistent" in surface["reasons"]
+
+        record = candidates_of(batch)
+        assert record is not None, "the task body derived a candidate record from the statement"
+        assert record["authority"] == "off"
+        outcomes = {(e["relation"], e["outcome"]) for e in record["surfaces"]}
+        # Every parent was observed by this run and every child listed was written: derived, none absent.
+        assert outcomes == {
+            ("account.repositories", "derived"),
+            ("repository.workflows", "derived"),
+            ("repository.environments", "derived"),
+            ("workflow.jobs", "derived"),
+        }
+        assert all(e["candidates"] == [] for e in record["surfaces"])
+
+        # The reconcile verb (tap#652, in tap v0.2.0) runs as the run's final phase with this
+        # collector's authority OFF (the default; the operator's switch is tap#655): it probes
+        # nothing and records that on the run — a verdict record with authority "off" and no
+        # entries, since no candidate was derived. Absent authority is recorded, not silent.
+        verdicts = verdicts_of(batch)
+        assert verdicts is not None, "the verb ran as the final phase and recorded its refusal to judge"
+        assert verdicts["authority"] == "off" and verdicts["entries"] == [] and verdicts["candidates"] == 0
+        assert verdicts["applied"]["authority"] == "off" and verdicts["applied"]["applied"] == 0
+
+
+@pytest.mark.django_db(transaction=True)
+class TestAFailedRepositoryDoesNotLeaveAnAdmittedSurface:
+    """Codex on PR# 154: a repository that lists its workflows and then fails part-way must not
+    leave a complete, admitted `repository.workflows` surface behind for candidates to be
+    derived from — its children never all reached the batch."""
+
+    @pytest.mark.spec("req-grid-reconcile-evidence-6")
+    def test_the_failed_repository_surfaces_are_not_admitted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        with isolated_registry(collector_registry):
+            self._run_and_assert(monkeypatch)
+
+    @staticmethod
+    def _run_and_assert(monkeypatch: pytest.MonkeyPatch) -> None:
+        fake = _fake_rest()
+        broken = "acme/broken"
+        fake.answer(
+            f"/repos/{broken}/actions/workflows",
+            {"workflows": [{"id": 200, "path": ".github/workflows/ci.yml", "name": "ci", "state": "active"}]},
+        )
+        fake.refuse(f"/repos/{broken}/actions/runs", 502)  # after the workflows listing, before the runs
+        second = {**_config_repo(), "nameWithOwner": broken, "name": "broken", "databaseId": 11}
+        monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: _Secret())
+        monkeypatch.setattr(collector_module, "GithubClient", lambda **kw: fake)
+        monkeypatch.setattr(
+            GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([_config_repo(), second], [])
+        )
+        monkeypatch.setattr(GithubGraphQLClient, "fetch_pull_request_layer", lambda self, login: ({}, []))
+
+        job = run_collection(_register())
+        job.refresh_from_db()
+        assert job.status == CollectionJobStatus.SUCCESSFUL.value, job.summary
+        statement = completeness_of(_lifecycle_batch(job))
+        assert statement is not None
+        by_key = {(s["relation"], s["subject"]): s for s in statement["surfaces"]}
+        healthy = by_key[("repository.workflows", str(repository_id(REPO)))]
+        failed = by_key[("repository.workflows", str(repository_id(broken)))]
+        assert healthy["admitted"] is True and healthy["reconcilable"] is True
+        assert failed["enumeration_complete"] is True, "the listing itself was read to the end"
+        assert failed["admitted"] is False and failed["reconcilable"] is False
+        assert failed["reasons"]["admitted"].startswith("collection_failed: acme/broken")
+        for relation in ("repository.environments", "workflow.jobs"):
+            broken_surfaces = [s for k, s in by_key.items() if k[0] == relation and s["admitted"] is False]
+            assert broken_surfaces, f"{relation}: the failed repository's surface is withdrawn too"
+        account = by_key[("account.repositories", str(account_id(OWNER)))]
+        assert account["admitted"] is False and account["reasons"]["admitted"].startswith("collection_partial")
+        record = candidates_of(_lifecycle_batch(job))
+        assert record is not None
+        skipped = {e["subject"]: e["reason"] for e in record["surfaces"] if e["outcome"] == "skipped"}
+        assert (
+            str(repository_id(broken)) in skipped and "surface_not_reconcilable" in skipped[str(repository_id(broken))]
+        )
+
+
+class TestListingContract:
+    """What `_note_listing` records for the states a walk can end in."""
+
+    @staticmethod
+    def _collector() -> GithubCollector:
+        c = GithubCollector.__new__(GithubCollector)
+        c.results = {"info": [], "warn": [], "error": []}
+        return c
+
+    def test_a_refused_listing_is_unauthorized_unenumerated_and_not_admitted(self) -> None:
+        c = self._collector()
+        c._note_listing(
+            "repository.workflows", "DEFINES_WORKFLOW__github_core", uuid.uuid4(), datetime.now(UTC), refused=403
+        )
+        [surface] = c._listing_state()["listings"]
+        assert (surface["scope_authorized"], surface["enumeration_complete"], surface["admitted"]) == (
+            False,
+            False,
+            False,
+        )
+        assert surface["count_observed"] is None
+        assert surface["reasons"]["scope_authorized"].startswith("http_403")
+
+    def test_a_refusal_that_is_not_a_permission_answer_is_not_determinable(self) -> None:
+        c = self._collector()
+        c._note_listing(
+            "repository.workflows", "DEFINES_WORKFLOW__github_core", uuid.uuid4(), datetime.now(UTC), refused=502
+        )
+        [surface] = c._listing_state()["listings"]
+        assert surface["scope_authorized"] is None and surface["enumeration_complete"] is False
+
+    def test_a_capped_walk_is_incomplete_with_its_reason(self) -> None:
+        c = self._collector()
+        c._note_listing(
+            "account.repositories",
+            "OWNS_REPO__github_core",
+            uuid.uuid4(),
+            datetime.now(UTC),
+            complete=False,
+            count=100,
+            reasons={"enumeration_complete": "walk_capped: page cap"},
+        )
+        [surface] = c._listing_state()["listings"]
+        assert surface["enumeration_complete"] is False and surface["reasons"]["enumeration_complete"].startswith(
+            "walk_capped"
+        )
+        assert surface["source_consistent"] == "unknown" and surface["reasons"]["source_consistent"].startswith(
+            "no_promise"
+        )
+
+    def test_an_undeterminable_walk_says_so(self) -> None:
+        c = self._collector()
+        c._note_listing(
+            "repository.environments",
+            "DECLARES_ENVIRONMENT__github_core",
+            uuid.uuid4(),
+            datetime.now(UTC),
+            complete=None,
+        )
+        [surface] = c._listing_state()["listings"]
+        assert surface["enumeration_complete"] is None
+        assert surface["reasons"]["enumeration_complete"].startswith("not_determinable")
+
+    def test_an_unread_workflow_file_lists_no_jobs(self) -> None:
+        c = self._collector()
+        c._emit_declared_jobs(
+            REPO, workflow_id(REPO, 7), 7, ".github/workflows/x.yml", {"jobs": []}, {}, [], [], file_read=False
+        )
+        [surface] = c._listing_state()["listings"]
+        assert surface["relation"] == "workflow.jobs"
+        assert (surface["enumeration_complete"], surface["admitted"], surface["count_observed"]) == (False, False, None)
+        assert surface["reasons"]["enumeration_complete"].startswith("workflow_yaml_missing")
