@@ -131,8 +131,8 @@ def probe_status_of(exc: GithubAPIError) -> str:
 #: repository the reach is read again after the probe (``_reach_after_probe``).
 #:
 #: An earlier version of this note said the residual — access narrowed between the listing and the
-#: probe — was the reconcile verb's freshness fence to hold. That was checked in review on PR# 161
-#: and is FALSE: the verb rejects a verdict whose target was RE-OBSERVED since the candidate record
+#: probe — was the reconcile verb's freshness fence to hold. That was checked against
+#: ``tap_grid/reconcile.py`` and is FALSE: the verb rejects a verdict whose target was RE-OBSERVED since the candidate record
 #: was derived, and a repository that left the credential's reach is precisely the one this run
 #: cannot observe, so nothing re-observes it and the fence never fires. The residual is held here,
 #: not there.
@@ -250,7 +250,7 @@ class _GithubFalsifier(Falsifier):
         #: A reach RESOLVED from the credential is scoped to the run it was resolved for: an
         #: installation can be narrowed between runs, and a falsifier instance that outlived the
         #: first run would otherwise carry the old selection into the second and authorize
-        #: exactly the retirement this gate exists to refuse (found in review, PR# 161).
+        #: exactly the retirement this gate exists to refuse.
         self._resolved_reach: Reach | None = None
         self._resolved_for = ""
         #: A SECOND reading of the reach, taken after a probe and before a repository retirement
@@ -307,7 +307,7 @@ class _GithubFalsifier(Falsifier):
         Re-resolving the reach was not enough on its own. ``GithubAuth`` records the installation
         once, when the token is minted, and never re-reads it — so an ``all`` selection would be
         re-derived from a frozen record and a narrowed installation would keep authorizing
-        retirements (found in review, PR# 161). Nothing here touches an injected client: a
+        retirements. Nothing here touches an injected client: a
         caller that supplied one owns its lifetime, and a test's pinned credential must stay
         pinned.
         """
@@ -324,7 +324,7 @@ class _GithubFalsifier(Falsifier):
 
     def _reach_after_probe(self, client: ProbeClient) -> Reach:
         """The reach read AGAIN, after the probe, for the one case that has no other freshness
-        check (found in review, PR# 161).
+        check.
 
         A child's 404 is confirmed by a probe of its parent made at judgement time, so it is
         already judged against something fresh. A REPOSITORY has no parent to probe: its only
@@ -428,7 +428,7 @@ class _GithubFalsifier(Falsifier):
         narrowing that could have caused any of these 404s necessarily happened before this read,
         so it is caught for all of them rather than only for the ones probed after it. Reading at
         the first absence and caching — the earlier shape — left every later candidate judged
-        against a snapshot that predated its own probe (found in review, PR# 161).
+        against a snapshot that predated its own probe.
 
         Conservative on purpose. A narrowing downgrades every retirement in the run, including
         ones that may genuinely be gone, because after the reach moves there is no longer evidence
@@ -535,6 +535,21 @@ class RepositoryFalsifier(_GithubFalsifier):
 class EnvironmentFalsifier(_GithubFalsifier):
     """Shape B: ``GET /repos/{owner}/{repo}/environments/{name}``; compare the numeric id."""
 
+    def confirm_retirements(
+        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
+    ) -> list[Verdict]:
+        """The parent probe is cached for the run, so a narrowing AFTER it would let a later
+        child 404 through it. The end-of-run reach reading covers that half, on the repository
+        that contains the child. The other half — a permission narrowing while the repository
+        stays readable — is github-core#160 and is a precondition for arming, not closed here."""
+        return self._confirm_against_reach_after_every_probe(client, candidates, verdicts)
+
+    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
+        row = _row_of(candidate.entity_id)
+        if row is None:
+            return "", None
+        return str(getattr(row, "full_name", "") or ""), None
+
     def judge(self, client: ProbeClient, candidate: Candidate) -> Verdict:
         row = _row_of(candidate.entity_id)
         if row is None:
@@ -608,6 +623,21 @@ class WorkflowFalsifier(_GithubFalsifier):
     repository's own candidate, never here.
     """
 
+    def confirm_retirements(
+        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
+    ) -> list[Verdict]:
+        """The parent probe is cached for the run, so a narrowing AFTER it would let a later
+        child 404 through it. The end-of-run reach reading covers that half, on the repository
+        that contains the child. The other half — a permission narrowing while the repository
+        stays readable — is github-core#160 and is a precondition for arming, not closed here."""
+        return self._confirm_against_reach_after_every_probe(client, candidates, verdicts)
+
+    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
+        row = _row_of(candidate.entity_id)
+        if row is None:
+            return "", None
+        return str(getattr(row, "full_name", "") or ""), None
+
     def judge(self, client: ProbeClient, candidate: Candidate) -> Verdict:
         row = _row_of(candidate.entity_id)
         if row is None:
@@ -650,6 +680,21 @@ class WorkflowJobFalsifier(_GithubFalsifier):
     the parent workflow's id. One file fetch per (repository, path) serves every job candidate
     of that file.
     """
+
+    def confirm_retirements(
+        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
+    ) -> list[Verdict]:
+        """The parent probe is cached for the run, so a narrowing AFTER it would let a later
+        child 404 through it. The end-of-run reach reading covers that half, on the repository
+        that contains the child. The other half — a permission narrowing while the repository
+        stays readable — is github-core#160 and is a precondition for arming, not closed here."""
+        return self._confirm_against_reach_after_every_probe(client, candidates, verdicts)
+
+    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
+        row = _row_of(candidate.entity_id)
+        if row is None:
+            return "", None
+        return str(getattr(row, "full_name", "") or ""), None
 
     def judge_all(self, client: ProbeClient, candidates: list[Candidate]) -> list[Verdict]:
         files: dict[tuple[str, str], tuple[dict[str, Any] | None, Probe | None]] = {}

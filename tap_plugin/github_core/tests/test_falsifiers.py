@@ -467,7 +467,7 @@ class TestReachJudgement:
 
 
 class TestReachBoundary:
-    """`all` is a statement about ONE account, not about GitHub (found in review, PR# 161)."""
+    """`all` is a statement about ONE account, not about GitHub ."""
 
     @staticmethod
     def _all(account: str | None) -> Reach:
@@ -505,7 +505,7 @@ class TestReachIsScopedToTheRun:
     own: `GithubAuth` records the installation once, when the token is minted, and never re-reads
     it — so an `all` selection re-derived from that frozen record would keep authorizing exactly
     the retirement this gate exists to refuse. The falsifier therefore throws away a session it
-    owns at the start of each run (found in review, PR# 161).
+    owns at the start of each run .
 
     The test drives that through the session factory rather than by mutating a cached record, so
     it proves the production refresh path and not a hand-written one.
@@ -530,7 +530,14 @@ class TestReachIsScopedToTheRun:
         # an observation, not a failure.
         fake.answer("/installation/repositories", {"repositories": [], "total_count": 0})
 
-        sessions = [(fake, self._auth("all")), (fake, self._auth("selected"))]
+        # Run one takes two sessions: the one that opens it, and the end-of-run reading that
+        # confirms the retirement. Run two is refused at its opening gate, so it never reaches
+        # the confirmation and takes only one.
+        sessions = [
+            (fake, self._auth("all")),
+            (fake, self._auth("all")),
+            (fake, self._auth("selected")),
+        ]
         falsifier = RepositoryFalsifier(session_factory=lambda: sessions.pop(0))
 
         [first] = falsifier.batch_falsify([candidate], _context())
@@ -560,7 +567,7 @@ class TestReachIsScopedToTheRun:
 
 @pytest.mark.django_db
 class TestReachIsReadAgainAfterTheProbe:
-    """A repository has no parent to probe, so its reach is read twice (found in review, PR# 161).
+    """A repository has no parent to probe, so its reach is read twice .
 
     A child's 404 is confirmed against a probe of its parent made at judgement time. A repository
     has no such second check: its only gate is the reach, read once near the start of the run. An
