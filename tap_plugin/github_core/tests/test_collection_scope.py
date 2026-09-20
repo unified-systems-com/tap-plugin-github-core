@@ -14,8 +14,9 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid7
 
 import jsonschema
 import pytest
@@ -25,6 +26,7 @@ from tap_plugin.github_core.collectors.github_collector.collector import (
     plan_from_org_detail,
 )
 from tap_plugin.github_core.collectors.github_collector.identity import (
+    Ref,
     app_installation_id,
     collection_scope_id,
 )
@@ -36,6 +38,8 @@ from tap_plugin.github_core.models.collection_scope import (
 
 from tap_cares.collectors.config import CollectorConfig
 from tap_grid.services import create_node
+
+from .envelopes import edge_from, edge_to, envelope_key
 
 EDGES_DIR = Path(github.__file__).parent.parent / "edges"
 
@@ -129,7 +133,31 @@ def _collector(auth: _Auth, *, account_type: str = "Organization", org_detail: d
     c._fetch_account = lambda client, owner: {"type": account_type}  # type: ignore[method-assign]
     c._fetch_org_detail = lambda client, login: (org_detail, "observed" if org_detail else "unobservable")  # type: ignore[method-assign]
     submitted: list[dict[str, Any]] = []
-    c.submit_grift = submitted.append  # type: ignore[method-assign]
+
+    def _submit(document: dict[str, Any]) -> SimpleNamespace:
+        """Stand in for `submit_grift`, INCLUDING the ref -> id map it answers with.
+
+        The scope node rides its own batch, so its batch-local ref dies at that batch's edge
+        and the id core assigned is learned only here (Issue# 162). A stub that returned None
+        would have let `_scope_uuid` stay None and every later assertion about the
+        installation edge pass vacuously, so the stub assigns an id exactly as the importer
+        does — a fresh UUIDv7 per ref — and reports it the way the result reports it.
+        """
+        submitted.append(document)
+        return SimpleNamespace(
+            imported_batches=[
+                SimpleNamespace(
+                    resolved_refs={
+                        node["entity"]["ref"]: str(uuid7())
+                        for batch in document["batches"]
+                        for node in batch["nodes"]
+                        if "ref" in node["entity"]
+                    }
+                )
+            ]
+        )
+
+    c.submit_grift = _submit  # type: ignore[method-assign]
     return c, submitted
 
 
@@ -144,7 +172,7 @@ class TestEmission:
         (edge,) = batch["edges"]
         job = c.config.collection_job_entity_id
         assert node["entity"]["entity_type"] == "github_core__collection_scope"
-        assert node["entity"]["entity_id"] == str(collection_scope_id(job))
+        assert envelope_key(node) == str(collection_scope_id(job))
         assert node["entity"]["dimensions"] == {"github.platform": "github.com", "github.observation": "execution"}
         assert node["node"]["run_id"] == str(job)
         assert node["node"]["observed_at"] == "2026-09-14T12:00:00Z"
@@ -152,10 +180,13 @@ class TestEmission:
         assert node["node"]["installation_id"] == 7
         assert node["node"]["plan"] == "team"
         assert edge["edge"]["edge_type"] == "SCOPES_RUN__github_core"
-        assert edge["edge"]["from_entity_id"] == node["entity"]["entity_id"]
-        assert edge["edge"]["to_entity_id"] == str(job)
+        assert edge_from(edge) == envelope_key(node)
+        assert edge_to(edge) == str(job)
         assert batch["batch_entity"]["dimensions"] == {"github.platform": "github.com", "github.owner": "acme"}
-        assert c._scope_uuid == collection_scope_id(job)
+        # The id is core's, not the collector's: what the collector keeps is what the import
+        # result told it the ref became, and that is a UUIDv7 nothing here can predict.
+        assert isinstance(c._scope_uuid, UUID) and c._scope_uuid.version == 7
+        assert str(c._scope_uuid) != str(collection_scope_id(job))
         (event,) = c.results["info"]
         assert event["message_code"] == "COLLECTION_SCOPE_ESTABLISHED"
         assert event["message_data"]["plan_source"] == "observed"
@@ -235,8 +266,8 @@ class TestInstallationEdge:
         c._append_scope_installation_edge(edges)
         (edge,) = edges
         assert edge["edge"]["edge_type"] == "DERIVED_FROM_INSTALLATION__github_core"
-        assert edge["edge"]["from_entity_id"] == str(c._scope_uuid)
-        assert edge["edge"]["to_entity_id"] == str(app_installation_id(7))
+        assert edge_from(edge) == str(c._scope_uuid)
+        assert edge_to(edge) == str(app_installation_id(7))
         assert edge["entity"]["dimensions"]["github.observation"] == "execution"
 
     def test_pat_only_has_nothing_to_derive_from(self) -> None:
@@ -401,7 +432,11 @@ class TestModelShape:
         job = uuid4()
         assert collection_scope_id(job) == collection_scope_id(str(job))
         assert collection_scope_id(job) != collection_scope_id(uuid4())
-        assert isinstance(collection_scope_id(job), UUID)
+        # A batch-local ref since Issue# 162, not a minted id: the run is still the whole of
+        # the key, and `CollectionScope.NATURAL_KEY` declares the `run_id` field it is read off.
+        assert isinstance(collection_scope_id(job), Ref)
+        assert str(collection_scope_id(job)) == f"github_core__collection_scope:{job}"
+        assert CollectionScope.NATURAL_KEY == ("run_id",)
 
 
 class TestPlan:

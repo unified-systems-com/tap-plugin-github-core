@@ -35,6 +35,9 @@ class GithubRuleset(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_ruleset"
+    # Owner + GitHub's ruleset id. Owner-scoped, not repo-scoped: one organization ruleset is ONE
+    # node many repositories point at. See identity.py for why the owner prefix is belt-and-braces.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("owner_login", "ruleset_id")
     ENTITY_NAME: ClassVar[str] = "GitHub Ruleset"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A ruleset gating what may land on a ref — its enforcement level, the refs it matches, "

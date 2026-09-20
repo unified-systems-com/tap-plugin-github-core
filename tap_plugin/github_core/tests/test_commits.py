@@ -25,6 +25,8 @@ from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_edge, create_node
 
+from .envelopes import edge_from, edge_to, envelope_key
+
 
 def _create(type_slug: str, payload: dict):
     result = create_node(type_slug, payload)
@@ -299,12 +301,12 @@ class TestEmission:
         ]
         # main and v2 share one commit (emitted twice, same id — collapse keeps one); v1 is
         # another; topic carried no slice and gets neither node nor edge.
-        assert {n["entity"]["entity_id"] for n in commits} == {
+        assert {envelope_key(n) for n in commits} == {
             str(git_commit_id("sha1", "e" * 40)),
             str(git_commit_id("sha1", "c" * 40)),
         }
         assert len(resolves) == 3
-        assert {e["edge"]["from_entity_id"] for e in resolves} == {
+        assert {edge_from(e) for e in resolves} == {
             str(git_ref_id(GIT_REPO, "refs/heads/main")),
             str(git_ref_id(GIT_REPO, "refs/tags/v1")),
             str(git_ref_id(GIT_REPO, "refs/tags/v2")),
@@ -342,10 +344,10 @@ class TestEmission:
             e for e in edges if e["edge"]["edge_type"] == "STORES_COMMIT__git_core"
         ]
         assert len(declares) == 4 and all(
-            e["edge"]["from_entity_id"] == str(GIT_REPO) for e in declares
+            edge_from(e) == str(GIT_REPO) for e in declares
         )
-        assert {e["edge"]["to_entity_id"] for e in stores} == {
-            n["entity"]["entity_id"]
+        assert {edge_to(e) for e in stores} == {
+            envelope_key(n)
             for n in nodes
             if n["entity"]["entity_type"] == "git_core__git_commit"
         }
@@ -360,7 +362,7 @@ class TestEmission:
             if n["entity"]["entity_type"] == "github_core__commit_observation"
         ]
         signed = next(n for n in obs if n["node"]["sha"] == "e" * 40)
-        assert signed["entity"]["entity_id"] == str(
+        assert envelope_key(signed) == str(
             commit_observation_id("github.com", GITHUB_ID, "sha1", "e" * 40)
         )
         assert (
@@ -379,16 +381,16 @@ class TestEmission:
             e
             for e in edges
             if e["edge"]["edge_type"] == "OBSERVES_COMMIT__github_core"
-            and e["edge"]["from_entity_id"] == signed["entity"]["entity_id"]
+            and edge_from(e) == envelope_key(signed)
         )
-        assert observes["edge"]["to_entity_id"] == str(git_commit_id("sha1", "e" * 40))
+        assert edge_to(observes) == str(git_commit_id("sha1", "e" * 40))
         observed_in = next(
             e
             for e in edges
             if e["edge"]["edge_type"] == "OBSERVED_IN_REPOSITORY__github_core"
-            and e["edge"]["from_entity_id"] == signed["entity"]["entity_id"]
+            and edge_from(e) == envelope_key(signed)
         )
-        assert observed_in["edge"]["to_entity_id"] == str(repository_id("acme/widget"))
+        assert edge_to(observed_in) == str(repository_id("acme/widget"))
 
     def test_a_target_without_a_typename_gets_its_kind_from_the_peel(self) -> None:
         """Live collection 2026-09-08: refs whose target carried no `__typename` failed git_core's

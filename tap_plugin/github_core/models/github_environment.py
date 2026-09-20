@@ -26,6 +26,8 @@ class GithubEnvironment(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_environment"
+    # Repository + environment name.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "name")
     ENTITY_NAME: ClassVar[str] = "GitHub Environment"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A named deployment environment and the protection rules standing in front of it."

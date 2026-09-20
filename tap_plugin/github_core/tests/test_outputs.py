@@ -34,6 +34,8 @@ from tap_plugin.github_core.collectors.github_collector.identity import (
 
 from tap_grid.registry import get_model_class
 
+from .envelopes import edge_from, edge_to, envelope_key
+
 _FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "outputs.json").read_text())
 _REPO = "unified-systems-com/tap"
 _OWNER = "unified-systems-com"
@@ -155,7 +157,7 @@ class TestReleasesLand:
         releases = _of_type(nodes, "github_core__github_release")
         assert state == "observed"
         assert len(releases) == len(_RELEASES["nodes"]) == 5
-        assert releases[0]["entity"]["entity_id"] == str(release_id(_REPO, _FIRST_RELEASE["databaseId"]))
+        assert envelope_key(releases[0]) == str(release_id(_REPO, _FIRST_RELEASE["databaseId"]))
         assert releases[0]["node"]["tag_name"] == _FIRST_RELEASE["tagName"]
         assert releases[0]["node"]["target_sha"] == _FIRST_RELEASE["tagCommit"]["oid"]
         assert releases[0]["node"]["author_login"] == _FIRST_RELEASE["author"]["login"]
@@ -178,8 +180,8 @@ class TestReleasesLand:
         )
         targets = _edges_of(edges, "TARGETS_REF__github_core")
         assert len(targets) == 1
-        assert targets[0]["edge"]["to_entity_id"] == str(known)
-        assert targets[0]["edge"]["from_entity_id"] == str(release_id(_REPO, _FIRST_RELEASE["databaseId"]))
+        assert edge_to(targets[0]) == str(known)
+        assert edge_from(targets[0]) == str(release_id(_REPO, _FIRST_RELEASE["databaseId"]))
         assert targets[0]["edge"]["properties"]["tag_name"] == _FIRST_RELEASE["tagName"]
 
     @pytest.mark.spec("req-github-core-releases-2")
@@ -195,7 +197,7 @@ class TestTheProducingRunIsDerived:
         _, _, edges, _ = _collect_releases(_collector(config={_REPO: {"releases": _RELEASES}}), runs=[run])
         builds = _edges_of(edges, "BUILDS_RELEASE__github_core")
         assert len(builds) == 1
-        assert builds[0]["edge"]["from_entity_id"] == str(run["uuid"]), "the run is the initiator; it is the source"
+        assert edge_from(builds[0]) == str(run["uuid"]), "the run is the initiator; it is the source"
         assert builds[0]["edge"]["properties"]["match_kind"] == "tag_ref"
 
     @pytest.mark.spec("req-github-core-releases-3")
@@ -276,7 +278,7 @@ class TestArtifactsLand:
         assert state == "observed"
         assert len(artifacts) == len(_ARTIFACTS["artifacts"]) == 3
         first = artifacts[0]
-        assert first["entity"]["entity_id"] == str(actions_artifact_id(_REPO, _FIRST_ARTIFACT["id"]))
+        assert envelope_key(first) == str(actions_artifact_id(_REPO, _FIRST_ARTIFACT["id"]))
         assert first["node"]["run_id"] == _FIRST_ARTIFACT["workflow_run"]["id"]
         assert first["node"]["digest"] == _FIRST_ARTIFACT["digest"]
         assert first["node"]["head_branch"] == _FIRST_ARTIFACT["workflow_run"]["head_branch"]
@@ -296,7 +298,7 @@ class TestArtifactsLand:
         uploads = _edges_of(edges, "UPLOADS_ARTIFACT__github_core")
         expected = sum(1 for a in _ARTIFACTS["artifacts"] if a["workflow_run"]["id"] == in_batch["run_id"])
         assert len(uploads) == expected >= 1
-        assert uploads[0]["edge"]["from_entity_id"] == str(in_batch["uuid"]), "the run uploaded; it is the source"
+        assert edge_from(uploads[0]) == str(in_batch["uuid"]), "the run uploaded; it is the source"
         # The ref is a field on the artifact, which IS the event; the edge carries no copy (#55).
         assert uploads[0]["edge"]["properties"] == {}
 
@@ -400,12 +402,12 @@ class TestPackagesLand:
         versions = _of_type(nodes, "github_core__github_package_version")
         assert len(packages) == 1 and len(versions) == len(_VERSIONS) >= 5
         pkg = packages[0]
-        assert pkg["entity"]["entity_id"] == str(package_id(_OWNER, "container", _PACKAGE["name"]))
+        assert envelope_key(pkg) == str(package_id(_OWNER, "container", _PACKAGE["name"]))
         assert pkg["node"]["purl"] == f"pkg:docker/ghcr.io/{_OWNER}/{_PACKAGE['name']}"
         assert pkg["node"]["repository_full_name"] == _PACKAGE["repository"]["full_name"]
         assert pkg["node"]["version_count"] == _PACKAGE["version_count"]
         first = versions[0]
-        assert first["entity"]["entity_id"] == str(
+        assert envelope_key(first) == str(
             package_version_id(_OWNER, "container", _PACKAGE["name"], _VERSIONS[0]["id"])
         )
         assert first["node"]["version"] == _VERSIONS[0]["name"]
@@ -427,7 +429,7 @@ class TestPackagesLand:
         _, _, _, edges = _collect_packages(collector, _FakeClient())
         publishes = _edges_of(edges, "PUBLISHES_PACKAGE__github_core")
         assert [e["edge"]["properties"]["link_kind"] for e in publishes] == ["owner"]
-        assert publishes[0]["edge"]["from_entity_id"] == str(account_id(_OWNER))
+        assert edge_from(publishes[0]) == str(account_id(_OWNER))
 
         collector = _collector(pat_client=self._client())
         collector._repo_envelopes[_PACKAGE["repository"]["full_name"]] = {"node": {}}
@@ -452,8 +454,8 @@ class TestPackagesLand:
         _, _, _, edges = _collect_packages(collector, _FakeClient())
         builds = _edges_of(edges, "BUILDS_PACKAGE_VERSION__github_core")
         assert len(builds) == 1
-        assert builds[0]["edge"]["from_entity_id"] == str(run["uuid"])
-        assert builds[0]["edge"]["to_entity_id"] == str(
+        assert edge_from(builds[0]) == str(run["uuid"])
+        assert edge_to(builds[0]) == str(
             package_version_id(_OWNER, "container", _PACKAGE["name"], tagged["id"])
         )
         assert builds[0]["edge"]["properties"] == {"match_kind": "tag_sha", "attested": None}
@@ -543,20 +545,25 @@ class TestPackagesLand:
 
 
 # --------------------------------------------------------------------------------------------
-# Identity and purl — pinned literals, because a natural key cannot change once nodes exist
+# Identity and purl — pinned literals, because a natural key cannot change once nodes exist.
+# Since Issue# 162 the pinned value is the batch-local REF, which IS the natural key as the
+# collector names it; the entity id behind it is assigned by core and is nobody's to pin.
 # --------------------------------------------------------------------------------------------
 
 
 class TestIdentity:
     def test_ids_are_pinned(self) -> None:
-        assert str(release_id("o/r", 1)) == "0f8b7e48-9625-5e7e-b96e-8a4addec545e"
-        assert str(actions_artifact_id("o/r", 2)) == "07bd16a5-49c1-5a01-b97d-61b2d19d7875"
-        assert str(package_id("o", "container", "n")) == "b9a442da-d5c8-5b8c-8953-8a42d1945f4e"
-        assert str(package_version_id("o", "container", "n", 3)) == "377f82cf-0697-577e-9716-9ec08f1e7a9d"
+        assert str(release_id("o/r", 1)) == "github_core__github_release:o/r#1"
+        assert str(actions_artifact_id("o/r", 2)) == "github_core__actions_artifact:o/r#2"
+        assert str(package_id("o", "container", "n")) == "github_core__github_package:o#container#n"
+        assert (
+            str(package_version_id("o", "container", "n", 3))
+            == "github_core__github_package_version:o#container#n#3"
+        )
 
     def test_a_package_is_keyed_on_its_path_not_its_numeric_id(self) -> None:
         """Deleted-and-republished under the same name IS the same thing to everything that pulls it."""
-        assert str(package_id("o", "container", "n")) == "b9a442da-d5c8-5b8c-8953-8a42d1945f4e"
+        assert str(package_id("o", "container", "n")) == "github_core__github_package:o#container#n"
         assert package_id("o", "container", "n") != package_id("o", "npm", "n")
 
     @pytest.mark.parametrize(

@@ -23,11 +23,10 @@ import pytest
 from tap_plugin.github_core.collectors.github_collector import collector as collector_module
 from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
 from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
-from tap_plugin.github_core.collectors.github_collector.identity import (
-    account_id,
-    repository_id,
-    workflow_id,
-)
+from tap_plugin.github_core.collectors.github_collector.identity import workflow_id
+from tap_plugin.github_core.models.github_account import GithubAccount
+from tap_plugin.github_core.models.github_repository import GithubRepository
+from tap_plugin.github_core.models.github_workflow import GithubWorkflow
 from tap_plugin.github_core.tests.fake_github import FakeGithub
 
 from tap.pytest_harness import isolated_registry
@@ -38,6 +37,20 @@ from tap_grid.candidates import candidates_of
 from tap_grid.completeness import completeness_of
 from tap_grid.falsifiers import verdicts_of
 from tap_grid.models import Batch, Edge
+
+
+def _assigned(model: Any, **natural_key: Any) -> str:
+    """The id core ASSIGNED the row this natural key names, as the surface's subject cites it.
+
+    Since github_core adopted assigned identity (Issue# 162) a surface's subject is no longer a
+    value a test can derive: the collector sends a batch-local ref, core resolves it through the
+    model's ``NATURAL_KEY``, and the id it hands back is what the completeness statement carries.
+    Looking it up through the declared key is the honest read — and it is a second assertion for
+    free, because a lookup on the declared key finding exactly one row is the same search the
+    importer ran.
+    """
+    return str(model.objects.get(**natural_key).entity_id)
+
 
 OWNER = "acme"
 REPO = "acme/app"
@@ -144,10 +157,14 @@ class TestOneRunAgainstTheFakeGithub:
             "repository.environments",
             "workflow.jobs",
         }
-        repos = by_relation[("account.repositories", str(account_id(OWNER)))]
-        workflows = by_relation[("repository.workflows", str(repository_id(REPO)))]
-        environments = by_relation[("repository.environments", str(repository_id(REPO)))]
-        jobs = by_relation[("workflow.jobs", str(workflow_id(REPO, 100)))]
+        repos = by_relation[("account.repositories", _assigned(GithubAccount, login=OWNER))]
+        workflows = by_relation[("repository.workflows", _assigned(GithubRepository, full_name=REPO))]
+        environments = by_relation[
+            ("repository.environments", _assigned(GithubRepository, full_name=REPO))
+        ]
+        jobs = by_relation[
+            ("workflow.jobs", _assigned(GithubWorkflow, full_name=REPO, workflow_id=100))
+        ]
         assert repos["edge_type"] == "OWNS_REPO__github_core" and repos["count_observed"] == 1
         assert workflows["edge_type"] == "DEFINES_WORKFLOW__github_core" and workflows["count_observed"] == 1
         assert environments["edge_type"] == "DECLARES_ENVIRONMENT__github_core" and environments["count_observed"] == 1
@@ -215,8 +232,8 @@ class TestAFailedRepositoryDoesNotLeaveAnAdmittedSurface:
         statement = completeness_of(_lifecycle_batch(job))
         assert statement is not None
         by_key = {(s["relation"], s["subject"]): s for s in statement["surfaces"]}
-        healthy = by_key[("repository.workflows", str(repository_id(REPO)))]
-        failed = by_key[("repository.workflows", str(repository_id(broken)))]
+        healthy = by_key[("repository.workflows", _assigned(GithubRepository, full_name=REPO))]
+        failed = by_key[("repository.workflows", _assigned(GithubRepository, full_name=broken))]
         assert healthy["admitted"] is True and healthy["reconcilable"] is True
         assert failed["enumeration_complete"] is True, "the listing itself was read to the end"
         assert failed["admitted"] is False and failed["reconcilable"] is False
@@ -224,14 +241,13 @@ class TestAFailedRepositoryDoesNotLeaveAnAdmittedSurface:
         for relation in ("repository.environments", "workflow.jobs"):
             broken_surfaces = [s for k, s in by_key.items() if k[0] == relation and s["admitted"] is False]
             assert broken_surfaces, f"{relation}: the failed repository's surface is withdrawn too"
-        account = by_key[("account.repositories", str(account_id(OWNER)))]
+        account = by_key[("account.repositories", _assigned(GithubAccount, login=OWNER))]
         assert account["admitted"] is False and account["reasons"]["admitted"].startswith("collection_partial")
         record = candidates_of(_lifecycle_batch(job))
         assert record is not None
         skipped = {e["subject"]: e["reason"] for e in record["surfaces"] if e["outcome"] == "skipped"}
-        assert (
-            str(repository_id(broken)) in skipped and "surface_not_reconcilable" in skipped[str(repository_id(broken))]
-        )
+        broken_id = _assigned(GithubRepository, full_name=broken)
+        assert broken_id in skipped and "surface_not_reconcilable" in skipped[broken_id]
 
 
 class TestListingContract:

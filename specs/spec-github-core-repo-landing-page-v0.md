@@ -386,7 +386,7 @@ table and validated against `grift-document.schema.json` at load.
 | --- | --- | :---: | --- | --- |
 | req-github-core-repo-page-grift-1 | Single GRIFT Batch | Implemented | The page + all six panel instances + all `USES_PANEL` edges land via one GRIFT batch. | |
 | req-github-core-repo-page-grift-2 | Manifest-Declared | Implemented | The GRIFT file is declared in `plugins/github_core/tap-plugin.toml` under `[grift]`. | |
-| req-github-core-repo-page-grift-3 | Stable Entity Ids | Implemented | Page and panel entity_ids are stable values authored as literal strings in the GRIFT JSON so re-import upserts in place. | UUIDv7 minted once via `scripts/uuid7` and recorded in the JSON. UUIDv5-from-natural-key is the convention for collected entities (see `plugins/github_core/collectors/github_collector/identity.py`); hardcoded page/panel ids are authored, not collected, so UUIDv7 is the right shape. |
+| req-github-core-repo-page-grift-3 | Stable Entity Ids | Implemented | Page and panel entity_ids are stable values authored as literal strings in the GRIFT JSON so re-import upserts in place. | UUIDv7 minted once via `scripts/uuid7` and recorded in the JSON. A COLLECTED entity's id is assigned by core, which the collector reaches by naming the node with a batch-local ref (`req-github-core-models-4`, Issue# 162); a page or panel is AUTHORED rather than collected and observes no source object, so it keeps its literal UUIDv7 and upserts on it. |
 | req-github-core-repo-page-grift-4 | Schema Validates | Implemented | The GRIFT batch passes `grift-document.schema.json` validation at load. | |
 
 ### v0 Non-Goals

@@ -32,6 +32,8 @@ from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_edge, create_node
 
+from .envelopes import envelope_key
+
 
 def _create(type_slug: str, payload: dict):
     result = create_node(type_slug, payload)
@@ -47,8 +49,17 @@ def _create(type_slug: str, payload: dict):
 
 class TestIdentity:
     def test_the_derivation_is_pinned_to_a_literal(self) -> None:
-        """A natural key cannot change once nodes exist; guard the derivation, not `f(x) == f(x)`."""
-        assert str(github_action_id("actions/checkout")) == "be97c026-1c75-58c5-a681-89c635bfc229"
+        """A natural key cannot change once nodes exist; guard the derivation, not `f(x) == f(x)`.
+
+        Pinned to the REF string since github_core adopted assigned identity (Issue# 162): the
+        node's id is core's to assign and is no longer a function of anything here, but the key
+        the collector names the source object by still is, and it is what a second run must
+        reproduce exactly for `find_existing` to find the first run's row.
+        """
+        assert (
+            str(github_action_id("actions/checkout"))
+            == "github_core__github_action:actions/checkout"
+        )
 
     def test_one_action_is_one_node_however_many_repositories_use_it(self) -> None:
         """Platform-global, like `github_app`: a repository parameter here would mint one
@@ -63,7 +74,7 @@ class TestIdentity:
         (job, action) alone would keep only the last after envelope collapse — silently."""
         job = workflow_job_id("o/r", 1, "build")
         action = github_action_id("actions/checkout")
-        assert str(uses_action_edge_id(job, action, "v4")) == "b8e8a365-d0d1-574a-9363-e6ea8a917d1a"
+        assert str(uses_action_edge_id(job, action, "v4")) == "53a16318-fa59-5c29-a009-8931f926f931"
         assert uses_action_edge_id(job, action, "v4") != uses_action_edge_id(job, action, "a" * 40)
 
 
@@ -231,8 +242,8 @@ class TestEmission:
         ]
         nodes, edges = _emit(_collector(), refs)
         assert len(edges) == 2
-        assert len({e["entity"]["entity_id"] for e in edges}) == 2
-        assert len({n["entity"]["entity_id"] for n in nodes}) == 1
+        assert len({envelope_key(e) for e in edges}) == 2
+        assert len({envelope_key(n) for n in nodes}) == 1
 
     def test_the_same_ref_in_two_steps_is_one_edge_with_both_positions(self) -> None:
         refs = [

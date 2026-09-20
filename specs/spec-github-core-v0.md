@@ -268,17 +268,49 @@ Natural-key inputs:
 | `github_actions_run` | `owner/repo` + run id |
 | `github_actions_job` | `owner/repo` + job id |
 | `github_runner` | `owner/repo` + runner id for durable registered runners |
-| `github_ruleset` | ruleset `databaseId` **alone** — deliberately not scoped by repo or org |
+| `github_ruleset` | owner login + GitHub's ruleset id — **not** repo-scoped |
 | `github_app` | app slug (`dependabot`) — singleton across repos |
 | `workflow_job` | `owner/repo` + workflow id + the job's YAML key |
-| `git_ref` | `owner/repo` + the FULL ref path (`refs/heads/main`) |
-| `github_ruleset` | owner login + GitHub's ruleset id — **not** repo-scoped |
+| `git_ref` | `owner/repo` + the FULL ref path (`refs/heads/main`) — git_core's type, minted there |
 | `github_environment` | `owner/repo` + environment name |
 | `actions_cache` | `owner/repo` + cache id |
+| `actions_artifact` | `owner/repo` + GitHub's artifact id |
+| `actions_secret` | scope + owner login + `owner/repo` + environment name + secret name |
 | `app_installation` | GitHub's installation id (unique platform-wide) |
 | `collection_scope` | the `collection_job` entity id — one scope per run |
+| `pull_request` | the BASE `owner/repo` + the PR number |
+| `github_custom_property` | owner login + the property name as reported |
+| `status_check` | owner login + the context string (case-sensitive) |
+| `rule_suite` | GitHub's suite id (unique platform-wide) |
+| `code_scanning_alert` | `owner/repo` + GitHub's alert number |
+| `code_scanning_analysis` | `owner/repo` + GitHub's analysis id |
+| `github_release` | `owner/repo` + GitHub's release id — **not** the tag name |
+| `github_package` | owner login + package type + package name |
+| `github_package_version` | owner login + package type + package name + GitHub's version id |
+| `github_action` | the `uses:` path with the ref stripped — platform-global |
+| `commit_observation` | the repository's numeric id + hash algorithm + the commit sha |
 
-Entity IDs are deterministic UUIDv5 values over the model type and natural key.
+The `github_ruleset` row previously appeared TWICE in this table, once saying "ruleset
+`databaseId` **alone**" and once saying "owner login + GitHub's ruleset id". The code has
+always been owner-scoped (`identity.py::ruleset_id(owner, ruleset_id_int)`), so the
+owner-scoped row is the true one and the `databaseId`-alone row has been removed
+(Issue# 162). The Ruleset Collection section below still narrates the verification that the
+bare id WOULD have keyed correctly; the owner prefix is belt-and-braces, not a correction.
+
+**Entity ids are ASSIGNED, not derived** (`req-grid-entity-natural-key`). Each model declares
+its key above as a `NATURAL_KEY` tuple of FIELD names; the collector names each node with a
+batch-local `ref` (`<entity_type>:<natural key>`) and the GRIFT importer resolves it —
+`find_existing` on the declared fields under a transaction-scoped advisory lock, a fresh
+UUIDv7 on a miss. Two exceptions still carry a derived UUIDv5, both because the type is not
+github_core's to declare or the declaration cannot yet say what the recipe says: the
+`compliance_core__compliance_finding` github_core mints for a code-scanning alert, and
+`commit_observation` (see its note below).
+
+**`commit_observation` — open.** Its recipe keys on the platform HOST as well, and the model
+has no `host` field for a declaration to name, so the declared key is narrower than the
+recipe. Inert while the host is the constant `github.com`; a GHES tenant sharing the grid
+could collide on repository id. Adding `host` as a field is the obvious fix and is not ruled
+on, so the type keeps an explicit derived id for now.
 
 #### Configuration Field Shape
 
@@ -322,10 +354,10 @@ must not conflate the two.
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-models-1 | V0 Models Declared | Implemented | The plugin declares the seven v0 model types listed above. | The original six landed via 0001_initial; `github_platform` via 0002. `oidc_issuer` (originally 0003) was extracted to `identity_core` and dropped here in 0004. |
-| req-github-core-models-8 | Platform Singleton Synthesized | Implemented | `github_platform` is a synthesized singleton (one per run, deterministic id keyed on the host), not fetched from any API; re-runs and hand-written GRIFT nodes with the same host upsert cleanly onto it. | Collector emits it before the per-repo walk; mirrors `aws_core`'s `aws_account_singleton` pattern. |
+| req-github-core-models-8 | Platform Singleton Synthesized | Implemented | `github_platform` is a synthesized singleton (one per run, keyed on the host), not fetched from any API; re-runs and hand-written GRIFT nodes with the same host upsert cleanly onto it. | Collector emits it before the per-repo walk; mirrors `aws_core`'s `aws_account_singleton` pattern. |
 | req-github-core-models-9 | OIDC Issuer Synthesized (via identity_core) | Implemented | The collector still synthesizes the GitHub Actions issuer node, but the type and vocabulary live in `identity_core` (`identity_core__oidc_issuer`); github mints it through `identity_core.issuer.oidc_issuer_node_envelope`. Any observer (samsite, AWS enrichment) converges on the same node by canonical-URL id regardless of run order. | Extracted 2026-07-08; see spec-identity-core-v0.md (req-identity-core-migration). |
 | req-github-core-models-3 | Job Steps Blobbed | Implemented | Workflow job steps remain structured data in `github_actions_job.configuration` in v0. | Future visualization target. |
-| req-github-core-models-4 | Deterministic Identity | Implemented | Every model uses deterministic UUIDv5 identity based on the natural keys above. | `collectors/github_collector/identity.py` mints UUIDv5 from `(entity_type, natural_key)` under a fixed namespace. |
+| req-github-core-models-4 | Assigned Identity, Declared Search | Implemented | Every model declares `NATURAL_KEY` over the fields named in the table above, and the collector emits a batch-local `ref` rather than a minted id, so `Entity.id` is assigned by core (`req-grid-entity-natural-key`). | Was "Deterministic Identity": every model minted a UUIDv5 from `(entity_type, natural_key)`. Adopted 2026-09-20 (Issue# 162 - tap-plugin-github-core); github_core is core's first adopter. `identity.py` now returns `Ref` strings; edge ids stay UUIDv5 (the importer never substitutes an edge's assignment — Issue# 690 - tap), as do `compliance_core__compliance_finding` and `commit_observation`. |
 | req-github-core-models-7 | Raw Workflow YAML Retained | Implemented | `github_workflow.configuration.raw_yaml` stores the full workflow YAML body fetched at collection time. | Parser stores raw bytes; collector base64-decodes the Contents-API `content` field and writes it. |
 
 ### Ruleset Collection
@@ -357,9 +389,10 @@ work.
 
 #### Identity
 
-The natural key is GitHub's ruleset `databaseId` **alone**, deliberately not scoped by
-repository or organization. This is unfixable once ids are minted, so it was verified rather
-than assumed (2026-08-27):
+The natural key is owner login + GitHub's ruleset `databaseId`, deliberately not scoped by
+REPOSITORY. The verification below (2026-08-27) established that the bare `databaseId` would
+also have keyed correctly — the owner prefix is belt-and-braces, kept because a natural key
+cannot be changed once nodes exist:
 
 - **Organization- and repository-sourced rulesets share one sequence.** Sorted, the six
   observed ids interleave by source — an org ruleset, then three repo rulesets, then two more

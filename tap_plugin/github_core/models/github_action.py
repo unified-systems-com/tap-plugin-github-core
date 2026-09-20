@@ -32,6 +32,9 @@ class GithubAction(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_action"
+    # The `uses:` path with the ref stripped. Platform-global: `actions/checkout` is ONE node.
+    # The ref is deliberately not here — the pin belongs to the edge.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("action_path",)
     ENTITY_NAME: ClassVar[str] = "GitHub Action"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A reusable action a declared job calls with `uses:` — third-party code that runs with "

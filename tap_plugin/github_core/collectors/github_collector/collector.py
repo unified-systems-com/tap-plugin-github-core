@@ -14,6 +14,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any, ClassVar, NamedTuple
 from urllib.parse import quote
+from uuid import UUID
 
 from tap_plugin.git_core.identity import (
     OID_LENGTH,
@@ -46,12 +47,15 @@ from .app_jwt import GithubAppAuthError
 from .auth import PREFER_APP, PREFER_PAT, GithubAuth
 from .batch import (
     assemble_batch,
+    endpoint_keys,
+    envelope_key,
     edge_envelope,
     node_envelope,
 )
 from .enrichment import resolve_links
 from .graphql_client import _ENVIRONMENT_PAGE_SIZE, GithubGraphQLClient, GithubGraphQLError
 from .identity import (
+    Ref,
     account_id,
     actions_artifact_id,
     actions_cache_id,
@@ -1269,7 +1273,7 @@ class GithubCollector(CollectorBase):
         # one-repo scope never happened and at nineteen rejected the whole batch for a dangling
         # endpoint. Drop those edges and say how many, rather than losing every repo.
         edges, dropped = self._drop_dangling_edges(
-            edges, {e["entity"]["entity_id"] for e in nodes}
+            edges, {k for k in (envelope_key(n) for n in nodes) if k is not None}
         )
         if dropped:
             self.record_warn(
@@ -1310,11 +1314,21 @@ class GithubCollector(CollectorBase):
         # walked no listing at all says so (a statement with zero surfaces, not no statement).
         collection_batch_id = str(github_batch["batches"][0]["batch_entity"]["entity_id"])
         listings = self._listing_state()["listings"]
+        result = self.submit_grift(github_batch)
+        # A SURFACE LEAVES THE BATCH (Issue# 162). The completeness statement is recorded on the
+        # RUN, not inside the document, and candidate derivation resolves its `subject` as a grid
+        # entity id (`tap_grid/candidates.py::_resolve_parent`). A ref is batch-local and means
+        # nothing there, so the surfaces are recorded AFTER the import — the one moment the
+        # assigned ids exist — rather than before it as they were. An unresolved subject keeps
+        # the ref and derivation says `subject_unresolved`: a visible skip, not a silent loss.
         for listing in listings:
-            self.record_surface(**listing, applied_batches=[collection_batch_id])
+            subject = self._assigned_id(result, listing["subject"])
+            self.record_surface(
+                **{**listing, "subject": str(subject or listing["subject"])},
+                applied_batches=[collection_batch_id],
+            )
         if not listings:
             self.declare_no_surfaces()
-        self.submit_grift(github_batch)
         self.record_info(
             _SITE_BATCH_SUBMITTED,
             "COLLECTION_BATCH_SUBMITTED",
@@ -1499,12 +1513,18 @@ class GithubCollector(CollectorBase):
 
         Applies to the collection batch only, where both endpoints are always emitted alongside
         the edge. Enrichment edges resolve against the grid and must never be filtered this way.
+
+        ``node_ids`` holds whatever each node envelope names itself by — a ref for a type that
+        has adopted assigned identity, an entity id for one that has not — and an edge endpoint
+        is compared on the same footing (``endpoint_keys``). A ref endpoint that names no node
+        of this batch is a hard GRIFT error (``unknown_ref``) rather than a dangling id, so
+        catching it here is the difference between dropping one edge and losing the batch.
         """
         kept: list[dict[str, Any]] = []
         dropped: list[str] = []
         for env in edges:
             e = env.get("edge") or {}
-            src, tgt = str(e.get("from_entity_id")), str(e.get("to_entity_id"))
+            src, tgt = endpoint_keys(env)
             if src in node_ids and tgt in node_ids:
                 kept.append(env)
             else:
@@ -1512,25 +1532,56 @@ class GithubCollector(CollectorBase):
         return kept, dropped
 
     @staticmethod
+    def _assigned_id(result: Any, value: Any) -> UUID | None:
+        """The entity id core assigned to a batch-local ref, read off the import result.
+
+        The only supported way a collector learns what a ref became (`tap_grid/grift/refs.py`:
+        "the ref -> id map is returned on the import result, which is where a collector learns
+        what it was given"). The map is reported per IMPORTED batch, so a rejected or skipped
+        batch yields None rather than a plausible-looking id.
+
+        Takes the ref by VALUE rather than by type: a ref that has been through `str()` on its
+        way into a per-run record (`_note_listing` stores its subject as text) is still the same
+        key in the map. A value that is already an id passes straight through, and anything that
+        is neither is None — three states, never two.
+        """
+        key = str(value)
+        for batch in getattr(result, "imported_batches", None) or []:
+            assigned = (getattr(batch, "resolved_refs", None) or {}).get(key)
+            if assigned:
+                return UUID(str(assigned))
+        if isinstance(value, Ref):
+            return None
+        try:
+            return UUID(key)
+        except (ValueError, AttributeError, TypeError):
+            return None
+
+    @staticmethod
     def _collapse_by_entity_id(
         envelopes: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], int]:
-        """Return the envelopes with duplicate ``entity.entity_id`` collapsed, and the count removed.
+        """Return the envelopes with a duplicate identity collapsed, and the count removed.
+
+        The identity is the envelope's ``ref`` or its ``entity_id``, whichever it carries
+        (``envelope_key``). Collapsing by ref is not merely the analogue of collapsing by id —
+        it is load-bearing: a repeated ref is a hard GRIFT error (``duplicate_ref``) that
+        rejects the whole batch, so the same account or action seen from nineteen repositories
+        MUST arrive once.
 
         Order is preserved and the LAST occurrence wins, so the freshest observation of a shared
-        node survives. Envelopes without an entity id pass through untouched rather than being
-        silently dropped — an id-less envelope is a different bug and GRIFT should be the one to
+        node survives. Envelopes that name themselves neither way pass through untouched rather
+        than being silently dropped — that is a different bug and GRIFT should be the one to
         say so.
         """
         seen: dict[str, int] = {}
         out: list[dict[str, Any]] = []
         removed = 0
         for env in envelopes:
-            eid = (env.get("entity") or {}).get("entity_id")
-            if eid is None:
+            key = envelope_key(env)
+            if key is None:
                 out.append(env)
                 continue
-            key = str(eid)
             if key in seen:
                 out[seen[key]] = env
                 removed += 1
@@ -3709,7 +3760,8 @@ class GithubCollector(CollectorBase):
         status a listing was refused with: 401/403 is "not authorized", anything else "not
         determinable" — in both cases nothing was enumerated or admitted. `source_consistent`
         is always "unknown": GitHub promises no snapshot across pages (req-grid-reconcile-evidence-2).
-        The surfaces are recorded at submission, once the batch they were applied by has an id.
+        The surfaces are recorded just AFTER submission, once the batch they were applied by has
+        an id AND the subject's batch-local ref has been resolved to the id core assigned it.
         """
         reasons = dict(reasons or {})
         if refused is not None:
@@ -6117,7 +6169,7 @@ class GithubCollector(CollectorBase):
         batch_dims = {"github.platform": "github.com"}
         if owner is not None:
             batch_dims["github.owner"] = owner
-        self.submit_grift(
+        result = self.submit_grift(
             assemble_batch(
                 batch_name=f"github_core collection scope: {owner or 'explicit repositories'}",
                 description=(
@@ -6129,7 +6181,13 @@ class GithubCollector(CollectorBase):
                 batch_dimensions=batch_dims,
             )
         )
-        self._scope_uuid = scope_uuid
+        # THE BATCH BOUNDARY (Issue# 162). The scope node rides its own batch and its ref dies
+        # with it; the main batch, submitted at the end of the run, names the scope as the
+        # source of `DERIVED_FROM_INSTALLATION`, and the reliability seam patches tier verdicts
+        # onto it through the service layer. Both need the id core ASSIGNED, which the import
+        # result is the one place to learn. A run whose batch did not import leaves this None,
+        # and `_append_scope_installation_edge` already declines to guess on None.
+        self._scope_uuid = self._assigned_id(result, scope_uuid)
         self.record_info(
             _SITE_COLLECTION_SCOPE,
             "COLLECTION_SCOPE_ESTABLISHED",
@@ -6137,7 +6195,7 @@ class GithubCollector(CollectorBase):
             f"selection {selection.get('kind')} "
             f"({'complete' if selection.get('complete') else 'incomplete'}); plan {plan}.",
             message_data={
-                "scope_id": str(scope_uuid),
+                "scope_id": str(self._scope_uuid or scope_uuid),
                 "installation_id": int(inst_id) if inst_id is not None else None,
                 "selection_kind": selection.get("kind"),
                 "complete": bool(selection.get("complete")),

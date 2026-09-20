@@ -33,6 +33,13 @@ class ActionsSecret(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__actions_secret"
+    # Scope is in the key because an org secret and a repository secret can share a name and are
+    # different credentials; `full_name` / `environment_name` are "" at the scopes that have none.
+    # NOTE: `identity.py.actions_secret_id` upper-cases the name in its key and this declaration
+    # cannot (the search filters the stored field, which holds the name as GitHub returned it).
+    # Inert in practice: node minting reads the secrets API, which returns one canonical casing
+    # per secret; the case-fold guards REFERENCE matching, which is a separate map.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("scope", "owner_login", "full_name", "environment_name", "name")
     ENTITY_NAME: ClassVar[str] = "GitHub Actions Secret"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "The name and scope of an Actions secret. GitHub's API returns names only — the value is "

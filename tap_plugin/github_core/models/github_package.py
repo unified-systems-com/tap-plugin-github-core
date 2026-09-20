@@ -22,6 +22,8 @@ class GithubPackage(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_package"
+    # Owner + type + name — GitHub's own REST path to the package, not its numeric id.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("owner_login", "package_type", "name")
     ENTITY_NAME: ClassVar[str] = "GitHub Package"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A package published to GitHub Packages — a container image on ghcr.io, an npm or Maven "

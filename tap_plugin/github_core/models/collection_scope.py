@@ -290,6 +290,8 @@ class CollectionScope(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__collection_scope"
+    # The `collection_job` entity id. One scope per run by construction: a re-run is a new job.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("run_id",)
     ENTITY_NAME: ClassVar[str] = "Collection Scope"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "One per collection run: which repositories, credentials, installation and plan this run "

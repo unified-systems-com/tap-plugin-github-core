@@ -20,6 +20,8 @@ class GithubPlatform(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_platform"
+    # The host. A GHES tenant is a second platform, not a special case.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("host",)
     ENTITY_NAME: ClassVar[str] = "GitHub Platform"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A GitHub platform instance (github.com or a GHES host)."

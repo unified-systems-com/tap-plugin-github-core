@@ -24,6 +24,8 @@ class GithubRelease(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_release"
+    # Repository + GitHub's release id, never the tag: a tag can be moved and a release re-cut.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "release_id")
     ENTITY_NAME: ClassVar[str] = "GitHub Release"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A published release — the tag it was cut on, the commit that tag resolved to when observed, "

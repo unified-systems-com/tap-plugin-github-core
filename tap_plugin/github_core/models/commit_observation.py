@@ -24,6 +24,13 @@ class CommitObservation(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__commit_observation"
+    # The repository's STABLE numeric id (never `owner/repo`, which renames) plus the commit
+    # identity. NOTE: `identity.py.commit_observation_id` also keys on the platform HOST, which
+    # this model has no field for. Inert while the host is the constant `github.com`
+    # (`_PLATFORM_DIMENSIONS`); a GHES tenant on the same grid could collide on repository id,
+    # so `host` must become a field and join this key before GHES lands. This type is therefore
+    # still addressed by an explicit id in the collector, not a ref — see Issue# 162.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("repository_github_id", "hash_algorithm", "sha")
     ENTITY_NAME: ClassVar[str] = "Commit Observation"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "GitHub's view of a commit in one repository — the accounts it resolved the author and committer "

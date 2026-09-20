@@ -6,6 +6,7 @@ Spec: plugins/github_core/specs/spec-github-core-v0.md
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import jsonschema
 import pytest
@@ -30,6 +31,8 @@ from tap_plugin.github_core.collectors.github_collector.secret import (
     api_base_url,
     initial_run_limit,
 )
+
+from .envelopes import edge_to, envelope_key
 
 
 class TestManifests:
@@ -771,7 +774,7 @@ class TestEnvelopeCollapse:
             self._env("a", "platform-again"), self._env("c", "repo-2"),
         ])
         assert removed == 1
-        assert [e["entity"]["entity_id"] for e in out] == ["a", "b", "c"]
+        assert [envelope_key(e) for e in out] == ["a", "b", "c"]
         assert out[0]["entity"]["name"] == "platform-again", "the freshest observation should win"
 
     def test_nothing_to_collapse_is_a_no_op(self) -> None:
@@ -787,6 +790,48 @@ class TestEnvelopeCollapse:
 
         out, removed = GithubCollector._collapse_by_entity_id([{"node": {"name": "orphan"}}, self._env("a", "x")])
         assert removed == 0 and len(out) == 2
+
+    def test_a_repeated_ref_collapses_the_same_way_a_repeated_id_does(self) -> None:
+        """The reason this helper still matters after assigned identity (Issue# 162).
+
+        A node now names itself by a batch-local `ref`, and a ref used twice in one batch is a
+        hard GRIFT error (`duplicate_ref`) that rejects the batch exactly as a repeated
+        `entity_id` did. Asserted with refs rather than only ids because the whole failure this
+        helper was written for — 43 repeated envelopes at a 19-repo scope, nothing landing —
+        would come back unchanged if the collapse still looked only at `entity_id`.
+        """
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        def _ref(ref: str, name: str) -> dict[str, Any]:
+            return {"entity": {"ref": ref, "name": name}, "node": {"name": name}}
+
+        out, removed = GithubCollector._collapse_by_entity_id([
+            _ref("github_core__github_account:acme", "acme"),
+            self._env("b", "repo-1"),
+            _ref("github_core__github_account:acme", "acme-again"),
+        ])
+        assert removed == 1
+        assert [envelope_key(e) for e in out] == ["github_core__github_account:acme", "b"]
+        assert out[0]["entity"]["name"] == "acme-again"
+
+    def test_a_dangling_ref_endpoint_is_dropped_like_a_dangling_id(self) -> None:
+        """An edge endpoint naming no node of its batch is `unknown_ref` — a rejected batch, not
+        one dropped edge — so it has to be caught here on the ref as well as on the id."""
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        def _edge(src: str, tgt: str, by_ref: bool) -> dict[str, Any]:
+            keys = ("from_ref", "to_ref") if by_ref else ("from_entity_id", "to_entity_id")
+            return {"entity": {"entity_id": "e"}, "edge": {keys[0]: src, keys[1]: tgt, "edge_type": "T"}}
+
+        kept, dropped = GithubCollector._drop_dangling_edges(
+            [
+                _edge("r:a", "r:b", by_ref=True),
+                _edge("r:a", "r:gone", by_ref=True),
+                _edge("r:a", "id-1", by_ref=False),
+            ],
+            {"r:a", "r:b", "id-1"},
+        )
+        assert len(kept) == 2 and dropped == ["T"], "the mixed ref/id edge survives; only the dangling one goes"
 
 
 class TestPerRepoContainment:
@@ -833,7 +878,7 @@ class TestDanglingEdgeGuard:
 
         kept, dropped = GithubCollector._drop_dangling_edges(
             [self._edge("run", "gone"), self._edge("run", "wf")], {"run", "wf"})
-        assert [e["edge"]["to_entity_id"] for e in kept] == ["wf"]
+        assert [edge_to(e) for e in kept] == ["wf"]
         assert dropped == ["EXECUTES_WORKFLOW__github_core"]
 
     def test_edge_from_uncollected_node_is_also_dropped(self) -> None:

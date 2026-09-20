@@ -18,6 +18,8 @@ import tap_plugin.github_core.models as github  # noqa: F401 — trigger model r
 from tap_plugin.github_core.collectors.github_collector.api_client import GithubAPIError
 from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
 
+from .envelopes import edge_to, envelope_key
+
 _ORG = "acme"
 
 
@@ -357,7 +359,7 @@ def test_every_environment_gets_its_containment_edge_when_every_detail_succeeds(
     assert [n["node"]["name"] for n in nodes] == ["production", "staging"]
     declares = [e for e in edges if e["edge"]["edge_type"] == "DECLARES_ENVIRONMENT__github_core"]
     assert len(declares) == 2, "one containment edge per environment, refusal or not"
-    assert {e["edge"]["to_entity_id"] for e in declares} == {n["entity"]["entity_id"] for n in nodes}
+    assert {edge_to(e) for e in declares} == {envelope_key(n) for n in nodes}
     assert _codes(c, "warn") == []
     assert nodes[0]["node"]["can_admins_bypass"] is False and nodes[1]["node"]["can_admins_bypass"] is None
 

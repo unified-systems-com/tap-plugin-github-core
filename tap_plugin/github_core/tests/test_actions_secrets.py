@@ -26,6 +26,8 @@ from tap_plugin.github_core.collectors.github_collector.identity import (
 )
 from tap_plugin.github_core.collectors.github_collector.parser import secret_names_in
 
+from .envelopes import edge_from, edge_to
+
 _OWNER = "acme"
 _REPO = "acme/widget"
 _DIMS = {
@@ -181,7 +183,7 @@ def test_repository_and_environment_secrets_land_with_their_holders() -> None:
     assert by_name["PROD_TOKEN"]["scope"] == "environment"
     assert by_name["PROD_TOKEN"]["environment_name"] == "production"
     # The holder of each is the object the listing belonged to, not the repository for both.
-    holders = {(e["edge"]["from_entity_id"], e["edge"]["to_entity_id"]) for e in edges}
+    holders = {(edge_from(e), edge_to(e)) for e in edges}
     assert (str(repository_id(_REPO)), str(found["DEPLOY_KEY"][0])) in {(str(a), str(b)) for a, b in holders}
     assert (str(env_uuid), str(found["PROD_TOKEN"][0])) in {(str(a), str(b)) for a, b in holders}
 
@@ -218,7 +220,7 @@ def test_an_organisation_secret_carries_its_sharing_visibility() -> None:
     assert nodes[0]["node"]["visibility"] == "all"
     assert nodes[0]["node"]["scope"] == "organization"
     assert nodes[0]["node"]["full_name"] == "", "an organisation secret belongs to no repository"
-    assert str(edges[0]["edge"]["from_entity_id"]) == str(account_id(_OWNER))
+    assert str(edge_from(edges[0])) == str(account_id(_OWNER))
 
 
 # ---------------------------------------------------------------------------------------------

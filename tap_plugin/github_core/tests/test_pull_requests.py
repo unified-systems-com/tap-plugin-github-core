@@ -33,6 +33,8 @@ from tap_plugin.github_core.models.pull_request import PullRequest
 
 from tap_grid.services import create_node
 
+from .envelopes import edge_from, edge_to, envelope_key
+
 _FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "pull_requests.json").read_text())
 _REPO = "unified-systems-com/tap"
 _OWNER = "unified-systems-com"
@@ -111,7 +113,7 @@ class TestPullRequestsLand:
         assert len(pulls) == _ROWS == 5  # three captured + two synthetic
         first = _captured()
         envelope = pulls[first["number"]]
-        assert envelope["entity"]["entity_id"] == str(pull_request_id(_REPO, first["number"]))
+        assert envelope_key(envelope) == str(pull_request_id(_REPO, first["number"]))
         assert envelope["entity"]["name"] == f"{_REPO}#{first['number']}"
         assert envelope["entity"]["dimensions"]["github.surface"] == "pulls"
         assert envelope["entity"]["dimensions"]["github.observation"] == "execution"
@@ -156,15 +158,15 @@ class TestJoinedToTheNeutralNodes:
         _, nodes, edges = _emit(_collector())
         first = _captured()
         pr_uuid = str(pull_request_id(_REPO, first["number"]))
-        proposes = [e for e in _edges_of(edges, "PROPOSES_REF__github_core") if e["edge"]["from_entity_id"] == pr_uuid]
+        proposes = [e for e in _edges_of(edges, "PROPOSES_REF__github_core") if edge_from(e) == pr_uuid]
         assert len(proposes) == 1
-        assert proposes[0]["edge"]["to_entity_id"] == str(git_ref_id(_GIT_REPO, f"refs/heads/{first['head_ref']}"))
+        assert edge_to(proposes[0]) == str(git_ref_id(_GIT_REPO, f"refs/heads/{first['head_ref']}"))
         assert proposes[0]["edge"]["properties"] == {"ref_name": first["head_ref"]}
-        base = [e for e in _edges_of(edges, "TARGETS_BASE_REF__github_core") if e["edge"]["from_entity_id"] == pr_uuid]
-        assert base[0]["edge"]["to_entity_id"] == str(git_ref_id(_GIT_REPO, "refs/heads/main"))
+        base = [e for e in _edges_of(edges, "TARGETS_BASE_REF__github_core") if edge_from(e) == pr_uuid]
+        assert edge_to(base[0]) == str(git_ref_id(_GIT_REPO, "refs/heads/main"))
         assert base[0]["edge"]["properties"] == {"ref_name": "main"}
-        commit = [e for e in _edges_of(edges, "PROPOSES_COMMIT__github_core") if e["edge"]["from_entity_id"] == pr_uuid]
-        assert commit[0]["edge"]["to_entity_id"] == str(git_commit_id("sha1", first["head_sha"]))
+        commit = [e for e in _edges_of(edges, "PROPOSES_COMMIT__github_core") if edge_from(e) == pr_uuid]
+        assert edge_to(commit[0]) == str(git_commit_id("sha1", first["head_sha"]))
         assert commit[0]["edge"]["properties"] == {}
 
     def test_a_fork_head_draws_no_ref_edge_and_keeps_the_fact_on_the_node(self) -> None:
@@ -172,9 +174,9 @@ class TestJoinedToTheNeutralNodes:
         fork = _pulls(nodes)[_FORK_PR]["node"]
         assert fork["head_repository"] == "someone-else/tap"
         pr_uuid = str(pull_request_id(_REPO, _FORK_PR))
-        assert [e for e in _edges_of(edges, "PROPOSES_REF__github_core") if e["edge"]["from_entity_id"] == pr_uuid] == []
+        assert [e for e in _edges_of(edges, "PROPOSES_REF__github_core") if edge_from(e) == pr_uuid] == []
         # The base is ours, so that edge still exists; the head commit edge is computed and may dangle.
-        assert [e for e in _edges_of(edges, "TARGETS_BASE_REF__github_core") if e["edge"]["from_entity_id"] == pr_uuid]
+        assert [e for e in _edges_of(edges, "TARGETS_BASE_REF__github_core") if edge_from(e) == pr_uuid]
 
     def test_without_a_neutral_repository_no_ref_edge_is_computed(self) -> None:
         _, _, edges = _emit(_collector(), git_repo_uuid=None)
@@ -190,9 +192,9 @@ class TestAuthorIsAnEdge:
         _, nodes, edges = _emit(_collector())
         first = _captured("User")
         pr_uuid = str(pull_request_id(_REPO, first["number"]))
-        opens = [e for e in _edges_of(edges, "OPENS_PULL_REQUEST__github_core") if e["edge"]["to_entity_id"] == pr_uuid]
+        opens = [e for e in _edges_of(edges, "OPENS_PULL_REQUEST__github_core") if edge_to(e) == pr_uuid]
         assert len(opens) == 1
-        assert opens[0]["edge"]["from_entity_id"] == str(account_id(first["author_login"]))
+        assert edge_from(opens[0]) == str(account_id(first["author_login"]))
         assert opens[0]["edge"]["properties"] == {"author_association": first["author_association"]}
         accounts = [n for n in nodes if n["entity"]["entity_type"] == "github_core__github_account"]
         assert {a["node"]["login"] for a in accounts} >= {first["author_login"], "outsider"}
@@ -201,8 +203,8 @@ class TestAuthorIsAnEdge:
     def test_a_bot_author_is_the_app(self) -> None:
         _, nodes, edges = _emit(_collector())
         pr_uuid = str(pull_request_id(_REPO, _BOT_PR))
-        opens = [e for e in _edges_of(edges, "OPENS_PULL_REQUEST__github_core") if e["edge"]["to_entity_id"] == pr_uuid]
-        assert opens[0]["edge"]["from_entity_id"] == str(github_app_id("renovate"))
+        opens = [e for e in _edges_of(edges, "OPENS_PULL_REQUEST__github_core") if edge_to(e) == pr_uuid]
+        assert edge_from(opens[0]) == str(github_app_id("renovate"))
         apps = [n for n in nodes if n["entity"]["entity_type"] == "github_core__github_app"]
         slugs = [a["node"]["slug"] for a in apps]
         assert "renovate" in slugs

@@ -23,6 +23,8 @@ from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_edge, create_node
 
+from .envelopes import edge_from, edge_to
+
 
 def _create(type_slug: str, payload: dict):
     result = create_node(type_slug, payload)
@@ -101,10 +103,10 @@ class TestCollection:
         _, nodes, all_edges = _collect(_Client([_artifact(1, 100)]), {100})
         edges = [e for e in all_edges if e["edge"]["edge_type"] == "UPLOADS_ARTIFACT__github_core"]
         assert len(nodes) == 1 and len(edges) == 1
-        assert edges[0]["edge"]["from_entity_id"] == str(run_id("o/r", 100))
-        assert edges[0]["edge"]["to_entity_id"] == str(actions_artifact_id("o/r", 1))
+        assert edge_from(edges[0]) == str(run_id("o/r", 100))
+        assert edge_to(edges[0]) == str(actions_artifact_id("o/r", 1))
         stores = [e for e in all_edges if e["edge"]["edge_type"] == "STORES_ARTIFACT__github_core"]
-        assert len(stores) == 1 and stores[0]["edge"]["from_entity_id"] == str(repository_id("o/r"))
+        assert len(stores) == 1 and edge_from(stores[0]) == str(repository_id("o/r"))
         assert nodes[0]["node"]["configuration"]["run_in_batch"] is True
 
     def test_an_artifact_of_a_run_outside_the_window_is_counted_not_dropped(self) -> None:

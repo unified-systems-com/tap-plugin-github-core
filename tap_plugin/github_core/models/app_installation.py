@@ -25,6 +25,8 @@ class AppInstallation(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__app_installation"
+    # GitHub's installation id — unique across the platform.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("installation_id",)
     ENTITY_NAME: ClassVar[str] = "App Installation"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A GitHub App installed into an account — the permissions granted, which repositories it "

@@ -30,6 +30,8 @@ class StatusCheck(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__status_check"
+    # Owner + the context string, kept exactly as written — check names are case-sensitive.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("owner_login", "context")
     ENTITY_NAME: ClassVar[str] = "Status Check"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A check context a ruleset requires — the name a gate waits for, and the name a workflow "

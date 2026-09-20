@@ -19,6 +19,9 @@ class GithubPackageVersion(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_package_version"
+    # The package's coordinates plus GitHub's version id, not the version string: an npm/maven
+    # version can be unpublished and re-published as different bytes.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("owner_login", "package_type", "package_name", "version_id")
     ENTITY_NAME: ClassVar[str] = "GitHub Package Version"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "One published version of a package — a container image digest with the tags pointing at it, "

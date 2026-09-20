@@ -23,6 +23,8 @@ from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_edge, create_node
 
+from .envelopes import edge_from, edge_to
+
 
 def _create(type_slug: str, payload: dict):
     result = create_node(type_slug, payload)
@@ -141,7 +143,7 @@ class TestCalls:
         edges: list[dict] = []
         c._emit_workflow_calls(edges)
         assert len(edges) == 1
-        assert edges[0]["edge"]["from_entity_id"] == str(job) and edges[0]["edge"]["to_entity_id"] == str(gate)
+        assert edge_from(edges[0]) == str(job) and edge_to(edges[0]) == str(gate)
         props = edges[0]["edge"]["properties"]
         assert props["pin_kind"] == "sha" and props["is_pinned"] is True and props["same_repository"] is False
         assert props["secrets_inherit"] is False
@@ -154,7 +156,7 @@ class TestCalls:
             _job_call(c, f"acme/plugin{i}", i, "tap", "acme/tap/.github/workflows/plugin-ci.yml@main")
         edges: list[dict] = []
         c._emit_workflow_calls(edges)
-        assert sum(1 for e in edges if e["edge"]["to_entity_id"] == str(gate)) == 13
+        assert sum(1 for e in edges if edge_to(e) == str(gate)) == 13
 
     def test_a_callee_outside_the_scope_is_recorded_on_the_job_and_no_node_is_invented(self) -> None:
         """The state a view must be able to say 'calls a workflow we cannot see' from."""
@@ -234,7 +236,7 @@ class TestTriggers:
         edges: list[dict] = []
         c._emit_workflow_triggers(edges)
         assert len(edges) == 1
-        assert edges[0]["edge"]["from_entity_id"] == str(capture) and edges[0]["edge"]["to_entity_id"] == str(review)
+        assert edge_from(edges[0]) == str(capture) and edge_to(edges[0]) == str(review)
         assert edges[0]["edge"]["properties"] == {
             "trigger_event": "workflow_run", "declared_name": "AI review capture", "types": ["completed"]
         }

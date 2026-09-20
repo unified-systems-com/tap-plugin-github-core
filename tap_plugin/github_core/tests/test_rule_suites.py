@@ -23,6 +23,8 @@ from tap_plugin.github_core.collectors.github_collector.identity import (
 
 from tap_grid.registry import get_model_class
 
+from .envelopes import edge_from, edge_to, envelope_key
+
 _FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "rule_suites.json").read_text())
 
 
@@ -112,7 +114,7 @@ class TestTheEventLands:
         suites = _of_type(nodes, "github_core__rule_suite")
         assert len(suites) == len(_FIXTURE["list_bypass"])
         first = _FIXTURE["list_bypass"][0]
-        assert suites[0]["entity"]["entity_id"] == str(rule_suite_id(first["id"]))
+        assert envelope_key(suites[0]) == str(rule_suite_id(first["id"]))
         assert suites[0]["node"]["result"] == "bypass"
         assert suites[0]["node"]["ref"] == first["ref"]
 
@@ -137,7 +139,7 @@ class TestTheActorIsAnAccount:
         login = _FIXTURE["list_bypass"][0]["actor_name"]
         assert accounts[0]["node"]["login"] == login
         assert accounts[0]["node"]["account_type"] == "", "must not claim User/Bot — the API does not say"
-        assert accounts[0]["entity"]["entity_id"] == str(account_id(login))
+        assert envelope_key(accounts[0]) == str(account_id(login))
         assert _edges_of(edges, "TRIGGERED_EVALUATION__github_core")
 
     @pytest.mark.spec("req-github-core-rule-suites-2")
@@ -145,7 +147,7 @@ class TestTheActorIsAnAccount:
         """Three captured bypasses share a pusher; that is one account, not three."""
         nodes, _, _, _ = _collect(_FakeClient())
         accounts = _of_type(nodes, "github_core__github_account")
-        assert len({a["entity"]["entity_id"] for a in accounts}) == len(accounts) == 1
+        assert len({envelope_key(a) for a in accounts}) == len(accounts) == 1
 
     @pytest.mark.spec("req-github-core-rule-suites-2")
     def test_the_account_is_the_source_because_the_account_initiated(self) -> None:
@@ -158,10 +160,10 @@ class TestTheActorIsAnAccount:
         """
         nodes, edges, _, _ = _collect(_FakeClient())
         edge = _edges_of(edges, "TRIGGERED_EVALUATION__github_core")[0]
-        account = _of_type(nodes, "github_core__github_account")[0]["entity"]["entity_id"]
-        suite = _of_type(nodes, "github_core__rule_suite")[0]["entity"]["entity_id"]
-        assert edge["edge"]["from_entity_id"] == account, "the account initiates; it is the source"
-        assert edge["edge"]["to_entity_id"] == suite
+        account = envelope_key(_of_type(nodes, "github_core__github_account")[0])
+        suite = envelope_key(_of_type(nodes, "github_core__rule_suite")[0])
+        assert edge_from(edge) == account, "the account initiates; it is the source"
+        assert edge_to(edge) == suite
 
     @pytest.mark.spec("req-github-core-rule-suites-2")
     def test_actor_id_rides_the_edge_so_a_rename_is_detectable(self) -> None:
@@ -183,16 +185,16 @@ class TestTheBypassedControlIsNamed:
         ]
         assert failing, "fixture no longer carries a failing ruleset evaluation"
         expected = str(ruleset_id("unified-systems-com", failing[0]["rule_source"]["id"]))
-        assert any(e["edge"]["to_entity_id"] == expected for e in bypassed)
+        assert any(edge_to(e) == expected for e in bypassed)
         assert bypassed[0]["edge"]["properties"]["rule_type"] == failing[0]["rule_type"]
 
     @pytest.mark.spec("req-github-core-rule-suites-3")
     def test_the_suite_is_the_source_because_the_push_did_the_bypassing(self) -> None:
         """The event acted on the gate, not the reverse."""
         nodes, edges, _, _ = _collect(_FakeClient())
-        suite = _of_type(nodes, "github_core__rule_suite")[0]["entity"]["entity_id"]
+        suite = envelope_key(_of_type(nodes, "github_core__rule_suite")[0])
         edge = _edges_of(edges, "BYPASSED_RULE__github_core")[0]
-        assert edge["edge"]["from_entity_id"] == suite
+        assert edge_from(edge) == suite
 
     @pytest.mark.spec("req-github-core-rule-suites-3")
     def test_githubs_own_explanation_is_preserved_verbatim(self) -> None:
@@ -247,5 +249,5 @@ class TestRefResolution:
         known = _uuid.uuid4()
         _, edges2, _, _ = _collect(_FakeClient(), ref_uuids={ref: known})
         on_ref = _edges_of(edges2, "EVALUATED_ON_REF__github_core")
-        assert on_ref and on_ref[0]["edge"]["to_entity_id"] == str(known)
+        assert on_ref and edge_to(on_ref[0]) == str(known)
         assert on_ref[0]["edge"]["properties"]["after_sha"] == _FIXTURE["list_bypass"][0]["after_sha"]

@@ -19,6 +19,8 @@ class GithubRunner(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_runner"
+    # Repository + GitHub's runner id.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "runner_id")
     ENTITY_NAME: ClassVar[str] = "GitHub Runner"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A durable registered self-hosted GitHub Actions runner."

@@ -33,6 +33,8 @@ from tap_plugin.github_core.models.github_repository import GithubRepository
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_node
 
+from .envelopes import envelope_key
+
 _FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "custom_properties.json").read_text())
 _OWNER = "unified-systems-com"
 _TYPE = "github_core__github_custom_property"
@@ -116,7 +118,7 @@ class TestDefinitionsLand:
         by_name = {n["node"]["property_name"]: n for n in _definitions(nodes)}
         assert set(by_name) == _ALL_FIVE
         crit = by_name["criticality"]
-        assert crit["entity"]["entity_id"] == str(custom_property_id(_OWNER, "criticality"))
+        assert envelope_key(crit) == str(custom_property_id(_OWNER, "criticality"))
         assert crit["entity"]["dimensions"]["github.surface"] == "custom-properties"
         assert crit["entity"]["dimensions"]["github.owner"] == _OWNER
         assert crit["node"]["value_type"] == "single_select"

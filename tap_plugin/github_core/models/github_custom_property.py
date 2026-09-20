@@ -29,6 +29,9 @@ class GithubCustomProperty(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_custom_property"
+    # A DEFINITION, keyed on owner + the property name exactly as reported (hyphens, case):
+    # that string is also the key of every repository's `custom_properties` map.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("owner_login", "property_name")
     ENTITY_NAME: ClassVar[str] = "GitHub Custom Property"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A custom property an organization declares for its repositories — its name, value type, "

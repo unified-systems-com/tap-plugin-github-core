@@ -1,8 +1,30 @@
-"""Deterministic UUIDv5 entity IDs for github_core nodes.
+"""Batch-local REFS for github_core nodes, and the UUIDv5 ids edges still keep.
 
 Spec: plugins/github_core/specs/spec-github-core-v0.md
-(req-github-core-models-4 Deterministic Identity). The natural-key table in
-the spec is the source of truth for each entity type's identity inputs.
+(req-github-core-models-4 Identity). The natural-key table in the spec is the
+source of truth for each entity type's identity inputs.
+
+**Node ids are no longer derived here** (Issue# 162 - git-serious / tap-plugin-github-core).
+github_core is core's first adopter of assigned identity: every function below that used to
+mint a node's UUIDv5 now returns a batch-local :class:`Ref` — a namespaced key STRING the
+GRIFT importer resolves against the model's ``NATURAL_KEY`` declaration, finding the live row
+if there is one and assigning a fresh UUIDv7 if there is not. The id a node ends up with is
+core's to assign; the recipe here only has to name the same source object the same way twice.
+
+The recipes are unchanged: a ref is exactly the string the old ``_id`` hashed, so every
+docstring below still describes the identity inputs and the reasoning behind them.
+
+Two things deliberately stay derived:
+
+- **Edge ids.** The importer never substitutes an edge envelope's id (edges are ``KEYLESS``
+  and keep their assignment), so :func:`edge_id` remains the plugin's cross-run edge
+  idempotency: the same fact re-observed keeps one edge instead of accumulating one per run.
+  Its inputs are now ref strings rather than node UUIDs, which are just as deterministic —
+  the id VALUE changes once, the property does not. Edge identity under assigned nodes is
+  tracked as Issue# 690 - tap and is out of scope here.
+- **``commit_observation``.** Its recipe keys on the platform HOST, which the model has no
+  field for, so its declaration cannot say what the recipe says. It keeps an explicit derived
+  id until that is ruled on — see :func:`commit_observation_id`.
 """
 
 from __future__ import annotations
@@ -10,39 +32,63 @@ from __future__ import annotations
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
 # A stable, github_core-specific namespace derived from the canonical DNS
-# namespace. Using a fixed UUID here keeps entity IDs reproducible across
-# environments without depending on a runtime random seed.
+# namespace. Using a fixed UUID here keeps the derived EDGE ids (and the one
+# remaining derived node id) reproducible across environments without depending
+# on a runtime random seed.
 GITHUB_CORE_NAMESPACE: UUID = uuid5(NAMESPACE_DNS, "github_core.tap")
 
 
-def _id(entity_type: str, natural_key: str) -> UUID:
+class Ref(str):
+    """A batch-local GRIFT ref: ``<entity_type>:<natural key>``.
+
+    A ``str`` subclass on purpose. Every call site that used to hold a minted ``UUID`` used it
+    as an ENVELOPE IDENTITY and, in a handful of places, as a set member, a dict key or a
+    ``str()`` for a log line — all of which a string does unchanged. ``batch.node_envelope`` /
+    ``batch.edge_envelope`` check for this type to decide between ``entity_id`` and ``ref`` /
+    ``from_ref`` / ``to_ref``, so the collector's 60-odd call sites did not have to change.
+
+    Refs are batch-local and must be unique within a batch: the ``<entity_type>:`` prefix
+    namespaces them per type, and the collector collapses repeated envelopes by ref before
+    submitting (the same node seen from several repositories is one observation, not a
+    duplicate-ref error).
+    """
+
+    __slots__ = ()
+
+
+def _id(entity_type: str, natural_key: str) -> Ref:
+    return Ref(f"{entity_type}:{natural_key}")
+
+
+def _uuid5_id(entity_type: str, natural_key: str) -> UUID:
+    """The pre-assignment derivation, kept only for the types still addressed explicitly."""
     return uuid5(GITHUB_CORE_NAMESPACE, f"{entity_type}:{natural_key}")
 
 
-def platform_id(host: str) -> UUID:
+def platform_id(host: str) -> Ref:
     # Natural key is the host ("github.com"); a GHES tenant gets its own id.
     return _id("github_core__github_platform", host)
 
 
-def account_id(login: str) -> UUID:
+def account_id(login: str) -> Ref:
     return _id("github_core__github_account", login)
 
 
-def repository_id(full_name: str) -> UUID:
+def repository_id(full_name: str) -> Ref:
     return _id("github_core__github_repository", full_name)
 
 
-def workflow_id(full_name: str, workflow_id_int: int | str) -> UUID:
+def workflow_id(full_name: str, workflow_id_int: int | str) -> Ref:
     return _id("github_core__github_workflow", f"{full_name}#{workflow_id_int}")
 
 
-def github_app_id(slug: str) -> UUID:
+def github_app_id(slug: str) -> Ref:
     # Natural key is the app slug ("dependabot"); one app node is shared across
     # every repo that enables it (ENABLED_ON_REPOSITORY edges fan in).
     return _id("github_core__github_app", slug)
 
 
-def workflow_job_id(full_name: str, workflow_id_int: int | str, job_key: str) -> UUID:
+def workflow_job_id(full_name: str, workflow_id_int: int | str, job_key: str) -> Ref:
     """A DECLARED job: the workflow it is written in, plus its YAML key.
 
     Keyed on the workflow id rather than the file path so a renamed file keeps the same job
@@ -64,13 +110,13 @@ def commit_observation_id(
     repository by construction and can never merge two networks' verdicts. The cross-fork join
     on the network root is a follow-on once `Repository.parent` is collected.
     """
-    return _id(
+    return _uuid5_id(
         "github_core__commit_observation",
         f"{host}#{repository_github_id}#{hash_algorithm}:{oid.lower()}",
     )
 
 
-def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
+def ruleset_id(owner: str, ruleset_id_int: int | str) -> Ref:
     """A ruleset, keyed on owner + GitHub's ruleset id.
 
     Not repo-scoped: one organization ruleset applies to many repositories and must be ONE node
@@ -88,7 +134,7 @@ def ruleset_id(owner: str, ruleset_id_int: int | str) -> UUID:
     return _id("github_core__github_ruleset", f"{owner}#{ruleset_id_int}")
 
 
-def pull_request_id(full_name: str, number: int | str) -> UUID:
+def pull_request_id(full_name: str, number: int | str) -> Ref:
     """A pull request, keyed on the repository it is opened against plus its number.
 
     The number is GitHub's own identity for a pull request within a repository and is what every
@@ -100,7 +146,7 @@ def pull_request_id(full_name: str, number: int | str) -> UUID:
     return _id("github_core__pull_request", f"{full_name}#{number}")
 
 
-def custom_property_id(owner: str, property_name: str) -> UUID:
+def custom_property_id(owner: str, property_name: str) -> Ref:
     """A custom-property DEFINITION, keyed on the owner and the property name.
 
     Owner-scoped like `ruleset_id`: one organization declares the property once and every
@@ -114,7 +160,7 @@ def custom_property_id(owner: str, property_name: str) -> UUID:
     return _id("github_core__github_custom_property", f"{owner}#{property_name}")
 
 
-def status_check_id(owner: str, context: str) -> UUID:
+def status_check_id(owner: str, context: str) -> Ref:
     """A required check context, keyed on the owner and the context string.
 
     Owner-scoped like `ruleset_id`: an organization ruleset requires the same context across
@@ -124,7 +170,7 @@ def status_check_id(owner: str, context: str) -> UUID:
     return _id("github_core__status_check", f"{owner}#{context}")
 
 
-def rule_suite_id(suite_id_int: int | str) -> UUID:
+def rule_suite_id(suite_id_int: int | str) -> Ref:
     """A rule suite, keyed on GitHub's own suite id — unique across the platform.
 
     Not scoped by repository: the id is assigned by GitHub and the suite carries its own
@@ -134,7 +180,7 @@ def rule_suite_id(suite_id_int: int | str) -> UUID:
     return _id("github_core__rule_suite", str(suite_id_int))
 
 
-def code_scanning_alert_id(full_name: str, number: int | str) -> UUID:
+def code_scanning_alert_id(full_name: str, number: int | str) -> Ref:
     """A code-scanning alert, keyed on the repository plus GitHub's alert number.
 
     The number is how every URL and every dismissal names the alert within its repository, and
@@ -144,7 +190,7 @@ def code_scanning_alert_id(full_name: str, number: int | str) -> UUID:
     return _id("github_core__code_scanning_alert", f"{full_name}#{number}")
 
 
-def code_scanning_analysis_id(full_name: str, analysis_id_int: int | str) -> UUID:
+def code_scanning_analysis_id(full_name: str, analysis_id_int: int | str) -> Ref:
     """One analysis (one SARIF upload), keyed on the repository plus GitHub's analysis id.
 
     The id is platform-global like runs and artifacts; the repository prefix is belt-and-braces
@@ -162,15 +208,21 @@ def code_scanning_finding_id(full_name: str, number: int | str) -> UUID:
     segment names the GitHub security surface the finding came from, so the same repository's
     Dependabot alert number 7 (``#dependabot#7``) and code-scanning alert number 7 can never
     collide; a future secret-scanning finding takes ``#secret_scanning#``.
+
+    STILL A DERIVED UUID, not a ref: ``compliance_core__compliance_finding`` is another
+    plugin's type and declares no ``NATURAL_KEY``, so a ref to it cannot be resolved. It flips
+    when compliance_core adopts. The same holds for every ``git_core__*`` and
+    ``identity_core__*`` node this collector emits, whose ids come from those plugins' own
+    identity modules.
     """
-    return _id("compliance_core__compliance_finding", f"{full_name}#code_scanning#{number}")
+    return _uuid5_id("compliance_core__compliance_finding", f"{full_name}#code_scanning#{number}")
 
 
-def environment_id(full_name: str, name: str) -> UUID:
+def environment_id(full_name: str, name: str) -> Ref:
     return _id("github_core__github_environment", f"{full_name}#{name}")
 
 
-def actions_secret_id(scope: str, owner_or_repo: str, name: str) -> UUID:
+def actions_secret_id(scope: str, owner_or_repo: str, name: str) -> Ref:
     """One id per (scope, owner-or-repo, name), with the name case-folded.
 
     Scope is in the key because an organisation secret and a repository secret can share a name
@@ -186,11 +238,11 @@ def actions_secret_id(scope: str, owner_or_repo: str, name: str) -> UUID:
     return _id("github_core__actions_secret", f"{scope}#{owner_or_repo}#{name.upper()}")
 
 
-def actions_cache_id(full_name: str, cache_id_int: int | str) -> UUID:
+def actions_cache_id(full_name: str, cache_id_int: int | str) -> Ref:
     return _id("github_core__actions_cache", f"{full_name}#{cache_id_int}")
 
 
-def actions_artifact_id(full_name: str, artifact_id_int: int | str) -> UUID:
+def actions_artifact_id(full_name: str, artifact_id_int: int | str) -> Ref:
     """An artifact, keyed on the repository plus GitHub's artifact id.
 
     The id is platform-global (the same generator as runs and caches), so the repository
@@ -200,12 +252,12 @@ def actions_artifact_id(full_name: str, artifact_id_int: int | str) -> UUID:
     return _id("github_core__actions_artifact", f"{full_name}#{artifact_id_int}")
 
 
-def app_installation_id(installation_id_int: int | str) -> UUID:
+def app_installation_id(installation_id_int: int | str) -> Ref:
     """An installation, keyed on GitHub's installation id — unique across the platform."""
     return _id("github_core__app_installation", str(installation_id_int))
 
 
-def collection_scope_id(run_id: UUID | str) -> UUID:
+def collection_scope_id(run_id: UUID | str) -> Ref:
     """The scope statement about one collection run, keyed on the `collection_job` entity id.
 
     Natural key: the run. One scope per run by construction — a re-run is a new job and so a new
@@ -215,21 +267,21 @@ def collection_scope_id(run_id: UUID | str) -> UUID:
     return _id("github_core__collection_scope", str(run_id))
 
 
-def run_id(full_name: str, run_id_int: int | str) -> UUID:
+def run_id(full_name: str, run_id_int: int | str) -> Ref:
     # v0 natural key is owner/repo + run_id (run_attempt deferred — see
     # req-github-core-backlog-run-attempts).
     return _id("github_core__github_actions_run", f"{full_name}#{run_id_int}")
 
 
-def job_id(full_name: str, job_id_int: int | str) -> UUID:
+def job_id(full_name: str, job_id_int: int | str) -> Ref:
     return _id("github_core__github_actions_job", f"{full_name}#{job_id_int}")
 
 
-def runner_id(full_name: str, runner_id_int: int | str) -> UUID:
+def runner_id(full_name: str, runner_id_int: int | str) -> Ref:
     return _id("github_core__github_runner", f"{full_name}#{runner_id_int}")
 
 
-def release_id(full_name: str, release_id_int: int | str) -> UUID:
+def release_id(full_name: str, release_id_int: int | str) -> Ref:
     """A release, keyed on `owner/repo` + GitHub's release id (github-core#31).
 
     The id rather than the tag name: a release can be deleted and re-cut on the same tag, and
@@ -239,7 +291,7 @@ def release_id(full_name: str, release_id_int: int | str) -> UUID:
     return _id("github_core__github_release", f"{full_name}#{release_id_int}")
 
 
-def package_id(owner: str, package_type: str, name: str) -> UUID:
+def package_id(owner: str, package_type: str, name: str) -> Ref:
     """A package, keyed on owner + type + name — GitHub's own path to it.
 
     Not on the numeric id: the REST path `/orgs/{owner}/packages/{type}/{name}` is how every
@@ -251,7 +303,7 @@ def package_id(owner: str, package_type: str, name: str) -> UUID:
 
 def package_version_id(
     owner: str, package_type: str, name: str, version_id_int: int | str
-) -> UUID:
+) -> Ref:
     """A version, scoped under its package and keyed on GitHub's version id.
 
     GitHub's id rather than the version name: for a container the name is a digest, which is
@@ -321,7 +373,7 @@ def package_purl(package_type: str, owner: str, name: str, version: str = "") ->
     return f"pkg:github/{owner}/{name}{at}"
 
 
-def github_action_id(action_path: str) -> UUID:
+def github_action_id(action_path: str) -> Ref:
     """An action, keyed on the `uses:` path with the ref stripped.
 
     Platform-global rather than repository-scoped, like `github_app`: `actions/checkout` is
@@ -332,7 +384,7 @@ def github_action_id(action_path: str) -> UUID:
     return _id("github_core__github_action", action_path)
 
 
-def uses_action_edge_id(job_uuid: UUID, action_uuid: UUID, declared_ref: str) -> UUID:
+def uses_action_edge_id(job_uuid: UUID | Ref, action_uuid: UUID | Ref, declared_ref: str) -> UUID:
     """A `USES_ACTION` edge, keyed on the job, the action AND the ref as written.
 
     Not the generic `edge_id` (type, source, target): a job that calls the same action at two
@@ -345,6 +397,6 @@ def uses_action_edge_id(job_uuid: UUID, action_uuid: UUID, declared_ref: str) ->
     )
 
 
-def edge_id(edge_type: str, source: UUID, target: UUID) -> UUID:
+def edge_id(edge_type: str, source: UUID | Ref, target: UUID | Ref) -> UUID:
     """Deterministic UUIDv5 for an edge by (type, source, target)."""
     return uuid5(GITHUB_CORE_NAMESPACE, f"edge:{edge_type}:{source}:{target}")

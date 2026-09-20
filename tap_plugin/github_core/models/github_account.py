@@ -21,6 +21,9 @@ class GithubAccount(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_account"
+    # The login. GitHub's numeric id is carried as a field for continuity across a rename;
+    # the login is what every URL, every `uses:` path and every API response names.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("login",)
     ENTITY_NAME: ClassVar[str] = "GitHub Account"
     ENTITY_DESCRIPTION: ClassVar[str] = "A GitHub user or organization account."
     ENTITY_ICON: ClassVar[str] = "github-account"

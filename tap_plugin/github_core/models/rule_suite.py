@@ -35,6 +35,8 @@ class RuleSuite(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__rule_suite"
+    # GitHub's own suite id, unique across the platform; the suite carries its own repository.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("suite_id",)
     ENTITY_NAME: ClassVar[str] = "Rule Suite"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "One push evaluated against the rulesets matching its ref — who pushed, onto which ref, "

@@ -32,6 +32,8 @@ class CodeScanningAlert(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__code_scanning_alert"
+    # Repository + GitHub's alert number: stable across re-analysis, and numbers restart per repo.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "number")
     ENTITY_NAME: ClassVar[str] = "Code Scanning Alert"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A code scanning rule that fired on a repository: the rule and its severities, the location and "

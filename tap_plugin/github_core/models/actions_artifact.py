@@ -33,6 +33,8 @@ class ActionsArtifact(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__actions_artifact"
+    # Repository + GitHub's artifact id (platform-global; the repository prefix is belt-and-braces).
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "artifact_id")
     ENTITY_NAME: ClassVar[str] = "Actions Artifact"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A file set a workflow run uploaded — its name, size, content digest and retention state. "
