@@ -171,9 +171,14 @@ class TestOneRunAgainstTheFakeGithub:
         }
         assert all(e["candidates"] == [] for e in record["surfaces"])
 
-        # NOT OBSERVED: the reconcile verb (tap#652) is not in this plugin's core pin, so no
-        # verdict record exists to assert on. Recorded as absent, not as "no verdicts".
-        assert verdicts_of(batch) is None
+        # The reconcile verb (tap#652, in tap v0.2.0) runs as the run's final phase with this
+        # collector's authority OFF (the default; the operator's switch is tap#655): it probes
+        # nothing and records that on the run — a verdict record with authority "off" and no
+        # entries, since no candidate was derived. Absent authority is recorded, not silent.
+        verdicts = verdicts_of(batch)
+        assert verdicts is not None, "the verb ran as the final phase and recorded its refusal to judge"
+        assert verdicts["authority"] == "off" and verdicts["entries"] == [] and verdicts["candidates"] == 0
+        assert verdicts["applied"]["authority"] == "off" and verdicts["applied"]["applied"] == 0
 
 
 @pytest.mark.django_db(transaction=True)
