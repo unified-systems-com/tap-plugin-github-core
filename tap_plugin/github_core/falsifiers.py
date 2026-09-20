@@ -405,24 +405,30 @@ class _GithubFalsifier(Falsifier):
     def judge_all(self, client: ProbeClient, candidates: list[Candidate]) -> list[Verdict]:
         return [self.judge(client, c) for c in candidates]
 
+    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
+        """The repository this candidate lives in, as ``(full_name, github_id)``.
+
+        The default is the in-repository shape: the containing repository's name, and no id,
+        because a workflow or an environment carries its parent's name but not its parent's
+        numeric id. A repository overrides it to add its own.
+        """
+        row = _row_of(candidate.entity_id)
+        if row is None:
+            return "", None
+        return str(getattr(row, "full_name", "") or ""), None
+
     def confirm_retirements(
         self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
     ) -> list[Verdict]:
-        """Last word on this run's retirements. Default: none needed.
-
-        A type whose absence is confirmed by a probe of its parent is already judged against
-        something taken at judgement time. A type with no parent overrides this.
-        """
-        return verdicts
-
-    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
-        """The repository this candidate names, as (full_name, github_id). Overridden per type."""
-        return "", None
-
-    def _confirm_against_reach_after_every_probe(
-        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
-    ) -> list[Verdict]:
         """Downgrade every retirement this run would make if the reach moved underneath it.
+
+        Every type takes this, for two different reasons that end in the same place. A
+        repository has no parent to probe, so the reach is its only gate. An object inside one
+        does have a parent probe, but that probe is cached for the run, so a membership
+        narrowing after it would let a later 404 through. One reading covers both.
+
+        The other half of the child case — a permission narrowing while the repository stays
+        readable — is github-core#160 and is a precondition for arming, not closed here.
 
         The reading is taken AFTER every probe of the run, which is what makes it complete: a
         narrowing that could have caused any of these 404s necessarily happened before this read,
@@ -479,14 +485,8 @@ class RepositoryFalsifier(_GithubFalsifier):
     at the same name is REIDENTIFIED.
     """
 
-    def confirm_retirements(
-        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
-    ) -> list[Verdict]:
-        """A repository has no parent to probe, so the reach is its only gate and it gets a second
-        reading taken after every probe of the run."""
-        return self._confirm_against_reach_after_every_probe(client, candidates, verdicts)
-
     def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
+        """A repository names itself, and carries a stable id to compare a selected list by."""
         row = _row_of(candidate.entity_id)
         if row is None:
             return "", None
@@ -534,21 +534,6 @@ class RepositoryFalsifier(_GithubFalsifier):
 
 class EnvironmentFalsifier(_GithubFalsifier):
     """Shape B: ``GET /repos/{owner}/{repo}/environments/{name}``; compare the numeric id."""
-
-    def confirm_retirements(
-        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
-    ) -> list[Verdict]:
-        """The parent probe is cached for the run, so a narrowing AFTER it would let a later
-        child 404 through it. The end-of-run reach reading covers that half, on the repository
-        that contains the child. The other half — a permission narrowing while the repository
-        stays readable — is github-core#160 and is a precondition for arming, not closed here."""
-        return self._confirm_against_reach_after_every_probe(client, candidates, verdicts)
-
-    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
-        row = _row_of(candidate.entity_id)
-        if row is None:
-            return "", None
-        return str(getattr(row, "full_name", "") or ""), None
 
     def judge(self, client: ProbeClient, candidate: Candidate) -> Verdict:
         row = _row_of(candidate.entity_id)
@@ -623,21 +608,6 @@ class WorkflowFalsifier(_GithubFalsifier):
     repository's own candidate, never here.
     """
 
-    def confirm_retirements(
-        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
-    ) -> list[Verdict]:
-        """The parent probe is cached for the run, so a narrowing AFTER it would let a later
-        child 404 through it. The end-of-run reach reading covers that half, on the repository
-        that contains the child. The other half — a permission narrowing while the repository
-        stays readable — is github-core#160 and is a precondition for arming, not closed here."""
-        return self._confirm_against_reach_after_every_probe(client, candidates, verdicts)
-
-    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
-        row = _row_of(candidate.entity_id)
-        if row is None:
-            return "", None
-        return str(getattr(row, "full_name", "") or ""), None
-
     def judge(self, client: ProbeClient, candidate: Candidate) -> Verdict:
         row = _row_of(candidate.entity_id)
         if row is None:
@@ -680,21 +650,6 @@ class WorkflowJobFalsifier(_GithubFalsifier):
     the parent workflow's id. One file fetch per (repository, path) serves every job candidate
     of that file.
     """
-
-    def confirm_retirements(
-        self, client: ProbeClient, candidates: list[Candidate], verdicts: list[Verdict]
-    ) -> list[Verdict]:
-        """The parent probe is cached for the run, so a narrowing AFTER it would let a later
-        child 404 through it. The end-of-run reach reading covers that half, on the repository
-        that contains the child. The other half — a permission narrowing while the repository
-        stays readable — is github-core#160 and is a precondition for arming, not closed here."""
-        return self._confirm_against_reach_after_every_probe(client, candidates, verdicts)
-
-    def _locator_of(self, candidate: Candidate) -> tuple[str, Any]:
-        row = _row_of(candidate.entity_id)
-        if row is None:
-            return "", None
-        return str(getattr(row, "full_name", "") or ""), None
 
     def judge_all(self, client: ProbeClient, candidates: list[Candidate]) -> list[Verdict]:
         files: dict[tuple[str, str], tuple[dict[str, Any] | None, Probe | None]] = {}
