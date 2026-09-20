@@ -1301,6 +1301,14 @@ class GithubCollector(CollectorBase):
             batch_dims["github.owner"] = owner
         # The scope's join onto the installation it was derived from lands here, beside the
         # installation node the inventory minted above (github-core#145).
+        #
+        # AFTER `_drop_dangling_edges`, and that ordering is load-bearing (Codex on PR# 163 -
+        # github-core). This edge's SOURCE is the collection_scope, which rode its own earlier
+        # batch, so it is a real grid id and by construction not among this batch's node keys —
+        # the guard would drop it, silently losing the run's provenance join. The guard is
+        # batch-local by design and must stay that way; it is this append that has to come
+        # after it. `test_a_cross_batch_endpoint_is_exactly_what_the_guard_drops` pins the
+        # hazard so the reason survives someone tidying these three lines together.
         self._append_scope_installation_edge(edges)
         github_batch = assemble_batch(
             batch_name=f"github_core collection: {scope_label}",

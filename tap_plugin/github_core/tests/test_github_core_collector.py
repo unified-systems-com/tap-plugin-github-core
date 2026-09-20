@@ -814,6 +814,33 @@ class TestEnvelopeCollapse:
         assert [envelope_key(e) for e in out] == ["github_core__github_account:acme", "b"]
         assert out[0]["entity"]["name"] == "acme-again"
 
+    def test_a_cross_batch_endpoint_is_exactly_what_the_guard_drops(self) -> None:
+        """Why `_append_scope_installation_edge` must run AFTER the guard, not before.
+
+        `DERIVED_FROM_INSTALLATION` runs from the `collection_scope`, which rode its own earlier
+        batch and is therefore a real grid id that by construction is NOT among this batch's
+        node keys. The guard keeps an edge only when both endpoints are, so appending before it
+        would silently drop the run's provenance join (Codex on PR# 163 - github-core; the
+        ordering is correct today and nothing asserted it).
+
+        This pins the hazard rather than the line numbers: the guard is batch-local on purpose
+        and should keep dropping such an edge. What must not change is which side of it the
+        append happens on.
+        """
+        from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
+
+        scope_id_from_an_earlier_batch = "01a0be43-5179-765e-8d1c-a47a81ca3303"
+        edge = {
+            "entity": {"entity_id": "e"},
+            "edge": {
+                "from_entity_id": scope_id_from_an_earlier_batch,
+                "to_ref": "github_core__app_installation:7",
+                "edge_type": "DERIVED_FROM_INSTALLATION__github_core",
+            },
+        }
+        kept, dropped = GithubCollector._drop_dangling_edges([edge], {"github_core__app_installation:7"})
+        assert kept == [] and dropped == ["DERIVED_FROM_INSTALLATION__github_core"]
+
     def test_a_dangling_ref_endpoint_is_dropped_like_a_dangling_id(self) -> None:
         """An edge endpoint naming no node of its batch is `unknown_ref` — a rejected batch, not
         one dropped edge — so it has to be caught here on the ref as well as on the id."""
