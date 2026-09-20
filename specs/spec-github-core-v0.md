@@ -301,16 +301,20 @@ bare id WOULD have keyed correctly; the owner prefix is belt-and-braces, not a c
 its key above as a `NATURAL_KEY` tuple of FIELD names; the collector names each node with a
 batch-local `ref` (`<entity_type>:<natural key>`) and the GRIFT importer resolves it —
 `find_existing` on the declared fields under a transaction-scoped advisory lock, a fresh
-UUIDv7 on a miss. Two exceptions still carry a derived UUIDv5, both because the type is not
-github_core's to declare or the declaration cannot yet say what the recipe says: the
-`compliance_core__compliance_finding` github_core mints for a code-scanning alert, and
-`commit_observation` (see its note below).
+UUIDv7 on a miss.
 
-**`commit_observation` — open.** Its recipe keys on the platform HOST as well, and the model
-has no `host` field for a declaration to name, so the declared key is narrower than the
-recipe. Inert while the host is the constant `github.com`; a GHES tenant sharing the grid
-could collide on repository id. Adding `host` as a field is the obvious fix and is not ruled
-on, so the type keeps an explicit derived id for now.
+**Three types are HELD BACK** — declared, but still addressed by an explicit derived UUIDv5, so
+nothing resolves against their declaration and it stays free to change. A natural key is a
+one-way door only once a node's id has been assigned under it.
+
+| Type | Why | Ruling |
+| --- | --- | --- |
+| `compliance_core__compliance_finding` | Another plugin's type; it declares no `NATURAL_KEY`, so a ref to it is refused outright. | Flips when compliance_core adopts. |
+| `commit_observation` | Its recipe keys on the platform HOST; the model has no `host` field, so the declared key is narrower. Inert while the host is the constant `github.com`; a GHES tenant sharing the grid could collide on repository id. | Issue# 164 |
+| `actions_secret` | Its key case-folds the name (GitHub secret names are not case-sensitive); the declared search filters the stored name, which is the name GitHub returned, so the two disagree. Under a ref a second canonical spelling would mint a second node behind an unchanged edge. | Issue# 165 |
+
+Every `git_core__*` and `identity_core__*` node this collector emits likewise keeps the id its
+own plugin's identity module derives.
 
 #### Configuration Field Shape
 
@@ -357,7 +361,7 @@ must not conflate the two.
 | req-github-core-models-8 | Platform Singleton Synthesized | Implemented | `github_platform` is a synthesized singleton (one per run, keyed on the host), not fetched from any API; re-runs and hand-written GRIFT nodes with the same host upsert cleanly onto it. | Collector emits it before the per-repo walk; mirrors `aws_core`'s `aws_account_singleton` pattern. |
 | req-github-core-models-9 | OIDC Issuer Synthesized (via identity_core) | Implemented | The collector still synthesizes the GitHub Actions issuer node, but the type and vocabulary live in `identity_core` (`identity_core__oidc_issuer`); github mints it through `identity_core.issuer.oidc_issuer_node_envelope`. Any observer (samsite, AWS enrichment) converges on the same node by canonical-URL id regardless of run order. | Extracted 2026-07-08; see spec-identity-core-v0.md (req-identity-core-migration). |
 | req-github-core-models-3 | Job Steps Blobbed | Implemented | Workflow job steps remain structured data in `github_actions_job.configuration` in v0. | Future visualization target. |
-| req-github-core-models-4 | Assigned Identity, Declared Search | Implemented | Every model declares `NATURAL_KEY` over the fields named in the table above, and the collector emits a batch-local `ref` rather than a minted id, so `Entity.id` is assigned by core (`req-grid-entity-natural-key`). | Was "Deterministic Identity": every model minted a UUIDv5 from `(entity_type, natural_key)`. Adopted 2026-09-20 (Issue# 162 - tap-plugin-github-core); github_core is core's first adopter. `identity.py` now returns `Ref` strings; edge ids stay UUIDv5 AND keep their exact pre-adoption values (the importer finds an edge only by the supplied id, so a shifted edge id would double every existing grid's edges on first re-collect — `_endpoint_token` re-derives what each ref used to be). Edge identity under assigned nodes is Issue# 690 - tap. `compliance_core__compliance_finding` and `commit_observation` also keep derived ids. |
+| req-github-core-models-4 | Assigned Identity, Declared Search | Implemented | Every model declares `NATURAL_KEY` over the fields named in the table above, and the collector emits a batch-local `ref` rather than a minted id, so `Entity.id` is assigned by core (`req-grid-entity-natural-key`). | Was "Deterministic Identity": every model minted a UUIDv5 from `(entity_type, natural_key)`. Adopted 2026-09-20 (Issue# 162 - tap-plugin-github-core); github_core is core's first adopter. `identity.py` now returns `Ref` strings; edge ids stay UUIDv5 AND keep their exact pre-adoption values (the importer finds an edge only by the supplied id, so a shifted edge id would double every existing grid's edges on first re-collect — `_endpoint_token` re-derives what each ref used to be). Edge identity under assigned nodes is Issue# 690 - tap. Three types keep derived ids and do not emit refs: `compliance_core__compliance_finding` (another plugin's type, undeclared), `commit_observation` (Issue# 164) and `actions_secret` (Issue# 165). |
 | req-github-core-models-7 | Raw Workflow YAML Retained | Implemented | `github_workflow.configuration.raw_yaml` stores the full workflow YAML body fetched at collection time. | Parser stores raw bytes; collector base64-decodes the Contents-API `content` field and writes it. |
 
 ### Ruleset Collection

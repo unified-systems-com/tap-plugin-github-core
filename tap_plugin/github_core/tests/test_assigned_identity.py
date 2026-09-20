@@ -184,6 +184,32 @@ class TestTheDocumentItself:
             assert isinstance(value, Ref), f"{fn.__name__} still mints an id instead of naming a ref"
             assert not isinstance(value, UUID)
 
+    def test_the_three_held_back_types_still_carry_a_derived_id(self) -> None:
+        """Held back is a STATE, not an omission — asserted so it cannot drift into adoption.
+
+        Three types do not emit a ref, each for a reason nobody in this repository can settle:
+        `compliance_core__compliance_finding` belongs to a plugin that has not declared;
+        `commit_observation`'s key names a platform host the model has no field for
+        (Issue# 164); `actions_secret`'s key case-folds a name the declared search cannot
+        (Issue# 165). Their declarations are present but inert, which is exactly what keeps
+        them free to change — a natural key is a one-way door only once a node's id has been
+        assigned under it.
+        """
+        from tap_plugin.github_core.collectors.github_collector.identity import (
+            actions_secret_id,
+            code_scanning_finding_id,
+            commit_observation_id,
+        )
+
+        held_back = (
+            commit_observation_id("github.com", 10, "sha1", "a" * 40),
+            code_scanning_finding_id(REPO, 7),
+            actions_secret_id("repository", OWNER, REPO, "", "HARNESS_PAT"),
+        )
+        for value in held_back:
+            assert isinstance(value, UUID) and not isinstance(value, Ref)
+            assert value.version == 5, "held back means the pre-adoption derivation, unchanged"
+
     def test_the_adoption_does_not_change_a_single_edge_id(self) -> None:
         """The property that makes this change data-neutral on an ALREADY-POPULATED grid.
 

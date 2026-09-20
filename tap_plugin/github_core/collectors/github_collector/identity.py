@@ -224,7 +224,7 @@ def environment_id(full_name: str, name: str) -> Ref:
 
 def actions_secret_id(
     scope: str, owner_login: str, full_name: str, environment_name: str, name: str
-) -> Ref:
+) -> UUID:
     """One ref per (scope, owner, repository, environment, name), with the name case-folded.
 
     Scope is in the key because an organisation secret and a repository secret can share a name
@@ -244,15 +244,21 @@ def actions_secret_id(
     the same credential, and two nodes here would say they are two. Observed on this estate —
     two of the nine referenced names are written lower-case.
 
-    THE FOLD IS THE ONE THING THE DECLARATION CANNOT SAY. ``find_existing`` filters the stored
-    ``name``, which holds the name as GitHub returned it, so the cross-run search is
-    case-SENSITIVE while this ref is not. Inert as far as anything can establish: a node is
-    only ever minted from the secrets API, which reports one canonical casing per secret, and
-    the two lower-case spellings measured on this estate are *references*, which resolve
-    through a separate upper-cased map. Left as it is rather than "fixed" in either direction,
-    because both fixes are rulings: folding the stored name would break the documented promise
-    that the node carries the name GitHub returned, and dropping the fold here would make two
-    spellings two nodes, which is what this fold was written to prevent.
+    STILL A DERIVED UUID, not a ref — the third type held back (Issue# 165). The fold is the one
+    thing a ``NATURAL_KEY`` cannot say: ``find_existing`` filters the stored ``name``, which
+    holds the name as GitHub returned it, so a declared search is case-SENSITIVE while this key
+    is not. Under a ref that split has teeth, and both AI seats on PR# 163 - github-core landed
+    on it independently: if the API ever reported a second canonical spelling, the search would
+    mint a SECOND node while the ref — and therefore the ``DEFINES_SECRET`` edge id derived
+    from it — stayed the same, stranding one of the two rows off the edge that describes it.
+
+    Whether that is reachable turns on a guarantee about GitHub's response casing that nobody
+    can produce from inside this repository, and both repairs are rulings: folding the stored
+    name breaks the documented promise that the node carries the name GitHub returned, and
+    dropping the fold makes two spellings two nodes, which is exactly what it was written to
+    prevent. So this type keeps its explicit derived id, which is byte-identical to what it has
+    always been and leaves secret identity completely unchanged by the adoption. The
+    declaration above it is present but inert, and therefore still free to change.
     """
     if environment_name:
         holder = f"{full_name}/{environment_name}"
@@ -260,7 +266,7 @@ def actions_secret_id(
         holder = full_name
     else:
         holder = owner_login
-    return _id("github_core__actions_secret", f"{scope}#{holder}#{name.upper()}")
+    return _uuid5_id("github_core__actions_secret", f"{scope}#{holder}#{name.upper()}")
 
 
 def actions_cache_id(full_name: str, cache_id_int: int | str) -> Ref:
