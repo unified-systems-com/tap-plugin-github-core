@@ -184,16 +184,19 @@ class TestTheDocumentItself:
             assert isinstance(value, Ref), f"{fn.__name__} still mints an id instead of naming a ref"
             assert not isinstance(value, UUID)
 
-    def test_the_three_held_back_types_still_carry_a_derived_id(self) -> None:
+    def test_the_one_held_back_type_still_carries_a_derived_id(self) -> None:
         """Held back is a STATE, not an omission — asserted so it cannot drift into adoption.
 
-        Three types do not emit a ref, each for a reason nobody in this repository can settle:
-        `compliance_core__compliance_finding` belongs to a plugin that has not declared;
-        `commit_observation`'s key names a platform host the model has no field for
-        (Issue# 164); `actions_secret`'s key case-folds a name the declared search cannot
-        (Issue# 165). Their declarations are present but inert, which is exactly what keeps
-        them free to change — a natural key is a one-way door only once a node's id has been
-        assigned under it.
+        ONE type does not emit a ref, for the only reason this repository cannot settle alone:
+        `compliance_core__compliance_finding` belongs to another plugin, which has not declared
+        a natural key. Its declaration here is present but inert, which is what keeps it free to
+        change — a natural key is a one-way door only once a node's id has been assigned under it.
+
+        The other two were released on 2026-09-20, both by putting the missing fact on the model
+        instead of leaving it only in the id recipe. `commit_observation` gained a `host` field
+        so the platform joins its key (Issue# 164). `actions_secret` now stores the canonical
+        upper-cased spelling in `name` and what GitHub returned in `name_reported`, so the fold
+        the key performs is a value the declared search can filter on (Issue# 165).
         """
         from tap_plugin.github_core.collectors.github_collector.identity import (
             actions_secret_id,
@@ -201,10 +204,13 @@ class TestTheDocumentItself:
             commit_observation_id,
         )
 
-        held_back = (
-            commit_observation_id("github.com", 10, "sha1", "a" * 40),
-            code_scanning_finding_id(REPO, 7),
-            actions_secret_id("repository", OWNER, REPO, "", "HARNESS_PAT"),
+        held_back = (code_scanning_finding_id(REPO, 7),)
+        # The two that were released, asserted here so the set cannot silently regrow.
+        assert isinstance(commit_observation_id("github.com", 10, "sha1", "a" * 40), Ref)
+        assert isinstance(actions_secret_id("repository", OWNER, REPO, "", "HARNESS_PAT"), Ref)
+        # The fold is the identity, so two spellings must compose the SAME ref.
+        assert actions_secret_id("repository", OWNER, REPO, "", "harness_pat") == actions_secret_id(
+            "repository", OWNER, REPO, "", "HARNESS_PAT"
         )
         for value in held_back:
             assert isinstance(value, UUID) and not isinstance(value, Ref)

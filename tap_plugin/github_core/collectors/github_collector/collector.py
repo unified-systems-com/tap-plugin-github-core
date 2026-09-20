@@ -2647,6 +2647,7 @@ class GithubCollector(CollectorBase):
                 name=f"{full_name}@{oid[:12]}",
                 dimensions=git_dims,
                 fields={
+                    "host": git_dims["github.platform"],
                     "full_name": full_name,
                     "repository_github_id": (
                         int(repository_github_id)
@@ -5251,7 +5252,9 @@ class GithubCollector(CollectorBase):
                     "owner_login": owner_login,
                     "full_name": full_name,
                     "environment_name": environment_name,
-                    "name": name,
+                    # Canonical spelling is the identity; what GitHub said rides beside it.
+                    "name": name.upper(),
+                    "name_reported": name,
                     # Organisation secrets carry a sharing policy; repository and environment
                     # secrets have none, and "" says so rather than implying a default.
                     "visibility": str(item.get("visibility") or ""),

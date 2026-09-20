@@ -111,7 +111,7 @@ def workflow_job_id(full_name: str, workflow_id_int: int | str, job_key: str) ->
 
 def commit_observation_id(
     host: str, repository_github_id: int | str, hash_algorithm: str, oid: str
-) -> UUID:
+) -> Ref:
     """GitHub's OBSERVATION of a commit in one repository (ruling 0.2, github-core#76).
 
     Keyed on the host, the repository's STABLE id (never `owner/repo`, which renames) and the
@@ -121,7 +121,7 @@ def commit_observation_id(
     repository by construction and can never merge two networks' verdicts. The cross-fork join
     on the network root is a follow-on once `Repository.parent` is collected.
     """
-    return _uuid5_id(
+    return _id(
         "github_core__commit_observation",
         f"{host}#{repository_github_id}#{hash_algorithm}:{oid.lower()}",
     )
@@ -235,7 +235,7 @@ def environment_id(full_name: str, name: str) -> Ref:
 
 def actions_secret_id(
     scope: str, owner_login: str, full_name: str, environment_name: str, name: str
-) -> UUID:
+) -> Ref:
     """One ref per (scope, owner, repository, environment, name), with the name case-folded.
 
     Scope is in the key because an organisation secret and a repository secret can share a name
@@ -255,21 +255,9 @@ def actions_secret_id(
     the same credential, and two nodes here would say they are two. Observed on this estate —
     two of the nine referenced names are written lower-case.
 
-    STILL A DERIVED UUID, not a ref — the third type held back (Issue# 165). The fold is the one
-    thing a ``NATURAL_KEY`` cannot say: ``find_existing`` filters the stored ``name``, which
-    holds the name as GitHub returned it, so a declared search is case-SENSITIVE while this key
-    is not. Under a ref that split has teeth, and both AI seats on PR# 163 - github-core landed
-    on it independently: if the API ever reported a second canonical spelling, the search would
-    mint a SECOND node while the ref — and therefore the ``DEFINES_SECRET`` edge id derived
-    from it — stayed the same, stranding one of the two rows off the edge that describes it.
-
-    Whether that is reachable turns on a guarantee about GitHub's response casing that nobody
-    can produce from inside this repository, and both repairs are rulings: folding the stored
-    name breaks the documented promise that the node carries the name GitHub returned, and
-    dropping the fold makes two spellings two nodes, which is exactly what it was written to
-    prevent. So this type keeps its explicit derived id, which is byte-identical to what it has
-    always been and leaves secret identity completely unchanged by the adoption. The
-    declaration above it is present but inert, and therefore still free to change.
+    The fold now agrees with the stored field: `ActionsSecret.name` holds the canonical
+    spelling and `name_reported` keeps what GitHub returned, so the declared search filters the
+    same value this key composes (Issue# 165, ruled 2026-09-20).
     """
     if environment_name:
         holder = f"{full_name}/{environment_name}"
@@ -277,7 +265,7 @@ def actions_secret_id(
         holder = full_name
     else:
         holder = owner_login
-    return _uuid5_id("github_core__actions_secret", f"{scope}#{holder}#{name.upper()}")
+    return _id("github_core__actions_secret", f"{scope}#{holder}#{name.upper()}")
 
 
 def actions_cache_id(full_name: str, cache_id_int: int | str) -> Ref:

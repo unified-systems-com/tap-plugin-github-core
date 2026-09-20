@@ -89,6 +89,7 @@ Observed distribution 2026-09-10: 41 workflows carry the tag, 35 with `scopes_re
 - `full_name` — `owner/repo` for repository and environment scope; empty on an organisation secret, which belongs to no repository.
 - `environment_name` — the environment, on environment scope only; empty otherwise.
 - `name` — the secret's name as GitHub returned it. The whole point of the node. Case is preserved here; identity folds it.
+- `name_reported` — the spelling GitHub actually returned, kept verbatim beside the canonical one. `name` is upper-cased because GitHub secret names are not case-sensitive, so the fold is the identity; this column is what was reported, which is a different fact and worth keeping (Issue# 165).
 - `visibility` — `all`, `private` or `selected`, on organisation secrets only. The blast-radius field. Empty on repository and environment secrets, which have no sharing policy — observed-empty, not unknown.
 - `created_at` — as reported.
 - `updated_at` — as reported. A secret whose value was rotated shows a new `updated_at` and nothing else; that timestamp is the only rotation signal this surface can offer.

@@ -436,6 +436,7 @@ class TestModelAndEdge:
         obs = _create(
             "github_core__commit_observation",
             {
+                "host": "github.com",
                 "full_name": "o/r",
                 "sha": "c" * 40,
                 "signature_state": "unsigned",
@@ -447,15 +448,15 @@ class TestModelAndEdge:
     def test_signature_kind_is_constrained_and_sha_must_be_lower_case(self) -> None:
         assert not create_node(
             "github_core__commit_observation",
-            {"full_name": "o/r", "sha": "c" * 40, "signature_kind": "pgp"},
+            {"host": "github.com", "full_name": "o/r", "sha": "c" * 40, "signature_kind": "pgp"},
         ).success
         assert not create_node(
-            "github_core__commit_observation", {"full_name": "o/r", "sha": "C" * 40}
+            "github_core__commit_observation", {"host": "github.com", "full_name": "o/r", "sha": "C" * 40}
         ).success
 
     def test_observes_commit_is_observation_to_commit_and_property_free(self) -> None:
         obs = _create(
-            "github_core__commit_observation", {"full_name": "o/r", "sha": "c" * 40}
+            "github_core__commit_observation", {"host": "github.com", "full_name": "o/r", "sha": "c" * 40}
         )
         commit = _create(
             "git_core__git_commit", {"hash_algorithm": "sha1", "oid": "c" * 40}

@@ -35,12 +35,13 @@ class ActionsSecret(BaseModel):
     ENTITY_TYPE: ClassVar[str] = "github_core__actions_secret"
     # Scope is in the key because an org secret and a repository secret can share a name and are
     # different credentials; `full_name` / `environment_name` are "" at the scopes that have none.
-    # DECLARED BUT INERT, and deliberately so (Issue# 165). `identity.py.actions_secret_id`
-    # upper-cases the name in its key and this declaration cannot — the search filters the stored
-    # field, which holds the name as GitHub returned it — so under a ref the two would disagree:
-    # a second canonical spelling would mint a second node behind an unchanged edge. This type
-    # therefore still emits an explicit derived id and nothing resolves against this tuple, which
-    # is what keeps it free to change. See the issue for the two candidate rulings.
+    # `name` is the CANONICAL spelling — upper-cased — and that is what the key uses. GitHub
+    # secret names are not case-sensitive: a workflow writing `${{ secrets.harness_pat }}` and
+    # one writing `${{ secrets.HARNESS_PAT }}` read the same credential, so two nodes would say
+    # they are two. Ruled by George 2026-09-20 (Issue# 165): fold at write time and store the
+    # fold, rather than folding only inside the id recipe where the declared search could not
+    # follow. `name_reported` keeps what GitHub actually returned, so nothing is lost by
+    # canonicalising — a column is cheap and this one buys precision the key needs.
     NATURAL_KEY: ClassVar[tuple[str, ...]] = ("scope", "owner_login", "full_name", "environment_name", "name")
     ENTITY_NAME: ClassVar[str] = "GitHub Actions Secret"
     ENTITY_DESCRIPTION: ClassVar[str] = (
@@ -69,6 +70,7 @@ class ActionsSecret(BaseModel):
         "full_name": {"type": "string"},
         "environment_name": {"type": "string"},
         "name": {"type": "string", "minLength": 1},
+        "name_reported": {"type": "string"},
         "visibility": {"type": "string"},
         "created_at": {"type": ["string", "null"]},
         "updated_at": {"type": ["string", "null"]},
@@ -115,7 +117,12 @@ class ActionsSecret(BaseModel):
     owner_login = models.CharField(max_length=255, blank=True, default="", db_index=True)
     full_name = models.CharField(max_length=255, blank=True, default="", db_index=True)
     environment_name = models.CharField(max_length=255, blank=True, default="")
+    #: The canonical spelling, upper-cased: GitHub secret names are not case-sensitive, so this
+    #: is the identity. Folded at write time so the declared search and the id agree.
     name = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    #: The spelling GitHub actually returned, kept verbatim. Never a constituting property —
+    #: it is what was reported, not what the secret IS (Issue# 165).
+    name_reported = models.CharField(max_length=255, blank=True, default="")
     visibility = models.CharField(max_length=32, blank=True, default="")
     created_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(null=True, blank=True)
