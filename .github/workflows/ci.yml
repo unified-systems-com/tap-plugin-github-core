@@ -18,11 +18,12 @@ permissions:
 
 jobs:
   tap:
-    # Pinned to tap v0.2.0 (Renovate does not track it): the validation logic must know the
-    # manifest keys the floor's core knows — the [falsifiers] table arrived with the
-    # reconciliation primitives this plugin adopts (github-core#151), and an older tooling
-    # checkout refuses it at manifest parse whatever the harness resolves to.
-    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@77f5d953b810c76cec964ea4a2c778e8984f1c2a
+    # Pinned to tap main after v0.2.0 (Renovate does not track it): the validation logic must
+    # know the manifest keys the floor's core knows — the [falsifiers] table arrived with the
+    # reconciliation primitives this plugin adopts (github-core#151) — and must survive the
+    # conformance lane's venv, which holds no plugin at all (tap#666, fixed after v0.2.0). The
+    # harness itself is still core at the tag the manifest floor names.
+    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@8d0ef6c93908f01ca172bb6d019584a547dd83ff
     with:
       plugin_slug: github_core
     secrets:

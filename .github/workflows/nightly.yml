@@ -16,7 +16,7 @@ permissions:
 jobs:
   main:
     name: vs core main
-    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@77f5d953b810c76cec964ea4a2c778e8984f1c2a
+    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@8d0ef6c93908f01ca172bb6d019584a547dd83ff
     with:
       plugin_slug: github_core
       harness_ref: main
@@ -24,7 +24,7 @@ jobs:
       harness_pat: ${{ secrets.TAP_CORE_RO_PAT }}
   latest:
     name: vs latest core release (v0.2.0, informational)
-    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@77f5d953b810c76cec964ea4a2c778e8984f1c2a
+    uses: unified-systems-com/tap/.github/workflows/plugin-ci.yml@8d0ef6c93908f01ca172bb6d019584a547dd83ff
     with:
       plugin_slug: github_core
       harness_ref: v0.2.0
