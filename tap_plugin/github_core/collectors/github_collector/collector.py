@@ -4970,7 +4970,6 @@ class GithubCollector(CollectorBase):
             self._emit_secret(
                 item,
                 scope="repository",
-                key=full_name,
                 owner_login=full_name.split("/")[0],
                 full_name=full_name,
                 environment_name="",
@@ -5005,7 +5004,6 @@ class GithubCollector(CollectorBase):
                 self._emit_secret(
                     item,
                     scope="environment",
-                    key=f"{full_name}/{env_name}",
                     owner_login=full_name.split("/")[0],
                     full_name=full_name,
                     environment_name=env_name,
@@ -5087,7 +5085,6 @@ class GithubCollector(CollectorBase):
             self._emit_secret(
                 item,
                 scope="organization",
-                key=owner,
                 owner_login=owner,
                 full_name="",
                 environment_name="",
@@ -5214,7 +5211,6 @@ class GithubCollector(CollectorBase):
         item: dict[str, Any],
         *,
         scope: str,
-        key: str,
         owner_login: str,
         full_name: str,
         environment_name: str,
@@ -5234,7 +5230,7 @@ class GithubCollector(CollectorBase):
         name = str(item.get("name") or "")
         if not name:
             return
-        uuid_ = actions_secret_id(scope, key, name)
+        uuid_ = actions_secret_id(scope, owner_login, full_name, environment_name, name)
         out.setdefault(name.upper(), []).append(uuid_)
         nodes.append(
             node_envelope(

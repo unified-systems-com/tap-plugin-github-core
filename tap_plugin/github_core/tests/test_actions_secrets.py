@@ -120,8 +120,7 @@ def test_names_differing_only_in_case_are_one_secret() -> None:
     case-sensitive key would mint a second node for a secret that already exists and report a
     working reference as broken.
     """
-    assert actions_secret_id("repository", _REPO, "harness_pat") == actions_secret_id(
-        "repository", _REPO, "HARNESS_PAT"
+    assert actions_secret_id("repository", _REPO.split("/")[0], _REPO, "", "harness_pat") == actions_secret_id("repository", _REPO.split("/")[0], _REPO, "", "HARNESS_PAT"
     )
 
 
@@ -131,9 +130,9 @@ def test_the_same_name_at_different_scopes_is_different_secrets() -> None:
     Collapsing them would make an organisation secret appear to live in whichever repository was
     collected last, and would hide a repository override — the case most worth seeing.
     """
-    org = actions_secret_id("organization", _OWNER, "AWS_ROLE")
-    repo = actions_secret_id("repository", _REPO, "AWS_ROLE")
-    env = actions_secret_id("environment", f"{_REPO}/production", "AWS_ROLE")
+    org = actions_secret_id("organization", _OWNER, "", "", "AWS_ROLE")
+    repo = actions_secret_id("repository", _REPO.split("/")[0], _REPO, "", "AWS_ROLE")
+    env = actions_secret_id("environment", f"{_REPO}/production".split("/")[0], "/".join(f"{_REPO}/production".split("/")[:2]), f"{_REPO}/production".split("/")[2], "AWS_ROLE")
     assert len({org, repo, env}) == 3
 
 
@@ -386,8 +385,8 @@ def test_one_name_at_two_scopes_keeps_both_credentials() -> None:
         merged.setdefault(k, []).extend(v)
 
     assert len(merged["AWS_ROLE"]) == 2, "both defining scopes survive the merge"
-    assert merged["AWS_ROLE"][0] == actions_secret_id("organization", _OWNER, "AWS_ROLE")
-    assert merged["AWS_ROLE"][1] == actions_secret_id("repository", _REPO, "AWS_ROLE")
+    assert merged["AWS_ROLE"][0] == actions_secret_id("organization", _OWNER, "", "", "AWS_ROLE")
+    assert merged["AWS_ROLE"][1] == actions_secret_id("repository", _REPO.split("/")[0], _REPO, "", "AWS_ROLE")
 
 
 def test_a_selected_visibility_org_secret_resolves_to_the_repositories_it_names() -> None:

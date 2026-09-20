@@ -74,7 +74,7 @@ class TestIdentity:
         (job, action) alone would keep only the last after envelope collapse — silently."""
         job = workflow_job_id("o/r", 1, "build")
         action = github_action_id("actions/checkout")
-        assert str(uses_action_edge_id(job, action, "v4")) == "53a16318-fa59-5c29-a009-8931f926f931"
+        assert str(uses_action_edge_id(job, action, "v4")) == "b8e8a365-d0d1-574a-9363-e6ea8a917d1a"
         assert uses_action_edge_id(job, action, "v4") != uses_action_edge_id(job, action, "a" * 40)
 
 

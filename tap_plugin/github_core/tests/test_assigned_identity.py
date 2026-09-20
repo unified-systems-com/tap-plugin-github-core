@@ -184,6 +184,35 @@ class TestTheDocumentItself:
             assert isinstance(value, Ref), f"{fn.__name__} still mints an id instead of naming a ref"
             assert not isinstance(value, UUID)
 
+    def test_the_adoption_does_not_change_a_single_edge_id(self) -> None:
+        """The property that makes this change data-neutral on an ALREADY-POPULATED grid.
+
+        The importer finds an edge by the `entity_id` the envelope supplies and by nothing else
+        (`tap_grid/grift/importer.py`, the `edge_exists` branch), so an edge id that shifted
+        would make the first re-collect CREATE a second live edge for every fact that already
+        has one rather than replace it — one silent doubling per grid (Codex on PR# 163). Node
+        ids are safe for the opposite reason: `find_existing` matches the existing typed rows on
+        their declared fields, so they are found rather than minted.
+
+        Pinned to literals taken from before the adoption. `_endpoint_token` re-derives the node
+        id each ref used to be, which is why these still hold; if that step is ever removed,
+        this is the test that says what it costs.
+        """
+        from tap_plugin.github_core.collectors.github_collector.identity import (
+            edge_id,
+            github_action_id,
+            uses_action_edge_id,
+        )
+
+        assert (
+            str(uses_action_edge_id(workflow_job_id("o/r", 1, "build"), github_action_id("actions/checkout"), "v4"))
+            == "b8e8a365-d0d1-574a-9363-e6ea8a917d1a"
+        )
+        assert (
+            str(edge_id("OWNS_REPO__github_core", account_id("acme"), repository_id("acme/app")))
+            == "b88a3925-3fe1-547c-bfa0-febb3da711a6"
+        )
+
     def test_every_github_core_model_has_declared(self) -> None:
         """Undeclared is never keyless: a ref to an undeclared type is refused outright.
 

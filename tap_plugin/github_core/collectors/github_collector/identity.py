@@ -19,9 +19,9 @@ Two things deliberately stay derived:
 - **Edge ids.** The importer never substitutes an edge envelope's id (edges are ``KEYLESS``
   and keep their assignment), so :func:`edge_id` remains the plugin's cross-run edge
   idempotency: the same fact re-observed keeps one edge instead of accumulating one per run.
-  Its inputs are now ref strings rather than node UUIDs, which are just as deterministic —
-  the id VALUE changes once, the property does not. Edge identity under assigned nodes is
-  tracked as Issue# 690 - tap and is out of scope here.
+  Its endpoints are hashed through :func:`_endpoint_token`, which reproduces the node id each
+  ref used to derive as, so every edge id is UNCHANGED by this adoption and an existing grid
+  gains no duplicates. Edge identity under assigned nodes is Issue# 690 - tap.
 - **``commit_observation``.** Its recipe keys on the platform HOST, which the model has no
   field for, so its declaration cannot say what the recipe says. It keeps an explicit derived
   id until that is ruled on — see :func:`commit_observation_id`.
@@ -222,20 +222,45 @@ def environment_id(full_name: str, name: str) -> Ref:
     return _id("github_core__github_environment", f"{full_name}#{name}")
 
 
-def actions_secret_id(scope: str, owner_or_repo: str, name: str) -> Ref:
-    """One id per (scope, owner-or-repo, name), with the name case-folded.
+def actions_secret_id(
+    scope: str, owner_login: str, full_name: str, environment_name: str, name: str
+) -> Ref:
+    """One ref per (scope, owner, repository, environment, name), with the name case-folded.
 
     Scope is in the key because an organisation secret and a repository secret can share a name
     and are different credentials — collapsing them would make an org secret look like it lives
-    in whichever repository was collected last. For an environment secret, `owner_or_repo` is
-    `owner/repo/environment`, so two environments of one repository stay distinct.
+    in whichever repository was collected last.
+
+    Takes the four holder fields rather than one pre-joined ``owner/repo/environment`` string
+    (Grok on PR# 163 - github-core). The caller was composing that string from the same fields
+    the payload already carries, so the ref and the declared search were derived twice from one
+    fact and could drift apart with nothing to notice; the composition now happens HERE, once,
+    over exactly the fields ``ActionsSecret.NATURAL_KEY`` names. The string it produces is
+    byte-identical to the one this function has always produced, so no secret's ref — and
+    therefore no ``DEFINES_SECRET`` edge id — changes.
 
     The name is upper-cased because GitHub secret names are NOT case-sensitive: a workflow
-    writing `${{ secrets.harness_pat }}` and one writing `${{ secrets.HARNESS_PAT }}` read the
-    same credential, and two nodes here would say they are two. Observed on this estate — two of
-    the nine referenced names are written lower-case.
+    writing ``${{ secrets.harness_pat }}`` and one writing ``${{ secrets.HARNESS_PAT }}`` read
+    the same credential, and two nodes here would say they are two. Observed on this estate —
+    two of the nine referenced names are written lower-case.
+
+    THE FOLD IS THE ONE THING THE DECLARATION CANNOT SAY. ``find_existing`` filters the stored
+    ``name``, which holds the name as GitHub returned it, so the cross-run search is
+    case-SENSITIVE while this ref is not. Inert as far as anything can establish: a node is
+    only ever minted from the secrets API, which reports one canonical casing per secret, and
+    the two lower-case spellings measured on this estate are *references*, which resolve
+    through a separate upper-cased map. Left as it is rather than "fixed" in either direction,
+    because both fixes are rulings: folding the stored name would break the documented promise
+    that the node carries the name GitHub returned, and dropping the fold here would make two
+    spellings two nodes, which is what this fold was written to prevent.
     """
-    return _id("github_core__actions_secret", f"{scope}#{owner_or_repo}#{name.upper()}")
+    if environment_name:
+        holder = f"{full_name}/{environment_name}"
+    elif full_name:
+        holder = full_name
+    else:
+        holder = owner_login
+    return _id("github_core__actions_secret", f"{scope}#{holder}#{name.upper()}")
 
 
 def actions_cache_id(full_name: str, cache_id_int: int | str) -> Ref:
@@ -384,6 +409,34 @@ def github_action_id(action_path: str) -> Ref:
     return _id("github_core__github_action", action_path)
 
 
+def _endpoint_token(value: UUID | Ref) -> UUID | Ref:
+    """What an edge id hashes for one endpoint: the node id the endpoint USED to be derived as.
+
+    Edge ids are not substituted by the importer, so this derivation is what keeps one edge per
+    fact across runs — and it is also what an ALREADY-POPULATED grid's existing edges were
+    minted from. Hashing the ref string directly would have been just as deterministic going
+    forward and would have changed every edge id exactly once, which on a populated grid means
+    a second live edge for every fact that already has one: the importer finds an edge by the
+    ``entity_id`` the envelope supplies and by nothing else, so it would create rather than
+    replace (Codex on PR# 163 - github-core, verified against
+    ``tap_grid/grift/importer.py``'s ``edge_exists`` branch).
+
+    Since a ref is exactly the string the old node derivation hashed, re-hashing it here
+    reproduces that node id byte for byte, and every edge id is unchanged by the adoption. The
+    node ids themselves are equally safe: ``find_existing`` matches the existing typed rows on
+    their declared fields, so they are found rather than minted. The whole change is therefore
+    data-neutral on a grid collected before it.
+
+    Deliberately transitional. It exists to make adoption a no-op for existing edges, not
+    because an edge's identity should be a function of its endpoints' former ids; that is the
+    question Issue# 690 - tap owns. An endpoint that is already a real id (another batch's
+    entity, another plugin's node) passes straight through, as it always did.
+    """
+    if isinstance(value, Ref):
+        return _uuid5_id(*str(value).split(":", 1))
+    return value
+
+
 def uses_action_edge_id(job_uuid: UUID | Ref, action_uuid: UUID | Ref, declared_ref: str) -> UUID:
     """A `USES_ACTION` edge, keyed on the job, the action AND the ref as written.
 
@@ -393,10 +446,18 @@ def uses_action_edge_id(job_uuid: UUID | Ref, action_uuid: UUID | Ref, declared_
     """
     return uuid5(
         GITHUB_CORE_NAMESPACE,
-        f"edge:USES_ACTION__github_core:{job_uuid}:{action_uuid}:{declared_ref}",
+        f"edge:USES_ACTION__github_core:{_endpoint_token(job_uuid)}:"
+        f"{_endpoint_token(action_uuid)}:{declared_ref}",
     )
 
 
 def edge_id(edge_type: str, source: UUID | Ref, target: UUID | Ref) -> UUID:
-    """Deterministic UUIDv5 for an edge by (type, source, target)."""
-    return uuid5(GITHUB_CORE_NAMESPACE, f"edge:{edge_type}:{source}:{target}")
+    """Deterministic UUIDv5 for an edge by (type, source, target).
+
+    Endpoints are hashed through :func:`_endpoint_token`, so an edge id is unchanged by the move
+    to assigned node identity — see that function for why that matters on a populated grid.
+    """
+    return uuid5(
+        GITHUB_CORE_NAMESPACE,
+        f"edge:{edge_type}:{_endpoint_token(source)}:{_endpoint_token(target)}",
+    )

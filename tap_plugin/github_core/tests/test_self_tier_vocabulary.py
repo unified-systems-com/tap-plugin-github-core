@@ -1479,7 +1479,7 @@ class TestPerRepoWalk:
         same to two of nine referenced names. `GITHUB_TOKEN` is absent from every listing by
         design and must not appear as unresolved.
         """
-        org_secret = actions_secret_id("organization", "acme", "SHARED_API_KEY")
+        org_secret = actions_secret_id("organization", "acme", "", "", "SHARED_API_KEY")
         nodes, edges, _client, _warns = _walk_one_repo(monkeypatch, org_secrets={"SHARED_API_KEY": [org_secret]})
 
         workflow = next(n["node"] for n in nodes if n["entity"]["entity_type"] == "github_core__github_workflow")
