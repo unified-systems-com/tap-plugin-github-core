@@ -1314,6 +1314,14 @@ record says so rather than assuming the credential could look:
   introspect itself, and with no organization there is no org-side listing. Every 404 it receives
   stays undetermined, by design.
 
+**Known gap, and the gate it must pass before arming.** Repository membership does not prove
+permission to read what is INSIDE the repository. An installation can keep `metadata` and lose
+`actions`, and where GitHub conceals that with a 404 rather than a 403, the parent probe answers
+200 while the child answers 404 — and this design would read the child as gone. The permission
+axis is github-core#160, and it is a **precondition for switching retirement authority on for this
+plugin**, not a later improvement. Raised by the Codex seat on PR# 161 and recorded here rather
+than left to the pull request, because the pull request is not what somebody reads before arming.
+
 **The judgement.** A `not_found` becomes `DROPPED_FROM_OBSERVATION` only when the object's
 repository is provably in reach. Where the reach could not be read, or was read and does not hold
 the repository, the verdict is `UNDETERMINED(scope_unknown)` with a note saying which of the two it
@@ -1326,6 +1334,8 @@ refused → the child says nothing.
 | req-github-core-falsifier-reach-1 | Reach Resolved Per Run | In Development | The falsifier resolves the credential's reach once per run; an App reads `repository_selection` and, when `selected`, walks `/installation/repositories`. A refused or failed walk is `unknown`, never an empty set. | `reach.py` unit assertions: a failed walk yields `unknown`; `selected` compares by numeric id and by lower-cased `owner/name`. |
 | req-github-core-falsifier-reach-2 | Outside The Reach Never Drops | In Development | A `not_found` on a repository the reach does not hold is `UNDETERMINED(scope_unknown)`, never `DROPPED_FROM_OBSERVATION`. | `tests/test_falsifiers.py::TestReachJudgement::test_out_of_reach_a_404_is_undetermined_not_dropped`. |
 | req-github-core-falsifier-reach-3 | An Unobservable Reach Never Drops | In Development | Where the reach could not be read at all — a PAT run today, a user-owned fine-grained token forever — every 404 is `UNDETERMINED(scope_unknown)`, with the reason on the note. | `TestReachJudgement::test_an_unobservable_reach_never_drops`; `::test_a_falsifier_with_no_credential_behind_its_client_has_no_reach` proves the default is fail-closed. |
+| req-github-core-falsifier-reach-5 | `all` Is One Account's Boundary | In Development | An installation reporting `repository_selection: all` holds every repository of the account it is installed on, and no other. A repository under a different owner is outside the installation, so its 404 is not evidence of absence. An installation that reports `all` but names no account has no boundary to test and its reach is `unknown`. | `tests/test_falsifiers.py::TestReachBoundary`. Raised by the Grok seat on PR# 161. |
+| req-github-core-falsifier-reach-6 | Reach Belongs To The Run | In Development | A reach resolved from the credential is cached against the lifecycle batch id, not the falsifier instance: an installation narrowed between two runs must be re-read, never carried forward. | `tests/test_falsifiers.py::TestReachIsScopedToTheRun` reuses one falsifier across two runs and narrows the installation between them. Raised by the Codex seat on PR# 161. |
 | req-github-core-falsifier-reach-4 | Parent Probe, Once Per Run | In Development | A 404 on an object inside a repository is judged against one probe of that repository; the answer is cached per run and shared across every falsifier of that run. An absence resting on a file the credential just READ is not reach-gated — the read already answered whether it could look. | `TestReachJudgement::test_a_child_404_under_a_gone_parent_is_undetermined`; `::test_the_parent_is_probed_once_per_run_however_many_children` proves one probe for three children and a re-probe on a new run. |
 
 ### Rule Suites — Who Actually Bypassed

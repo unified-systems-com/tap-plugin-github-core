@@ -231,7 +231,14 @@ class _GithubFalsifier(Falsifier):
         self._client = client
         self._auth: Any = None
         self._client_factory = client_factory
-        self._reach = reach
+        #: A reach handed in by a caller (tests) pins the answer and is never re-resolved.
+        self._injected_reach = reach
+        #: A reach RESOLVED from the credential is scoped to the run it was resolved for: an
+        #: installation can be narrowed between runs, and a falsifier instance that outlived the
+        #: first run would otherwise carry the old selection into the second and authorize
+        #: exactly the retirement this gate exists to refuse (Codex seat, PR# 161).
+        self._resolved_reach: Reach | None = None
+        self._resolved_for = ""
         self._batch_id = ""
 
     def _resolve_client(self) -> ProbeClient:
@@ -243,17 +250,25 @@ class _GithubFalsifier(Falsifier):
         return self._client
 
     def _resolve_reach(self, client: ProbeClient) -> Reach:
-        """This run's reach, resolved once. An injected client with no credential behind it has
-        no reach to read, and says so rather than assuming one — which is what keeps an injected
-        client from silently licensing retirements."""
-        if self._reach is None:
+        """This RUN's reach. An injected client with no credential behind it has no reach to
+        read, and says so rather than assuming one — which is what keeps an injected client from
+        silently licensing retirements.
+
+        Resolved once per run, not once per instance: the cache is keyed on the lifecycle batch
+        id exactly as the parent-probe cache is, so a falsifier instance reused across runs
+        re-reads the installation rather than carrying a stale selection forward.
+        """
+        if self._injected_reach is not None:
+            return self._injected_reach
+        if self._resolved_reach is None or self._resolved_for != self._batch_id:
             if self._auth is not None:
-                self._reach = resolve_reach(self._auth, client)
+                self._resolved_reach = resolve_reach(self._auth, client)
             else:
-                self._reach = unobservable(
+                self._resolved_reach = unobservable(
                     "none", "this falsifier was given a client but no credential whose reach could be read"
                 )
-        return self._reach
+            self._resolved_for = self._batch_id
+        return self._resolved_reach
 
     def batch_falsify(self, candidates: Sequence[Candidate], context: FalsifyContext) -> list[Verdict]:
         try:
@@ -294,6 +309,11 @@ class _GithubFalsifier(Falsifier):
         if held is False:
             return _undetermined(candidate, "scope_unknown", _OUT_OF_REACH_NOTE)
         if parent_probe:
+            # KNOWN GAP (github-core#160, a precondition for arming): a repository that answers
+            # does not prove this credential may read what is INSIDE it. An installation can keep
+            # `metadata` and lose `actions`, and where GitHub conceals that with a 404 the parent
+            # answers 200 while the child answers 404. The permission axis closes it; until then
+            # this gate covers the repository set only, and the spec says so.
             parent = _parent_probe(client, self._batch_id, full_name)
             if parent.status != "found":
                 reason = parent.status if parent.status in UNDETERMINED_REASONS else "scope_unknown"

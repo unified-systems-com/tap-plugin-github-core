@@ -22,7 +22,14 @@ from tap_plugin.github_core.falsifiers import (
     WorkflowJobFalsifier,
     probe_status_of,
 )
-from tap_plugin.github_core.reach import SELECTION_ALL, SELECTION_SELECTED, Reach, unobservable
+from tap_plugin.github_core.reach import (
+    SELECTION_ALL,
+    SELECTION_SELECTED,
+    SELECTION_UNKNOWN,
+    Reach,
+    resolve_reach,
+    unobservable,
+)
 from tap_plugin.github_core.tests.fake_github import FakeGithub, contents_payload
 
 from tap_grid.falsifier_testing import (
@@ -90,7 +97,12 @@ def _reach() -> Reach:
     right to answer UNDETERMINED for every one of them, so each proof injects the reach it is
     implicitly asserting.
     """
-    return Reach(credential="app", selection=SELECTION_ALL, note="test: the installation follows the account")
+    return Reach(
+        credential="app",
+        selection=SELECTION_ALL,
+        account="acme",
+        note="test: the installation follows the acme account",
+    )
 
 
 def _probe(verdict: Verdict) -> dict[str, Any]:
@@ -364,6 +376,7 @@ class TestReachJudgement:
         return Reach(
             credential="app",
             selection=SELECTION_SELECTED,
+            account="acme",
             repository_ids=frozenset(ids),
             repository_names=frozenset({"acme/inside"}),
             note="test: an installation on selected repositories",
@@ -451,3 +464,82 @@ class TestReachJudgement:
 
         EnvironmentFalsifier(client=fake, reach=_reach()).batch_falsify(candidates, _context())
         assert fake.calls.count("/repos/acme/app") == 2, "a new run re-probes rather than reusing the answer"
+
+
+class TestReachBoundary:
+    """`all` is a statement about ONE account, not about GitHub (Grok seat, PR# 161)."""
+
+    @staticmethod
+    def _all(account: str | None) -> Reach:
+        return Reach(credential="app", selection=SELECTION_ALL, account=account, note="test")
+
+    def test_all_holds_the_installation_account(self) -> None:
+        assert self._all("acme").holds_repository(full_name="acme/app") is True
+        assert self._all("acme").holds_repository(full_name="ACME/App") is True
+
+    def test_all_does_not_hold_another_account(self) -> None:
+        """An installation on acme 404s on newco's repositories because it is not installed
+        there — not because they are gone."""
+        assert self._all("acme").holds_repository(full_name="newco/app") is False
+
+    def test_all_without_an_account_cannot_say(self) -> None:
+        """`all` relative to nothing is not a boundary, so it answers cannot-say rather than
+        yes."""
+        assert self._all(None).holds_repository(full_name="acme/app") is None
+        assert self._all("acme").holds_repository(github_id=7) is None, "no owner to compare"
+
+    def test_an_installation_reporting_all_with_no_account_is_unobservable(self) -> None:
+        class _Auth:
+            has_app = True
+            has_pat = False
+            installation = {"repository_selection": "all"}
+
+        assert resolve_reach(_Auth(), None).selection == SELECTION_UNKNOWN
+
+
+@pytest.mark.django_db
+class TestReachIsScopedToTheRun:
+    """A reach RESOLVED from the credential belongs to the run it was resolved for.
+
+    An installation can be narrowed between two runs. A falsifier instance that outlived the
+    first run must not carry the first run's selection into the second, or it authorizes exactly
+    the retirement this gate exists to refuse (Codex seat, PR# 161).
+    """
+
+    class _Auth:
+        """A credential whose installation narrows between runs."""
+
+        has_app = True
+        has_pat = False
+
+        def __init__(self) -> None:
+            self.installation: dict[str, Any] = {
+                "repository_selection": "all",
+                "account": {"login": "acme"},
+            }
+
+        def narrow(self) -> None:
+            self.installation = {"repository_selection": "selected", "account": {"login": "acme"}}
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_a_reused_falsifier_re_reads_the_installation_on_a_new_run(self) -> None:
+        rid = _create(REPOSITORY, {"full_name": "acme/app", "owner_login": "acme", "github_id": 1})
+        candidate = _candidate(rid, REPOSITORY, None)
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/app", 404)
+        # The narrowed installation names no repositories, so the walk answers an empty list.
+        fake.answer("/installation/repositories", {"repositories": [], "total_count": 0})
+
+        auth = self._Auth()
+        falsifier = RepositoryFalsifier(client=fake)
+        falsifier._auth = auth  # the credential the reach is read from; injected for the test
+
+        [first] = falsifier.batch_falsify([candidate], _context())
+        assert first.verdict == DROPPED_FROM_OBSERVATION, "run one: acme/app is inside `all` on acme"
+
+        auth.narrow()
+        [second] = falsifier.batch_falsify([candidate], _context())
+        assert (second.verdict, second.reason) == (UNDETERMINED, "scope_unknown"), (
+            "run two: the installation no longer names acme/app, and the same instance must not "
+            "reuse run one's reach"
+        )

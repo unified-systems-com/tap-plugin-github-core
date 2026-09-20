@@ -72,6 +72,10 @@ class Reach:
     credential: str
     #: ``all``, ``selected`` or ``unknown`` — the installation's ``repository_selection``.
     selection: str
+    #: The account login the installation is ON, lower-cased. ``all`` means "every repository of
+    #: THIS account", never "every repository on GitHub", so without the account the ``all``
+    #: branch has no boundary to test and answers *cannot say* (Grok seat, PR# 161).
+    account: str | None = None
     #: GitHub's numeric ids the installation listed about itself; None when unobserved.
     repository_ids: frozenset[int] | None = None
     #: The same repositories as lower-cased ``owner/name``; None when unobserved.
@@ -94,9 +98,16 @@ class Reach:
         if not self.observable:
             return None
         if self.selection == SELECTION_ALL:
-            # The installation follows the account, so any repository the listing ever named is
-            # in reach; a 404 under it is the object, not the grant.
-            return True
+            # The installation follows THIS account into every repository it owns — which is a
+            # statement about one account, not about GitHub. A repository belonging to anyone
+            # else is outside the installation entirely and 404s for that reason, so the owner
+            # is compared before the 404 is allowed to mean anything.
+            if not self.account:
+                return None
+            owner = full_name.split("/", 1)[0].lower() if "/" in full_name else ""
+            if not owner:
+                return None
+            return owner == self.account
         if github_id is not None and self.repository_ids is not None:
             try:
                 return int(github_id) in self.repository_ids
@@ -157,11 +168,19 @@ def resolve_reach(auth: Any, client: Any) -> Reach:
         # client has already done that, so this reads the record rather than re-minting.
         installation = getattr(auth, "installation", None) or {}
         selection = str(installation.get("repository_selection") or "")
+        account = str((installation.get("account") or {}).get("login") or "").lower() or None
         if selection == SELECTION_ALL:
+            if account is None:
+                return unobservable(
+                    "app",
+                    "the installation reports `all` but names no account, so the boundary that "
+                    "`all` is relative to was not observed",
+                )
             return Reach(
                 credential="app",
                 selection=SELECTION_ALL,
-                note="the installation follows the account into every repository it owns",
+                account=account,
+                note=f"the installation follows {account} into every repository it owns",
             )
         walked = _walk_installation_repositories(client)
         if walked is None:
@@ -172,6 +191,7 @@ def resolve_reach(auth: Any, client: Any) -> Reach:
         return Reach(
             credential="app",
             selection=SELECTION_SELECTED,
+            account=account,
             repository_ids=ids,
             repository_names=names,
             note=f"the installation names {len(names)} repository/repositories",
