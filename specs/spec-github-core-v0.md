@@ -1288,6 +1288,64 @@ This node is not the run. Scope facts never go on `collection_job`.
 | req-github-core-collection-scope-3 | Seams Declared, Empty | Implemented | `visibility` and `tiers` are emitted `{}` with their shapes described per key; the tier `reason` enum is the agreed closed vocabulary. | A tier verdict in the agreed shape validates against the schema; a stray reason does not. |
 | req-github-core-collection-scope-4 | Inputs Versioned | Implemented | `configuration` carries the manifest version + digest, the grant as read, and the plan's provenance, so a changed verdict has an attributable cause. | `plan` is `unknown` with `plan_source` saying why whenever it could not be read. |
 
+### A 404 Is Judged Against The Credential's Reach
+----
+RID: `req-github-core-falsifier-reach`
+
+Status: `In Development`
+
+GitHub answers `404` for an object that is gone **and** for an object that is there and this
+credential may not see. A falsifier that reads the status line alone therefore cannot tell a
+deletion from a narrowed grant, and under retirement authority the two have opposite consequences:
+one records a fact, the other retires a live node.
+
+Ruled by George on 2026-09-20 (option D on github-core#155): the 404 is judged against the
+credential's **reach** — what it can demonstrably see right now — and never taken at face value.
+
+**The reach, per credential kind.** What is observable differs, and where it is not observable the
+record says so rather than assuming the credential could look:
+
+- **App** — observable. `repository_selection` says `all` or `selected`; `GET /installation/repositories`
+  walks the selected list.
+- **Classic token** — observable from the token's own `X-OAuth-Scopes` response header (github-core#158).
+- **Org-owned fine-grained token** — observable only from the organization side, and only by an App:
+  `GET /orgs/{org}/personal-access-tokens` (github-core#159).
+- **User-owned fine-grained token** — **not observable, permanently.** A fine-grained token cannot
+  introspect itself, and with no organization there is no org-side listing. Every 404 it receives
+  stays undetermined, by design.
+
+**The residual, named rather than implied.** The reach is read at two points in a run and the
+source can change after the second one. Nothing a probe can do closes that: any check happens at
+some instant and the world moves afterwards. What the design does is make the last reading later
+than every probe it judges, so a change that could have caused any of the run's 404s is caught.
+A change that happens after the final reading is not caught, and the honest statement is that
+this is bounded rather than eliminated. The reconcile verb's own fence does not help here, for
+the reason recorded at `NOT_FOUND_DETAIL`.
+
+**Known gap, and the gate it must pass before arming.** Repository membership does not prove
+permission to read what is INSIDE the repository. An installation can keep `metadata` and lose
+`actions`, and where GitHub conceals that with a 404 rather than a 403, the parent probe answers
+200 while the child answers 404 — and this design would read the child as gone. The permission
+axis is github-core#160, and it is a **precondition for switching retirement authority on for this
+plugin**, not a later improvement. Recorded here rather than left to the pull request, because the pull request is not what somebody reads before arming.
+
+**The judgement.** A `not_found` becomes `DROPPED_FROM_OBSERVATION` only when the object's
+repository is provably in reach. Where the reach could not be read, or was read and does not hold
+the repository, the verdict is `UNDETERMINED(scope_unknown)` with a note saying which of the two it
+was. For an object inside a repository the tie-breaker is one probe of that repository under the
+same credential, cached per run: parent answers → the child's absence is the child's; parent 404 or
+refused → the child says nothing.
+
+| RID | Requirement | Status | Behaviour | Verification |
+| --- | --- | --- | --- | --- |
+| req-github-core-falsifier-reach-1 | Reach Resolved Per Run | In Development | The falsifier resolves the credential's reach once per run; an App reads `repository_selection` and, when `selected`, walks `/installation/repositories`. A refused or failed walk is `unknown`, never an empty set — an empty listing is an observation and a refusal is not, and the two must not resolve alike. | `tests/test_falsifiers.py::TestReachWalk`: a refused walk and a raising walk each yield `unknown` with no repository set; an empty successful walk yields `selected` with an empty set that answers no rather than cannot-say; a walked listing compares by numeric id and by lower-cased `owner/name`. |
+| req-github-core-falsifier-reach-2 | Outside The Reach Never Drops | In Development | A `not_found` on a repository the reach does not hold is `UNDETERMINED(scope_unknown)`, never `DROPPED_FROM_OBSERVATION`. | `tests/test_falsifiers.py::TestReachJudgement::test_out_of_reach_a_404_is_undetermined_not_dropped`. |
+| req-github-core-falsifier-reach-3 | An Unobservable Reach Never Drops | In Development | Where the reach could not be read at all — a PAT run today, a user-owned fine-grained token forever — every 404 is `UNDETERMINED(scope_unknown)`, with the reason on the note. | `TestReachJudgement::test_an_unobservable_reach_never_drops`; `::test_a_falsifier_with_no_credential_behind_its_client_has_no_reach` proves the default is fail-closed. |
+| req-github-core-falsifier-reach-5 | `all` Is One Account's Boundary | In Development | An installation reporting `repository_selection: all` holds every repository of the account it is installed on, and no other. A repository under a different owner is outside the installation, so its 404 is not evidence of absence. An installation that reports `all` but names no account has no boundary to test and its reach is `unknown`. | `tests/test_falsifiers.py::TestReachBoundary`. Introduced on PR# 161. |
+| req-github-core-falsifier-reach-6 | Reach Belongs To The Run | In Development | A reach resolved from the credential is cached against the lifecycle batch id, not the falsifier instance: an installation narrowed between two runs must be re-read, never carried forward. | `tests/test_falsifiers.py::TestReachIsScopedToTheRun` reuses one falsifier across two runs and narrows the installation between them. Introduced on PR# 161. |
+| req-github-core-falsifier-reach-7 | A Repository's Reach Is Read Again After Every Probe | In Development | A repository has no parent to probe, so the reach is its only gate and gets a second reading from a freshly minted credential, taken after EVERY probe of the run — not at the first absence. That ordering is what makes it complete: a narrowing that could have caused any of the run's 404s necessarily precedes the reading, so it is caught for all of them. A narrowing downgrades every retirement in the run, including ones that may genuinely be gone, because once the reach has moved no evidence separates them. One extra read per run, on that path only. Core's verb cannot cover this: it rejects a verdict whose target was re-observed, and a repository that left the reach is the one this run cannot observe. | `tests/test_falsifiers.py::TestReachIsReadAgainAfterTheProbe`: a narrowing refuses the retirement; a narrowing after the FIRST absence still refuses both candidates; a stable installation still drops; two absences cost one extra read. Introduced on PR# 161. |
+| req-github-core-falsifier-reach-4 | Parent Probe, Once Per Run | In Development | A 404 on an object inside a repository is judged against one probe of that repository; the answer is cached per run and shared across every falsifier of that run. An absence resting on a file the credential just READ is not reach-gated — the read already answered whether it could look. | `TestReachJudgement::test_a_child_404_under_a_gone_parent_is_undetermined`; `::test_the_parent_is_probed_once_per_run_however_many_children` proves one probe for three children and a re-probe on a new run. |
+
 ### Rule Suites — Who Actually Bypassed
 ----
 RID: `req-github-core-rule-suites`
