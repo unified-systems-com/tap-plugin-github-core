@@ -35,6 +35,16 @@ workflow or an environment, the workflow id for a declared job. Where the grid h
 parent, the owner is ``None`` and the probe's owner is not compared — a comparison the grid
 never asked for cannot yield a transfer.
 
+**A 404 is judged against the credential's reach, never taken at face value** (github-core#157,
+ruling D on github-core#155). GitHub answers 404 both for an object that is gone and for one
+this credential may not see, so ``not_found`` is only allowed to become
+``DROPPED_FROM_OBSERVATION`` when the object's repository is provably inside the reach
+``tap_plugin.github_core.reach`` resolved for this run. Outside it, or where the reach could not
+be read at all, the verdict is ``UNDETERMINED(scope_unknown)`` — a credential that could not
+prove it could look never reads as gone. For an object INSIDE a repository the tie-breaker is one
+probe of that repository, cached per run: parent answers → the child's absence is the child's;
+parent 404 → the child says nothing.
+
 Every probe is a single-object read of the source under this plugin's own credential
 (``github_core:collector``, resolved here, never taken from the run context); no response
 body is recorded — ``Probe.detail`` carries an HTTP status or an error class only.
@@ -45,6 +55,7 @@ from __future__ import annotations
 import base64
 import logging
 import posixpath
+from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
@@ -65,6 +76,9 @@ from tap_grid.falsifiers import (
     Verdict,
     verdict_from_probe,
 )
+from tap_plugin.github_core.reach import Reach, resolve_reach, unobservable
+
+from tap_grid.falsifiers import UNDETERMINED_REASONS
 from tap_grid.services import get_node
 
 logger = logging.getLogger(__name__)
@@ -73,12 +87,24 @@ logger = logging.getLogger(__name__)
 ProbeClient = Any
 
 
-def _default_client() -> GithubClient:
-    """The collector's own credential, resolved from the secret store (consumer-scoped)."""
+def _default_session() -> tuple[GithubClient, GithubAuth]:
+    """The collector's own credential, resolved from the secret store (consumer-scoped).
+
+    Both halves are returned because the reach statement (github-core#157) is read off the
+    AUTH — the installation record the token was minted for — while the probes go through the
+    client. Resolving them together mints one installation token for the run rather than one
+    per question.
+    """
     secret = resolve_github_secret()
     data = dict(secret.data)
     auth = GithubAuth(kind=secret.kind, data=data, api_base_url=api_base_url(data))
-    return GithubClient(token=auth.token(), api_base_url=api_base_url(data), retry_empty_404=False)
+    client = GithubClient(token=auth.token(), api_base_url=api_base_url(data), retry_empty_404=False)
+    return client, auth
+
+
+def _default_client() -> GithubClient:
+    """The client half of the default session, for a caller that needs no reach."""
+    return _default_session()[0]
 
 
 def probe_status_of(exc: GithubAPIError) -> str:
@@ -102,6 +128,42 @@ def probe_status_of(exc: GithubAPIError) -> str:
 #: under the same credential ever claimed — and the residual (access narrowed between the listing
 #: and the probe) is the reconcile verb's freshness fence to hold, not something a probe can tell.
 NOT_FOUND_DETAIL = "HTTP 404 (GitHub also answers 404 for a private object this credential may not see)"
+
+
+#: Parent probes already made, per run (keyed by the lifecycle batch id) and per repository.
+#: A 404 on an object inside a repository is judged against ONE probe of that repository, and
+#: every child candidate of that repository — of every type — reuses the answer
+#: (github-core#157: one call per parent, cached per run). Bounded rather than unbounded: a
+#: process serving many runs would otherwise hold every run's probes forever.
+_PARENT_PROBES: "OrderedDict[str, dict[str, Probe]]" = OrderedDict()
+_PARENT_PROBE_RUNS = 8
+
+#: The note on a verdict that refused to let a 404 stand because the reach could not be read.
+_REACH_UNOBSERVED_NOTE = "a 404 cannot mean gone here: "
+#: The note when the reach WAS read and does not contain the object's repository.
+_OUT_OF_REACH_NOTE = (
+    "the containing repository is not in this credential's reach, so a 404 is what a credential "
+    "that may not look receives, not evidence the object is gone"
+)
+
+
+def _parent_probe(client: ProbeClient, batch_id: str, full_name: str) -> Probe:
+    """Probe the containing repository once per run, and remember the answer.
+
+    The tie-breaker for an in-repository 404: the same credential asking for the parent. Parent
+    answers → the child's absence is the child's. Parent 404 or refused → the credential's view
+    of the whole repository changed, and the child says nothing.
+    """
+    runs = _PARENT_PROBES.get(batch_id)
+    if runs is None:
+        runs = _PARENT_PROBES[batch_id] = {}
+        while len(_PARENT_PROBES) > _PARENT_PROBE_RUNS:
+            _PARENT_PROBES.popitem(last=False)
+    _PARENT_PROBES.move_to_end(batch_id)
+    if full_name not in runs:
+        result = _GithubFalsifier._probe_get(client, f"/repos/{full_name}")
+        runs[full_name] = result if isinstance(result, Probe) else Probe(status="found", detail="HTTP 200")
+    return runs[full_name]
 
 
 def _failed_probe(exc: GithubAPIError) -> Probe:
@@ -161,15 +223,37 @@ class _GithubFalsifier(Falsifier):
     """
 
     def __init__(
-        self, client: ProbeClient | None = None, client_factory: Callable[[], ProbeClient] | None = None
+        self,
+        client: ProbeClient | None = None,
+        client_factory: Callable[[], ProbeClient] | None = None,
+        reach: Reach | None = None,
     ) -> None:
         self._client = client
-        self._client_factory = client_factory or _default_client
+        self._auth: Any = None
+        self._client_factory = client_factory
+        self._reach = reach
+        self._batch_id = ""
 
     def _resolve_client(self) -> ProbeClient:
         if self._client is None:
-            self._client = self._client_factory()
+            if self._client_factory is not None:
+                self._client = self._client_factory()
+            else:
+                self._client, self._auth = _default_session()
         return self._client
+
+    def _resolve_reach(self, client: ProbeClient) -> Reach:
+        """This run's reach, resolved once. An injected client with no credential behind it has
+        no reach to read, and says so rather than assuming one — which is what keeps an injected
+        client from silently licensing retirements."""
+        if self._reach is None:
+            if self._auth is not None:
+                self._reach = resolve_reach(self._auth, client)
+            else:
+                self._reach = unobservable(
+                    "none", "this falsifier was given a client but no credential whose reach could be read"
+                )
+        return self._reach
 
     def batch_falsify(self, candidates: Sequence[Candidate], context: FalsifyContext) -> list[Verdict]:
         try:
@@ -178,7 +262,48 @@ class _GithubFalsifier(Falsifier):
             note = f"credential unavailable: {type(exc).__name__}"
             logger.warning("[dffc] %s: %s", type(self).__name__, note)
             return [_undetermined(c, "errored", note) for c in candidates]
+        # The batch id keys the per-run parent-probe cache, so every type's falsifier shares one
+        # probe of a given repository.
+        self._batch_id = context.batch_id
+        self._resolve_reach(client)
         return self.judge_all(client, list(candidates))
+
+    def _absence_verdict(
+        self,
+        client: ProbeClient,
+        candidate: Candidate,
+        expected: Expected,
+        probe: Probe,
+        *,
+        full_name: str,
+        github_id: Any = None,
+        parent_probe: bool,
+    ) -> Verdict:
+        """A ``not_found`` is only allowed to mean GONE inside the credential's provable reach.
+
+        Three refusals, each with its own note, because they are three different facts: the
+        reach could not be read at all; the reach was read and does not hold this repository;
+        the repository is in reach but did not answer the parent probe. Outside them the probe
+        stands and core derives ``DROPPED_FROM_OBSERVATION`` as before (github-core#157,
+        ruling D on github-core#155).
+        """
+        reach = self._resolve_reach(client)
+        held = reach.holds_repository(full_name=full_name, github_id=github_id)
+        if held is None:
+            return _undetermined(candidate, "scope_unknown", f"{_REACH_UNOBSERVED_NOTE}{reach.note}")
+        if held is False:
+            return _undetermined(candidate, "scope_unknown", _OUT_OF_REACH_NOTE)
+        if parent_probe:
+            parent = _parent_probe(client, self._batch_id, full_name)
+            if parent.status != "found":
+                reason = parent.status if parent.status in UNDETERMINED_REASONS else "scope_unknown"
+                return _undetermined(
+                    candidate,
+                    reason,
+                    f"the containing repository {full_name} did not answer the probe ({parent.detail}), so a "
+                    "404 on the object inside it says nothing about the object",
+                )
+        return verdict_from_probe(candidate, expected, probe)
 
     def judge_all(self, client: ProbeClient, candidates: list[Candidate]) -> list[Verdict]:
         return [self.judge(client, c) for c in candidates]
@@ -222,6 +347,15 @@ class RepositoryFalsifier(_GithubFalsifier):
         expected = Expected(source_id=str(row.github_id), owner=owner, name=full_name)
         result = self._probe_get(client, f"/repos/{full_name}")
         if isinstance(result, Probe):
+            if result.status == "not_found":
+                # No parent probe: the repository IS the parent. Under an installation that
+                # follows the account (`all`) the grant cannot narrow per repository, so a 404
+                # there is the repository leaving the account; under `selected` the membership
+                # test is the whole question.
+                return self._absence_verdict(
+                    client, candidate, expected, result, full_name=full_name, github_id=row.github_id,
+                    parent_probe=False,
+                )
             return verdict_from_probe(candidate, expected, result)
         found_owner = str((result.get("owner") or {}).get("login") or "") or None
         probe = Probe(
@@ -258,6 +392,10 @@ class EnvironmentFalsifier(_GithubFalsifier):
         expected = Expected(source_id=str(row.environment_id), owner=owner, name=name)
         result = self._probe_get(client, f"/repos/{full_name}/environments/{quote(name, safe='')}")
         if isinstance(result, Probe):
+            if result.status == "not_found":
+                return self._absence_verdict(
+                    client, candidate, expected, result, full_name=full_name, parent_probe=True
+                )
             return verdict_from_probe(candidate, expected, result)
         probe = Probe(
             status="found",
@@ -326,7 +464,12 @@ class WorkflowFalsifier(_GithubFalsifier):
         expected = Expected(source_id=str(workflow_id), owner=owner, name=str(getattr(row, "name", "") or "") or None)
         record, failed = _workflow_file_at_head(client, full_name, path)
         if record is None:
-            return verdict_from_probe(candidate, expected, failed or _NO_ANSWER)
+            answer = failed or _NO_ANSWER
+            if answer.status == "not_found":
+                return self._absence_verdict(
+                    client, candidate, expected, answer, full_name=full_name, parent_probe=True
+                )
+            return verdict_from_probe(candidate, expected, answer)
         probe = Probe(
             status="found",
             source_id=str(record.get("id")) if record.get("id") is not None else None,
@@ -377,13 +520,25 @@ class WorkflowJobFalsifier(_GithubFalsifier):
                 files[key] = _workflow_file_at_head(client, full_name, path)
             record, failed = files[key]
             if record is None:
-                out.append(verdict_from_probe(candidate, expected, failed or _NO_ANSWER))
+                answer = failed or _NO_ANSWER
+                if answer.status == "not_found":
+                    out.append(
+                        self._absence_verdict(
+                            client, candidate, expected, answer, full_name=full_name, parent_probe=True
+                        )
+                    )
+                else:
+                    out.append(verdict_from_probe(candidate, expected, answer))
                 continue
             jobs = {
                 str(j.get("id") or ""): j for j in (parse_workflow_yaml(record.get("text") or "").get("jobs") or [])
             }
             job = jobs.get(job_key)
             if job is None:
+                # Deliberately NOT routed through the reach judgement: this absence rests on a
+                # file this credential just READ, so the question "could it look" is already
+                # answered yes by the read itself. The reach gate exists for a 404, which is the
+                # status that cannot tell gone from unreadable (github-core#157).
                 out.append(
                     verdict_from_probe(
                         candidate, expected, Probe(status="not_found", detail="job key absent from the file at HEAD")

@@ -22,6 +22,7 @@ from tap_plugin.github_core.falsifiers import (
     WorkflowJobFalsifier,
     probe_status_of,
 )
+from tap_plugin.github_core.reach import SELECTION_ALL, SELECTION_SELECTED, Reach, unobservable
 from tap_plugin.github_core.tests.fake_github import FakeGithub, contents_payload
 
 from tap_grid.falsifier_testing import (
@@ -32,6 +33,7 @@ from tap_grid.falsifier_testing import (
     run_four_cases,
 )
 from tap_grid.falsifiers import (
+    DROPPED_FROM_OBSERVATION,
     PRESENT_AT_PROBE,
     RELOCATED,
     UNDETERMINED,
@@ -80,6 +82,17 @@ def _context() -> FalsifyContext:
     return FalsifyContext(batch_id=str(uuid.uuid4()), statement=None)
 
 
+def _reach() -> Reach:
+    """A credential that can demonstrably look at every repository of the account.
+
+    The four-case proof is about the PROBE, and a probe's 404 only means "gone" when the
+    credential could prove it could look (github-core#157). Without a reach the falsifier is
+    right to answer UNDETERMINED for every one of them, so each proof injects the reach it is
+    implicitly asserting.
+    """
+    return Reach(credential="app", selection=SELECTION_ALL, note="test: the installation follows the account")
+
+
 def _probe(verdict: Verdict) -> dict[str, Any]:
     assert verdict.probe is not None, "a judged verdict records its probe"
     return verdict.probe
@@ -117,7 +130,7 @@ class TestRepositoryFalsifier:
         _, cases[CASE_REIDENTIFIED] = self._repo("reborn", 4, account)
         fake.answer("/repos/acme/reborn", {"id": 44, "full_name": "acme/reborn", "owner": {"login": "acme"}})
 
-        verdicts = run_four_cases(RepositoryFalsifier(client=fake), cases, _context())
+        verdicts = run_four_cases(RepositoryFalsifier(client=fake, reach=_reach()), cases, _context())
         _assert_evidence_supports(verdicts)
         assert verdicts[CASE_PRESENT].expected == {"source_id": "1", "owner": "acme", "name": "acme/present"}
         assert _probe(verdicts[CASE_PRESENT])["owner"] == "acme"
@@ -134,7 +147,7 @@ class TestRepositoryFalsifier:
         account = _create(ACCOUNT, {"login": "acme"})
         rid, candidate = self._repo("moved", 5, account)
         fake = FakeGithub({"/repos/acme/moved": {"id": 5, "full_name": "newco/moved", "owner": {"login": "newco"}}})
-        [verdict] = RepositoryFalsifier(client=fake).batch_falsify([candidate], _context())
+        [verdict] = RepositoryFalsifier(client=fake, reach=_reach()).batch_falsify([candidate], _context())
         assert (verdict.verdict, verdict.kind) == (RELOCATED, "transferred")
         assert unsupported(verdict) is None
 
@@ -143,7 +156,7 @@ class TestRepositoryFalsifier:
         some login is then not a transfer — the grid never claimed an owner to end."""
         _, candidate = self._repo("orphan", 6, None)
         fake = FakeGithub({"/repos/acme/orphan": {"id": 6, "full_name": "acme/orphan", "owner": {"login": "somebody"}}})
-        [verdict] = RepositoryFalsifier(client=fake).batch_falsify([candidate], _context())
+        [verdict] = RepositoryFalsifier(client=fake, reach=_reach()).batch_falsify([candidate], _context())
         assert verdict.verdict == PRESENT_AT_PROBE
         assert verdict.expected == {"source_id": "6", "owner": None, "name": "acme/orphan"}
         assert unsupported(verdict) is None
@@ -151,7 +164,7 @@ class TestRepositoryFalsifier:
     def test_a_row_without_a_stable_id_is_not_answered(self) -> None:
         rid = _create(REPOSITORY, {"full_name": "acme/legacy"})
         fake = FakeGithub({"/repos/acme/legacy": {"id": 9, "full_name": "acme/legacy", "owner": {"login": "acme"}}})
-        [verdict] = RepositoryFalsifier(client=fake).batch_falsify([_candidate(rid, REPOSITORY, None)], _context())
+        [verdict] = RepositoryFalsifier(client=fake, reach=_reach()).batch_falsify([_candidate(rid, REPOSITORY, None)], _context())
         assert (verdict.verdict, verdict.reason) == (UNDETERMINED, "scope_unknown")
         assert fake.calls == [], "nothing is probed when the grid holds nothing to compare against"
 
@@ -182,6 +195,9 @@ class TestWorkflowFalsifier:
         )
         cases[CASE_DROPPED] = self._workflow(repo, "gone.yml", 101)
         fake.refuse("/repos/acme/app/contents/.github/workflows/gone.yml", 404)
+        # The 404 above is judged against a probe of the containing repository: it answers, so
+        # the file's absence is the file's (github-core#157).
+        fake.answer("/repos/acme/app", {"id": 10, "full_name": "acme/app", "owner": {"login": "acme"}})
         cases[CASE_FORBIDDEN] = self._workflow(repo, "secret.yml", 102)
         fake.refuse("/repos/acme/app/contents/.github/workflows/secret.yml", 403)
         cases[CASE_REIDENTIFIED] = self._workflow(repo, "reborn.yml", 103)
@@ -191,7 +207,7 @@ class TestWorkflowFalsifier:
             {"id": 999, "name": "reborn", "path": ".github/workflows/reborn.yml"},
         )
 
-        verdicts = run_four_cases(WorkflowFalsifier(client=fake), cases, _context())
+        verdicts = run_four_cases(WorkflowFalsifier(client=fake, reach=_reach()), cases, _context())
         _assert_evidence_supports(verdicts)
         assert verdicts[CASE_PRESENT].expected == {"source_id": "100", "owner": "acme/app", "name": "ci"}
         assert _probe(verdicts[CASE_REIDENTIFIED])["source_id"] == "999"
@@ -203,7 +219,7 @@ class TestWorkflowFalsifier:
         candidate = self._workflow(None, "ci.yml", 100, name="old name")
         fake = FakeGithub({"/repos/acme/app/contents/.github/workflows/ci.yml": contents_payload(WORKFLOW_YAML)})
         fake.answer("/repos/acme/app/actions/workflows/ci.yml", {"id": 100, "name": "new name"})
-        [verdict] = WorkflowFalsifier(client=fake).batch_falsify([candidate], _context())
+        [verdict] = WorkflowFalsifier(client=fake, reach=_reach()).batch_falsify([candidate], _context())
         assert (verdict.verdict, verdict.kind) == (RELOCATED, "renamed")
         assert unsupported(verdict) is None
 
@@ -211,7 +227,7 @@ class TestWorkflowFalsifier:
         candidate = self._workflow(None, "notes.yml", 104)
         fake = FakeGithub({"/repos/acme/app/contents/.github/workflows/notes.yml": contents_payload("hello: world\n")})
         fake.refuse("/repos/acme/app/actions/workflows/notes.yml", 404)
-        [verdict] = WorkflowFalsifier(client=fake).batch_falsify([candidate], _context())
+        [verdict] = WorkflowFalsifier(client=fake, reach=_reach()).batch_falsify([candidate], _context())
         assert (verdict.verdict, verdict.reason) == (UNDETERMINED, "errored")
         assert unsupported(verdict) is None
 
@@ -253,7 +269,7 @@ class TestWorkflowJobFalsifier:
         fake.answer("/repos/acme/app/contents/.github/workflows/reborn.yml", contents_payload(WORKFLOW_YAML))
         fake.answer("/repos/acme/app/actions/workflows/reborn.yml", {"id": 999, "name": "reborn"})
 
-        verdicts = run_four_cases(WorkflowJobFalsifier(client=fake), cases, _context())
+        verdicts = run_four_cases(WorkflowJobFalsifier(client=fake, reach=_reach()), cases, _context())
         _assert_evidence_supports(verdicts)
         assert verdicts[CASE_PRESENT].expected == {"source_id": "100#build", "owner": "100", "name": "build"}
         assert "job key absent" in _probe(verdicts[CASE_DROPPED])["detail"]
@@ -283,19 +299,20 @@ class TestEnvironmentFalsifier:
         )
         cases[CASE_DROPPED] = self._env(repo, "staging", 2)
         fake.refuse("/repos/acme/app/environments/staging", 404)
+        fake.answer("/repos/acme/app", {"id": 10, "full_name": "acme/app", "owner": {"login": "acme"}})
         cases[CASE_FORBIDDEN] = self._env(repo, "vault", 3)
         fake.refuse("/repos/acme/app/environments/vault", 403)
         cases[CASE_REIDENTIFIED] = self._env(repo, "reborn", 4)
         fake.answer("/repos/acme/app/environments/reborn", {"id": 44, "name": "reborn"})
 
-        verdicts = run_four_cases(EnvironmentFalsifier(client=fake), cases, _context())
+        verdicts = run_four_cases(EnvironmentFalsifier(client=fake, reach=_reach()), cases, _context())
         _assert_evidence_supports(verdicts)
         assert verdicts[CASE_PRESENT].expected == {"source_id": "1", "owner": "acme/app", "name": "production"}
 
     def test_a_name_needing_escaping_is_quoted_in_the_path(self) -> None:
         candidate = self._env(None, "prod/eu west", 7)
         fake = FakeGithub({"/repos/acme/app/environments/prod%2Feu%20west": {"id": 7, "name": "prod/eu west"}})
-        [verdict] = EnvironmentFalsifier(client=fake).batch_falsify([candidate], _context())
+        [verdict] = EnvironmentFalsifier(client=fake, reach=_reach()).batch_falsify([candidate], _context())
         assert verdict.verdict == PRESENT_AT_PROBE
 
 
@@ -325,3 +342,112 @@ class TestNoCredential:
         verdicts = RepositoryFalsifier(client_factory=boom).batch_falsify(candidates, _context())
         assert [(v.verdict, v.reason) for v in verdicts] == [(UNDETERMINED, "errored")] * 2
         assert all("credential unavailable" in v.note for v in verdicts)
+
+
+@pytest.mark.django_db
+class TestReachJudgement:
+    """github-core#157 (ruling D on #155): a 404 only means GONE inside the credential's reach.
+
+    GitHub answers 404 both for an object that is gone and for one this credential may not see.
+    Every case here holds the probe constant — the same 404 — and varies only what the
+    credential could prove about its own reach, so the verdict difference is attributable to
+    the reach and to nothing else.
+    """
+
+    @staticmethod
+    def _repo(name: str, github_id: int) -> Candidate:
+        rid = _create(REPOSITORY, {"full_name": f"acme/{name}", "owner_login": "acme", "github_id": github_id})
+        return _candidate(rid, REPOSITORY, None)
+
+    @staticmethod
+    def _selected(*ids: int) -> Reach:
+        return Reach(
+            credential="app",
+            selection=SELECTION_SELECTED,
+            repository_ids=frozenset(ids),
+            repository_names=frozenset({"acme/inside"}),
+            note="test: an installation on selected repositories",
+        )
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_in_reach_a_404_is_dropped(self) -> None:
+        candidate = self._repo("inside", 1)
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/inside", 404)
+        [verdict] = RepositoryFalsifier(client=fake, reach=self._selected(1)).batch_falsify([candidate], _context())
+        assert verdict.verdict == DROPPED_FROM_OBSERVATION
+        assert _probe(verdict)["detail"].startswith("HTTP 404 (GitHub also answers 404")
+        assert unsupported(verdict) is None
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_out_of_reach_a_404_is_undetermined_not_dropped(self) -> None:
+        """The narrowing case: the repository left the installation, so the 404 is what a
+        credential that may not look receives — not evidence the repository is gone."""
+        candidate = self._repo("outside", 2)
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/outside", 404)
+        [verdict] = RepositoryFalsifier(client=fake, reach=self._selected(1)).batch_falsify([candidate], _context())
+        assert (verdict.verdict, verdict.reason) == (UNDETERMINED, "scope_unknown")
+        assert "not in this credential's reach" in verdict.note
+        assert unsupported(verdict) is None
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_an_unobservable_reach_never_drops(self) -> None:
+        """A personal access token cannot introspect its own reach, so nothing it 404s on may be
+        read as gone (github-core#158 / #159 are what would make it observable)."""
+        candidate = self._repo("inside", 3)
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/inside", 404)
+        reach = unobservable("pat", "a personal access token cannot introspect its own reach")
+        [verdict] = RepositoryFalsifier(client=fake, reach=reach).batch_falsify([candidate], _context())
+        assert (verdict.verdict, verdict.reason) == (UNDETERMINED, "scope_unknown")
+        assert "cannot introspect" in verdict.note
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_a_falsifier_with_no_credential_behind_its_client_has_no_reach(self) -> None:
+        """The default is fail-closed: an injected client proves nothing about what the
+        credential behind it could see, so a 404 under it is never a retirement."""
+        candidate = self._repo("inside", 4)
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/inside", 404)
+        [verdict] = RepositoryFalsifier(client=fake).batch_falsify([candidate], _context())
+        assert (verdict.verdict, verdict.reason) == (UNDETERMINED, "scope_unknown")
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_a_child_404_under_a_gone_parent_is_undetermined(self) -> None:
+        """The parent probe is the tie-breaker for an object inside a repository: the repository
+        did not answer either, so the child's 404 says nothing about the child."""
+        eid = _create(ENVIRONMENT, {"full_name": "acme/app", "name": "staging", "environment_id": 2})
+        fake = FakeGithub()
+        fake.refuse("/repos/acme/app/environments/staging", 404)
+        fake.refuse("/repos/acme/app", 404)
+        [verdict] = EnvironmentFalsifier(client=fake, reach=_reach()).batch_falsify(
+            [_candidate(eid, ENVIRONMENT, None)], _context()
+        )
+        assert (verdict.verdict, verdict.reason) == (UNDETERMINED, "scope_unknown")
+        assert "did not answer the probe" in verdict.note
+
+    @pytest.mark.spec("req-grid-reconcile-absence-states")
+    def test_the_parent_is_probed_once_per_run_however_many_children(self) -> None:
+        """One call per parent, cached for the run — and the cache is keyed on the run, so a
+        second run probes again rather than trusting a stale answer."""
+        candidates = [
+            _candidate(
+                _create(ENVIRONMENT, {"full_name": "acme/app", "name": name, "environment_id": i}),
+                ENVIRONMENT,
+                None,
+            )
+            for i, name in enumerate(("staging", "preview", "canary"), start=2)
+        ]
+        fake = FakeGithub()
+        for name in ("staging", "preview", "canary"):
+            fake.refuse(f"/repos/acme/app/environments/{name}", 404)
+        fake.answer("/repos/acme/app", {"id": 10, "full_name": "acme/app", "owner": {"login": "acme"}})
+
+        context = _context()
+        verdicts = EnvironmentFalsifier(client=fake, reach=_reach()).batch_falsify(candidates, context)
+        assert [v.verdict for v in verdicts] == [DROPPED_FROM_OBSERVATION] * 3
+        assert fake.calls.count("/repos/acme/app") == 1, "three children, one probe of their parent"
+
+        EnvironmentFalsifier(client=fake, reach=_reach()).batch_falsify(candidates, _context())
+        assert fake.calls.count("/repos/acme/app") == 2, "a new run re-probes rather than reusing the answer"

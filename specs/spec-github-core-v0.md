@@ -1288,6 +1288,46 @@ This node is not the run. Scope facts never go on `collection_job`.
 | req-github-core-collection-scope-3 | Seams Declared, Empty | Implemented | `visibility` and `tiers` are emitted `{}` with their shapes described per key; the tier `reason` enum is the agreed closed vocabulary. | A tier verdict in the agreed shape validates against the schema; a stray reason does not. |
 | req-github-core-collection-scope-4 | Inputs Versioned | Implemented | `configuration` carries the manifest version + digest, the grant as read, and the plan's provenance, so a changed verdict has an attributable cause. | `plan` is `unknown` with `plan_source` saying why whenever it could not be read. |
 
+### A 404 Is Judged Against The Credential's Reach
+----
+RID: `req-github-core-falsifier-reach`
+
+Status: `In Development`
+
+GitHub answers `404` for an object that is gone **and** for an object that is there and this
+credential may not see. A falsifier that reads the status line alone therefore cannot tell a
+deletion from a narrowed grant, and under retirement authority the two have opposite consequences:
+one records a fact, the other retires a live node.
+
+Ruled by George on 2026-09-20 (option D on github-core#155): the 404 is judged against the
+credential's **reach** — what it can demonstrably see right now — and never taken at face value.
+
+**The reach, per credential kind.** What is observable differs, and where it is not observable the
+record says so rather than assuming the credential could look:
+
+- **App** — observable. `repository_selection` says `all` or `selected`; `GET /installation/repositories`
+  walks the selected list.
+- **Classic token** — observable from the token's own `X-OAuth-Scopes` response header (github-core#158).
+- **Org-owned fine-grained token** — observable only from the organization side, and only by an App:
+  `GET /orgs/{org}/personal-access-tokens` (github-core#159).
+- **User-owned fine-grained token** — **not observable, permanently.** A fine-grained token cannot
+  introspect itself, and with no organization there is no org-side listing. Every 404 it receives
+  stays undetermined, by design.
+
+**The judgement.** A `not_found` becomes `DROPPED_FROM_OBSERVATION` only when the object's
+repository is provably in reach. Where the reach could not be read, or was read and does not hold
+the repository, the verdict is `UNDETERMINED(scope_unknown)` with a note saying which of the two it
+was. For an object inside a repository the tie-breaker is one probe of that repository under the
+same credential, cached per run: parent answers → the child's absence is the child's; parent 404 or
+refused → the child says nothing.
+
+| RID | Requirement | Status | Behaviour | Verification |
+| --- | --- | --- | --- | --- |
+| req-github-core-falsifier-reach-1 | Reach Resolved Per Run | In Development | The falsifier resolves the credential's reach once per run; an App reads `repository_selection` and, when `selected`, walks `/installation/repositories`. A refused or failed walk is `unknown`, never an empty set. | `reach.py` unit assertions: a failed walk yields `unknown`; `selected` compares by numeric id and by lower-cased `owner/name`. |
+| req-github-core-falsifier-reach-2 | Outside The Reach Never Drops | In Development | A `not_found` on a repository the reach does not hold is `UNDETERMINED(scope_unknown)`, never `DROPPED_FROM_OBSERVATION`. | `tests/test_falsifiers.py::TestReachJudgement::test_out_of_reach_a_404_is_undetermined_not_dropped`. |
+| req-github-core-falsifier-reach-3 | An Unobservable Reach Never Drops | In Development | Where the reach could not be read at all — a PAT run today, a user-owned fine-grained token forever — every 404 is `UNDETERMINED(scope_unknown)`, with the reason on the note. | `TestReachJudgement::test_an_unobservable_reach_never_drops`; `::test_a_falsifier_with_no_credential_behind_its_client_has_no_reach` proves the default is fail-closed. |
+| req-github-core-falsifier-reach-4 | Parent Probe, Once Per Run | In Development | A 404 on an object inside a repository is judged against one probe of that repository; the answer is cached per run and shared across every falsifier of that run. An absence resting on a file the credential just READ is not reach-gated — the read already answered whether it could look. | `TestReachJudgement::test_a_child_404_under_a_gone_parent_is_undetermined`; `::test_the_parent_is_probed_once_per_run_however_many_children` proves one probe for three children and a re-probe on a new run. |
+
 ### Rule Suites — Who Actually Bypassed
 ----
 RID: `req-github-core-rule-suites`
