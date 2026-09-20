@@ -169,8 +169,9 @@ class TestTheDocumentItself:
     """What the collector puts on the wire, checked without a database.
 
     The tests above would also pass if the collector sent ids that core happened to accept. This
-    one reads the envelope: the github_core nodes name themselves by `ref`, so the id is core's
-    to assign; the nodes that do NOT are the types whose key is not github_core's to declare.
+    one reads the envelope: every node this collector names, names itself by `ref`, so the id is
+    core's to assign. Edge ids stay derived on purpose — edges are KEYLESS, so the derivation is
+    the plugin's cross-run edge idempotency.
     """
 
     def test_a_github_core_node_names_itself_by_ref(self) -> None:
@@ -184,37 +185,71 @@ class TestTheDocumentItself:
             assert isinstance(value, Ref), f"{fn.__name__} still mints an id instead of naming a ref"
             assert not isinstance(value, UUID)
 
-    def test_the_one_held_back_type_still_carries_a_derived_id(self) -> None:
-        """Held back is a STATE, not an omission — asserted so it cannot drift into adoption.
+    def test_the_held_back_set_is_empty(self) -> None:
+        """Nothing is held back any more — asserted over the MODULE, not over a list kept by hand.
 
-        ONE type does not emit a ref, for the only reason this repository cannot settle alone:
-        `compliance_core__compliance_finding` belongs to another plugin, which has not declared
-        a natural key. Its declaration here is present but inert, which is what keeps it free to
-        change — a natural key is a one-way door only once a node's id has been assigned under it.
+        Held back was a state, and it is over as of 2026-09-20. Rather than deleting the test
+        that recorded it, it now asserts the opposite property positively: every public
+        `*_id` recipe in `identity.py` that names a NODE returns a `Ref`, so a future function
+        that quietly minted a UUID instead would fail here rather than in a grid.
 
-        The other two were released on 2026-09-20, both by putting the missing fact on the model
-        instead of leaving it only in the id recipe. `commit_observation` gained a `host` field
-        so the platform joins its key (Issue# 164). `actions_secret` now stores the canonical
-        upper-cased spelling in `name` and what GitHub returned in `name_reported`, so the fold
-        the key performs is a value the declared search can filter on (Issue# 165).
+        Each of the last three was released by making the declared search able to filter the
+        same value the ref composes. `commit_observation` gained a `host` field (Issue# 164).
+        `actions_secret` stored the canonical upper-cased spelling (Issue# 165). And
+        `code_scanning_finding` waited on compliance_core — the plugin that OWNS the type — to
+        declare (Issue# 8 - tap-plugin-compliance-core), because a declaration lives on the
+        owning model and nothing done in this repository could substitute for it.
         """
+        from tap_plugin.github_core.collectors.github_collector import identity as identity_module
         from tap_plugin.github_core.collectors.github_collector.identity import (
             actions_secret_id,
             code_scanning_finding_id,
             commit_observation_id,
         )
 
-        held_back = (code_scanning_finding_id(REPO, 7),)
-        # The two that were released, asserted here so the set cannot silently regrow.
+        # Edge ids stay derived on purpose (edges are KEYLESS, and the id is the plugin's
+        # cross-run edge idempotency), so they are excluded by name rather than by accident.
+        edge_recipes = {"edge_id", "uses_action_edge_id"}
+        minted: dict[str, Any] = {}
+        for name in dir(identity_module):
+            if not name.endswith("_id") or name.startswith("_") or name in edge_recipes:
+                continue
+            fn = getattr(identity_module, name)
+            if not callable(fn):
+                continue
+            hints = getattr(fn, "__annotations__", {})
+            if hints.get("return") in ("Ref", Ref):
+                continue
+            minted[name] = hints.get("return")
+        assert minted == {}, f"these node recipes do not return a Ref: {minted}"
+
+        # The three that were released, named so the set cannot silently regrow.
+        assert isinstance(code_scanning_finding_id(REPO, 7), Ref)
         assert isinstance(commit_observation_id("github.com", 10, "sha1", "a" * 40), Ref)
         assert isinstance(actions_secret_id("repository", OWNER, REPO, "", "HARNESS_PAT"), Ref)
         # The fold is the identity, so two spellings must compose the SAME ref.
         assert actions_secret_id("repository", OWNER, REPO, "", "harness_pat") == actions_secret_id(
             "repository", OWNER, REPO, "", "HARNESS_PAT"
         )
-        for value in held_back:
-            assert isinstance(value, UUID) and not isinstance(value, Ref)
-            assert value.version == 5, "held back means the pre-adoption derivation, unchanged"
+
+    def test_the_finding_ref_and_the_key_it_writes_are_one_string(self) -> None:
+        """compliance_core decides the key; github_core owes the VALUES its declaration names.
+
+        `compliance_core__compliance_finding` declares `("source", "source_key")`, so the
+        importer's generated search filters those two columns on the node this collector
+        writes. The ref is a batch-local label and does NOT participate in identity — which is
+        exactly why the written `source_key` and the ref must be composed in one place, or the
+        label and the search could name different objects with nothing to notice.
+        """
+        from tap_plugin.github_core.collectors.github_collector.identity import (
+            COMPLIANCE_FINDING_SOURCE,
+            code_scanning_finding_id,
+            code_scanning_finding_source_key,
+        )
+
+        assert COMPLIANCE_FINDING_SOURCE == "github_core", "the namespace half is this plugin's slug"
+        key = code_scanning_finding_source_key(REPO, 7)
+        assert code_scanning_finding_id(REPO, 7) == f"compliance_core__compliance_finding:{key}"
 
     def test_the_adoption_does_not_change_a_single_edge_id(self) -> None:
         """The property that makes this change data-neutral on an ALREADY-POPULATED grid.

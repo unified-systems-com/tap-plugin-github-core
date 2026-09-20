@@ -38,6 +38,7 @@ from tap_plugin.github_core.collectors.github_collector.identity import (
     repository_id,
 )
 
+from tap_grid.grift import grift_import
 from tap_grid.registry import get_model_class
 
 from .envelopes import edge_from, edge_to, envelope_key
@@ -357,17 +358,45 @@ class TestFindingPerAlert:
     status in {open, resolved}, no configuration/tags — is what the assertions encode."""
 
     @pytest.mark.spec("req-github-core-code-scanning-4")
-    def test_one_finding_per_alert_keyed_under_github_cores_namespace(self) -> None:
+    def test_one_finding_per_alert_named_by_a_ref_compliance_core_can_resolve(self) -> None:
+        """One finding per alert, each naming itself by a ref rather than a minted id.
+
+        The ref string is unchanged from the one the pre-adoption uuid5 hashed (Issue# 8 -
+        tap-plugin-compliance-core), which is what keeps every edge id byte-identical; the
+        assertion holds it to the letter so a Dependabot finding (`#dependabot#`) can never
+        collide with a code-scanning one.
+        """
         _, nodes, _, _, _ = _collect(_FakeClient())
         findings = _of_type(nodes, _FINDING_TYPE)
         assert len(findings) == len(_ALL_ALERTS)
         ids = {envelope_key(f) for f in findings}
         assert ids == {str(code_scanning_finding_id(_REPO, a["number"])) for a in _ALL_ALERTS}
-        # The natural key is documented in the helper's docstring; hold it to the letter, so a
-        # Dependabot finding (`#dependabot#`) can never collide with a code-scanning one.
-        assert code_scanning_finding_id(_REPO, 164) == uuid.uuid5(
+        assert all("ref" in f["entity"] for f in findings), "the id is core's to assign"
+        assert code_scanning_finding_id(_REPO, 164) == f"{_FINDING_TYPE}:{_REPO}#code_scanning#164"
+        # The string the old derivation hashed — pinned so the edge ids it feeds cannot shift.
+        assert uuid.uuid5(GITHUB_CORE_NAMESPACE, str(code_scanning_finding_id(_REPO, 164))) == uuid.uuid5(
             GITHUB_CORE_NAMESPACE, f"{_FINDING_TYPE}:{_REPO}#code_scanning#164"
         )
+
+    @pytest.mark.spec("req-github-core-code-scanning-4")
+    def test_the_finding_carries_the_two_values_compliance_cores_key_names(self) -> None:
+        """The data contract, asserted: compliance_core decides the key, github_core owes values.
+
+        `NATURAL_KEY = ("source", "source_key")` on the model compliance_core owns, so these
+        two columns are what the importer's generated search filters. Omitting them would not
+        fail — the search would find a hole, answer "not found", and core would assign a fresh
+        id: one duplicate finding per alert per run. That silence is why this is a test.
+        """
+        _, nodes, _, _, _ = _collect(_FakeClient())
+        for alert in _ALL_ALERTS:
+            number = alert["number"]
+            ref = str(code_scanning_finding_id(_REPO, number))
+            finding = next(f for f in _of_type(nodes, _FINDING_TYPE) if envelope_key(f) == ref)
+            assert finding["node"]["source"] == "github_core"
+            assert finding["node"]["source_key"] == f"{_REPO}#code_scanning#{number}"
+            # The ref and the written key are the same string, composed once in identity.py:
+            # if they ever drifted, the search would miss the row the ref names.
+            assert ref.endswith(finding["node"]["source_key"])
 
     @pytest.mark.spec("req-github-core-code-scanning-4")
     def test_the_finding_carries_only_the_substrates_fields(self) -> None:
@@ -375,7 +404,7 @@ class TestFindingPerAlert:
         finding = next(
             f for f in _of_type(nodes, _FINDING_TYPE) if envelope_key(f) == str(code_scanning_finding_id(_REPO, 164))
         )
-        assert set(finding["node"]) == {"name", "summary", "description", "status"}
+        assert set(finding["node"]) == {"source", "source_key", "name", "summary", "description", "status"}
         assert finding["node"]["name"] == "SonarCloud pythonsecurity:S6549"
         assert finding["entity"]["name"] == finding["node"]["name"]
         assert finding["node"]["summary"] == "Accessing files should not lead to filesystem oracle attacks"
@@ -589,3 +618,78 @@ class TestWalkAndTruncation:
         assert summary["alerts_by_state"] == {"open": 9, "dismissed": 5, "fixed": 3}
         assert summary["alerts_by_tool"] == {"SonarCloud": 14, "Trivy": 3}
         assert summary["analyses_by_tool"] == {"CodeQL": 7, "SonarCloud": 3}
+
+
+# ---------------------------------------------------------------------------------------------
+# 10. The cross-plugin contract, end to end: the finding ref resolves against compliance_core's
+#     declaration, and a second collection of the same alert re-observes one node.
+# ---------------------------------------------------------------------------------------------
+
+
+def _import_node(envelope: dict[str, Any]) -> str:
+    """Import one collected node envelope as its own GRIFT batch; return the id core resolved.
+
+    Sends the envelope the collector actually built, unedited: a test that re-authored the
+    payload would prove its own document resolves, not the collector's.
+    """
+    doc = {
+        "metadata": {"grift_version": "0"},
+        "_reserved": {},
+        "batches": [
+            {
+                "batch_entity": {
+                    "entity_id": str(uuid.uuid4()),
+                    "entity_type": "batch",
+                    "name": "code scanning",
+                    "dimensions": {},
+                },
+                "batch_node": {
+                    "name": "code scanning",
+                    "description": "",
+                    "description_json": None,
+                    "source": "test",
+                    "metadata": {},
+                },
+                "nodes": [envelope],
+                "edges": [],
+            }
+        ],
+    }
+    result = grift_import(doc)
+    assert result.success, result.errors
+    return str(result.imported_batches[0].resolved_refs[envelope["entity"]["ref"]])
+
+
+@pytest.mark.django_db
+class TestTheFindingResolvesAgainstComplianceCore:
+    """The half of the adoption this repository cannot prove alone, proved here.
+
+    `compliance_core__compliance_finding` is another plugin's type: the `NATURAL_KEY` the
+    importer resolves this ref against lives on ITS model. So these two tests fail — correctly —
+    against a pinned compliance_core that has not declared (Issue# 8 -
+    tap-plugin-compliance-core), and that red IS the blocker, made visible. Without them the
+    flip could merge green under a pin that cannot resolve it and only break on a real grid.
+    """
+
+    @pytest.mark.spec("req-github-core-code-scanning-4")
+    def test_two_collections_of_one_alert_resolve_to_one_finding(self) -> None:
+        _, nodes, _, _, _ = _collect(_FakeClient())
+        finding = next(
+            f for f in _of_type(nodes, _FINDING_TYPE) if envelope_key(f) == str(code_scanning_finding_id(_REPO, 164))
+        )
+        first = _import_node(finding)
+        second = _import_node(finding)
+        assert second == first, "a re-scan re-observed the finding instead of duplicating it"
+        assert uuid.UUID(first).version == 7, "the id is core's to assign, not github_core's to derive"
+        assert get_model_class(_FINDING_TYPE).objects.live().count() == 1
+
+    @pytest.mark.spec("req-github-core-code-scanning-4")
+    def test_the_resolved_row_carries_the_key_the_declaration_names(self) -> None:
+        """What the search will filter on the NEXT run, read back off the row it wrote."""
+        _, nodes, _, _, _ = _collect(_FakeClient())
+        finding = next(
+            f for f in _of_type(nodes, _FINDING_TYPE) if envelope_key(f) == str(code_scanning_finding_id(_REPO, 164))
+        )
+        row = get_model_class(_FINDING_TYPE).objects.live().get(entity_id=uuid.UUID(_import_node(finding)))
+        assert row.source == "github_core"
+        assert row.source_key == f"{_REPO}#code_scanning#164"

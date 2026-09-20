@@ -22,20 +22,16 @@ What deliberately stays derived:
   Its endpoints are hashed through :func:`_endpoint_token`, which reproduces the node id each
   ref used to derive as, so every edge id is UNCHANGED by this adoption and an existing grid
   gains no duplicates. Edge identity under assigned nodes is Issue# 690 - tap.
-- **Three node types, HELD BACK.** Each declares a ``NATURAL_KEY``, but nothing resolves
-  against it while the type is addressed by an explicit id — so the declaration is inert and
-  still free to change, which is the whole reason to hold back rather than guess. A natural
-  key is a one-way door only once a node's id has been assigned under it.
+- **Nothing else.** The held-back set is EMPTY as of 2026-09-20: every node type this module
+  names is a ref. The last three were released one at a time, each by making the declared
+  search able to filter the same value the ref composes — ``commit_observation`` gained a
+  ``host`` field (Issue# 164 - github-core), ``actions_secret`` stored the canonical
+  upper-cased spelling (Issue# 165 - github-core), and ``code_scanning_finding`` waited on the
+  plugin that OWNS the type to declare (Issue# 8 - tap-plugin-compliance-core), because a
+  declaration lives on the owning model and no amount of work here could substitute for it.
 
-  * :func:`code_scanning_finding_id` mints a ``compliance_core__compliance_finding`` — another
-    plugin's type, which declares nothing, so a ref to it would be refused outright.
-  * :func:`commit_observation_id` keys on the platform HOST, which its model has no field for
-    (Issue# 164 - github-core).
-  * :func:`actions_secret_id` case-folds the name, which a declared search cannot
-    (Issue# 165 - github-core).
-
-  Every ``git_core__*`` and ``identity_core__*`` node this collector emits likewise keeps the
-  id its own plugin's identity module derives.
+  Every ``git_core__*`` and ``identity_core__*`` node this collector emits still keeps the id
+  its own plugin's identity module derives — those are ids this module never named.
 """
 
 from __future__ import annotations
@@ -210,23 +206,53 @@ def code_scanning_analysis_id(full_name: str, analysis_id_int: int | str) -> Ref
     return _id("github_core__code_scanning_analysis", f"{full_name}#{analysis_id_int}")
 
 
-def code_scanning_finding_id(full_name: str, number: int | str) -> UUID:
+#: The value a `compliance_core__compliance_finding` this collector mints carries in its
+#: `source` column: the slug of the plugin that asserted it. compliance_core's declared key
+#: is ``("source", "source_key")``, and `source` is the namespace half — it is what keeps
+#: github_core's `acme/app#7` and another producer's `acme/app#7` two different findings.
+COMPLIANCE_FINDING_SOURCE = "github_core"
+
+
+def code_scanning_finding_source_key(full_name: str, number: int | str) -> str:
+    """What github_core calls one code-scanning finding, verbatim — composed HERE, once.
+
+    This string is BOTH halves of the contract: the collector writes it into the finding's
+    `source_key` column, and :func:`code_scanning_finding_id` names the ref with it. Composing
+    it in one function is what keeps the value the declared search filters and the value the
+    ref carries from drifting apart (the lesson of `actions_secret_id`, PR# 163 - github-core).
+
+    The middle segment names the GitHub security surface the finding came from, so the same
+    repository's Dependabot alert number 7 (``#dependabot#7``) and code-scanning alert number 7
+    can never collide; a future secret-scanning finding takes ``#secret_scanning#``.
+    """
+    return f"{full_name}#code_scanning#{number}"
+
+
+def code_scanning_finding_id(full_name: str, number: int | str) -> Ref:
     """The generic `compliance_core__compliance_finding` github_core mints for a code-scanning alert.
 
-    Minted under GITHUB_CORE_NAMESPACE — github_core is the author of the observation, so the
-    finding's identity is github_core's to derive — with the natural key
-    ``compliance_core__compliance_finding:{full_name}#code_scanning#{number}``. The middle
-    segment names the GitHub security surface the finding came from, so the same repository's
-    Dependabot alert number 7 (``#dependabot#7``) and code-scanning alert number 7 can never
-    collide; a future secret-scanning finding takes ``#secret_scanning#``.
+    A REF since compliance_core declared (Issue# 8 - tap-plugin-compliance-core). It was the
+    last type this collector held back, and for the only reason this repository could not
+    settle alone: the declaration lives on the owning model, so a ref to a type whose plugin
+    had not declared was refused outright — *undeclared is never keyless*.
 
-    STILL A DERIVED UUID, not a ref: ``compliance_core__compliance_finding`` is another
-    plugin's type and declares no ``NATURAL_KEY``, so a ref to it cannot be resolved. It flips
-    when compliance_core adopts. The same holds for every ``git_core__*`` and
-    ``identity_core__*`` node this collector emits, whose ids come from those plugins' own
-    identity modules.
+    What changed is the DIRECTION, not the recipe. Under derived ids github_core decided this
+    type's identity because somebody had to compute an identifier and only the producer held
+    the values; that docstring line ("the finding's identity is github_core's to derive") is
+    now false. compliance_core decides the key — ``("source", "source_key")`` — and github_core
+    owes the VALUES: :meth:`GithubCollector._code_scanning_finding_fields` writes
+    :data:`COMPLIANCE_FINDING_SOURCE` and :func:`code_scanning_finding_source_key` onto the
+    node. That is the data contract, and it is not optional in the way an API is: a producer
+    that wrote neither field would get a hole, a search that answers "not found", and a FRESH
+    node every run — duplicates, not an error.
+
+    The ref string is unchanged from the string the uuid5 hashed, which is what keeps every
+    edge id byte-identical through :func:`_endpoint_token`.
+
+    Every ``git_core__*`` and ``identity_core__*`` node this collector emits still keeps the id
+    its own plugin's identity module derives.
     """
-    return _uuid5_id("compliance_core__compliance_finding", f"{full_name}#code_scanning#{number}")
+    return _id("compliance_core__compliance_finding", code_scanning_finding_source_key(full_name, number))
 
 
 def environment_id(full_name: str, name: str) -> Ref:

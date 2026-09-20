@@ -905,9 +905,15 @@ this ruling. The source-specific node — `code_scanning_alert` — is github_co
 finding through a github_core-owned edge, `DETAILS_FINDING`, detail → finding, because the substrate
 cannot name a github_core type as a target and the finding must not know its sources.
 
-**Mapping, alert → finding.** Natural key `<owner/repo>#code_scanning#<number>` under github_core's
-uuid5 namespace (the source segment is what keeps a Dependabot finding on the same repository from
-colliding); `name` = `"<tool_name> <rule_id>"` (`SonarCloud pythonsecurity:S6350`); `summary` =
+**Mapping, alert → finding.** The finding is named by a REF and its identity is
+compliance_core's to declare (Issue# 8 - tap-plugin-compliance-core, 2026-09-20): that model
+declares `NATURAL_KEY = ("source", "source_key")`, so this collector writes `source = "github_core"`
+and `source_key = <owner/repo>#code_scanning#<number>` and core assigns the id. The key string is
+unchanged from the one github_core's uuid5 namespace used to hash — the source segment is still what
+keeps a Dependabot finding on the same repository from colliding, and re-hashing the ref is what
+keeps every edge id byte-identical. What changed is WHO decides: under derived ids the producer did,
+because only it held the values; now the owning plugin declares and the producer owes the values.
+A producer that wrote neither field would get a fresh node every run rather than an error. `name` = `"<tool_name> <rule_id>"` (`SonarCloud pythonsecurity:S6350`); `summary` =
 the rule description; `description` = the message plus `path:line`; `status` = `open` when the
 alert's state is `open`, else `resolved` — **dismissed and fixed both map to resolved**, and the true
 lifecycle (`state`, `dismissed_reason`, `dismissed_comment`, `dismissed_by_login`, `fixed_at`,
@@ -916,7 +922,7 @@ lifecycle (`state`, `dismissed_reason`, `dismissed_comment`, `dismissed_by_login
 
 | Alert (detail) | Finding (generic) |
 | --- | --- |
-| `full_name` + `number` | key `<owner/repo>#code_scanning#<number>` |
+| `full_name` + `number` | `source` = `github_core`, `source_key` = `<owner/repo>#code_scanning#<number>` (the ref, and the declared key) |
 | `tool_name`, `rule_id` | `name` = `"<tool_name> <rule_id>"` |
 | `rule_description` | `summary` |
 | `message`, `location.path`, `location.start_line` | `description` = message + `path:line` |
@@ -999,7 +1005,7 @@ dismissed sample: reason `false positive`, 2026-08-31.
 | req-github-core-code-scanning-1 | Alert Shape Accepted | In Development | Every alert the listing returns for a repository in scope lands as one `code_scanning_alert` per (repository, number), in every lifecycle state, carrying state, timestamps, dismissal (reason, comment, login), rule (id, name, severity, security severity, description, tags), tool (name, version, guid), the most recent instance's analysis key, category, environment, ref, commit, location, message and classifications, with the raw alert in `configuration`. | A fixed alert is history; an absent `security_severity_level` is `""`, never `low`. |
 | req-github-core-code-scanning-2 | Analysis Shape Accepted | In Development | Every analysis in the most recent page lands as one `code_scanning_analysis` per (repository, GitHub analysis id) carrying ref, commit, analysis key, category, environment, tool, created time, result and rule counts, SARIF id, deletable flag, processing warning and error, with the raw analysis in `configuration`. | Keyed on GitHub's id, not `sarif_id`. |
 | req-github-core-code-scanning-3 | Four Observability States | In Development | `github_repository.code_scanning_observability` is `observed` after a 200 (zero rows included), `unobservable` after a 403 with a per-repository warning and nothing minted, `not_enabled` when GitHub reports code scanning or Advanced Security off for the repository with an information record and nothing minted, and `""` when the surface was not asked; no two of these ever serialize alike. | Never two states where GitHub offers four. |
-| req-github-core-code-scanning-4 | One Finding Per Alert | In Development | Every landed alert mints exactly one `compliance_core__compliance_finding` keyed `<owner/repo>#code_scanning#<number>` with `name = "<tool_name> <rule_id>"`, `summary` = rule description, `description` = message + `path:line`, and `status = open` iff the alert's state is `open`, else `resolved` (dismissed and fixed alike); re-collection updates the same finding, never a second. | The true lifecycle stays on the detail. |
+| req-github-core-code-scanning-4 | One Finding Per Alert | In Development | Every landed alert mints exactly one `compliance_core__compliance_finding`, named by a ref and carrying `source` = `github_core` + `source_key` = `<owner/repo>#code_scanning#<number>` (the key compliance_core's model declares), with `name = "<tool_name> <rule_id>"`, `summary` = rule description, `description` = message + `path:line`, and `status = open` iff the alert's state is `open`, else `resolved` (dismissed and fixed alike); re-collection updates the same finding, never a second. | The true lifecycle stays on the detail. |
 | req-github-core-code-scanning-5 | Placed On Repository And Workflow | In Development | Every finding carries `CARRIES_COMPLIANCE_FINDING__compliance_core` from its `github_repository`, and additionally from the `github_workflow` whose path equals the alert's `location.path` when that workflow was collected; no github_core-owned placement edge exists. | compliance_core's wildcard-source edge, reused. |
 | req-github-core-code-scanning-6 | Detail Behind The Finding | In Development | Every finding has exactly one inbound `DETAILS_FINDING__github_core` from its `code_scanning_alert`, property-free; no finding minted by this collector lacks a detail and no detail points at two findings. | 1:1 by construction. |
 | req-github-core-code-scanning-7 | Analyses Land With Their Edges | In Development | Every landed analysis carries `ANALYZES_REPOSITORY__github_core` to its repository, and `ANALYZES_COMMIT__github_core` to `git_core__git_commit` only when that commit is on the grid in the same batch; an analysis whose commit is absent lands with no commit edge and `commit_sha` intact. | Absence ≠ not analysed. |
