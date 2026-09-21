@@ -55,5 +55,5 @@ Populated from the per-suite detail at **`repository:administration:read`**: `ru
 
 - **Source:** `github_core__rule_suite` — the push that went around the gate.
 - **Target:** `github_core__github_ruleset` — the gate it went around.
-- **Dimensions:** `github.platform`, `github.surface: rules`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: rules`, `github.observation: execution`.
 - **Properties:** `rule_type` (the rule not satisfied), `enforcement` (its level at evaluation time — bypassing an `evaluate` rule means less), `details` (GitHub's own explanation, verbatim).

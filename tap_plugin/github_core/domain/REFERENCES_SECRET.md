@@ -76,5 +76,5 @@ Two ways a scope loses its place in `scopes_read`, and the second is the one tha
 
 - **Source:** `github_core__github_workflow` — the file that types the name.
 - **Target:** `github_core__actions_secret` — the secret that exists.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration`.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: declaration`.
 - **Properties:** none. The unresolved side is a tag on the workflow, because it has no target to hang an edge from.

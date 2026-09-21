@@ -20,13 +20,15 @@ class GithubPlatform(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_platform"
+    # The host. A GHES tenant is a second platform, not a special case.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("host",)
     ENTITY_NAME: ClassVar[str] = "GitHub Platform"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A GitHub platform instance (github.com or a GHES host)."
     )
     ENTITY_ICON: ClassVar[str] = "github-platform"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.observation": "declaration",
     }
     # GitHub family palette: a cool blue/neutral scheme that reads as "external

@@ -52,5 +52,5 @@ Emitted with the scope node, in the scope's own batch, before the walk — one e
 
 - **Source:** `github_core__collection_scope`.
 - **Target:** `collection_job` — tap_cares' core run record, named by its `ENTITY_TYPE` string.
-- **Dimensions:** `github.platform`, `github.observation: execution`. No `github.surface`: the edge is about a run, not a GitHub API surface.
+- **Dimensions:** `git.host`, `github.observation: execution`. No `github.surface`: the edge is about a run, not a GitHub API surface.
 - **Properties:** none. Everything about the reach lives on the scope node, where it is one statement rather than a copy per edge.

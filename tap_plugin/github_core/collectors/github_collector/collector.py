@@ -14,6 +14,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any, ClassVar, NamedTuple
 from urllib.parse import quote
+from uuid import UUID
 
 from tap_plugin.git_core.identity import (
     OID_LENGTH,
@@ -46,12 +47,15 @@ from .app_jwt import GithubAppAuthError
 from .auth import PREFER_APP, PREFER_PAT, GithubAuth
 from .batch import (
     assemble_batch,
+    endpoint_keys,
+    envelope_key,
     edge_envelope,
     node_envelope,
 )
 from .enrichment import resolve_links
 from .graphql_client import _ENVIRONMENT_PAGE_SIZE, GithubGraphQLClient, GithubGraphQLError
 from .identity import (
+    Ref,
     account_id,
     actions_artifact_id,
     actions_cache_id,
@@ -513,14 +517,16 @@ _REF_TYPE_BY_RULESET_TARGET = {"branch": "branch", "tag": "tag"}
 # The platform instance every collected account/repo/workflow hangs under.
 # v0 is github.com only; a GHES host would key on its own hostname.
 _PLATFORM_HOST = "github.com"
-_PLATFORM_DIMENSIONS = {"github.platform": "github.com"}
+_PLATFORM_DIMENSIONS = {"git.host": _PLATFORM_HOST}
 
 # The neutral git_core rows carry only git_core's own partition key (spec-git_core-v0.md
-# req-git-core-dimensions): the forge is a fact about the OBSERVER and lives on the hosting
-# record and the commit observation, never on the substrate.
-_GIT_REF_DIMENSIONS = {"git.object": "ref"}
-_GIT_COMMIT_DIMENSIONS = {"git.object": "commit"}
-_GIT_RELATION_DIMENSIONS = {"git.object": "relation"}
+# req-git-core-dimensions): `git.host`, the forge instance identity already rests on. The
+# forge's own VOCABULARY — owner, repo, surface — is a fact about the OBSERVER and lives on
+# the hosting record and the commit observation, never on the substrate. github_core writes
+# `git.host` because it depends on git_core and so legitimately writes git_core's vocabulary;
+# the same key, the same meaning, on both layers, so "every node on this host" is one filter
+# rather than a union of two spellings (github-core#168, git-core-tap#11). The value is
+# DERIVED from the host the record hangs off, never authored a second time.
 
 # GitHub Actions' OIDC issuer URL — the identity convergence node github enables
 # on every repo. The node itself (id, canonical host, provider, display name) is
@@ -1269,7 +1275,7 @@ class GithubCollector(CollectorBase):
         # one-repo scope never happened and at nineteen rejected the whole batch for a dangling
         # endpoint. Drop those edges and say how many, rather than losing every repo.
         edges, dropped = self._drop_dangling_edges(
-            edges, {e["entity"]["entity_id"] for e in nodes}
+            edges, {k for k in (envelope_key(n) for n in nodes) if k is not None}
         )
         if dropped:
             self.record_warn(
@@ -1292,11 +1298,19 @@ class GithubCollector(CollectorBase):
             )
 
         scope_label = owner if owner is not None else ", ".join(repos)
-        batch_dims = {"github.platform": "github.com"}
+        batch_dims = {"git.host": _PLATFORM_HOST}
         if owner is not None:
             batch_dims["github.owner"] = owner
         # The scope's join onto the installation it was derived from lands here, beside the
         # installation node the inventory minted above (github-core#145).
+        #
+        # AFTER `_drop_dangling_edges`, and that ordering is load-bearing (Codex on PR# 163 -
+        # github-core). This edge's SOURCE is the collection_scope, which rode its own earlier
+        # batch, so it is a real grid id and by construction not among this batch's node keys —
+        # the guard would drop it, silently losing the run's provenance join. The guard is
+        # batch-local by design and must stay that way; it is this append that has to come
+        # after it. `test_a_cross_batch_endpoint_is_exactly_what_the_guard_drops` pins the
+        # hazard so the reason survives someone tidying these three lines together.
         self._append_scope_installation_edge(edges)
         github_batch = assemble_batch(
             batch_name=f"github_core collection: {scope_label}",
@@ -1310,11 +1324,21 @@ class GithubCollector(CollectorBase):
         # walked no listing at all says so (a statement with zero surfaces, not no statement).
         collection_batch_id = str(github_batch["batches"][0]["batch_entity"]["entity_id"])
         listings = self._listing_state()["listings"]
+        result = self.submit_grift(github_batch)
+        # A SURFACE LEAVES THE BATCH (Issue# 162). The completeness statement is recorded on the
+        # RUN, not inside the document, and candidate derivation resolves its `subject` as a grid
+        # entity id (`tap_grid/candidates.py::_resolve_parent`). A ref is batch-local and means
+        # nothing there, so the surfaces are recorded AFTER the import — the one moment the
+        # assigned ids exist — rather than before it as they were. An unresolved subject keeps
+        # the ref and derivation says `subject_unresolved`: a visible skip, not a silent loss.
         for listing in listings:
-            self.record_surface(**listing, applied_batches=[collection_batch_id])
+            subject = self._assigned_id(result, listing["subject"])
+            self.record_surface(
+                **{**listing, "subject": str(subject or listing["subject"])},
+                applied_batches=[collection_batch_id],
+            )
         if not listings:
             self.declare_no_surfaces()
-        self.submit_grift(github_batch)
         self.record_info(
             _SITE_BATCH_SUBMITTED,
             "COLLECTION_BATCH_SUBMITTED",
@@ -1357,7 +1381,7 @@ class GithubCollector(CollectorBase):
             )
 
         # --- enrichment phase (link resolution against landed nodes) ---
-        enrichment_dims = {"github.platform": "github.com"}
+        enrichment_dims = {"git.host": _PLATFORM_HOST}
         enrichment = resolve_links(
             link_manifest=link_manifest,
             repos=repos,
@@ -1499,12 +1523,18 @@ class GithubCollector(CollectorBase):
 
         Applies to the collection batch only, where both endpoints are always emitted alongside
         the edge. Enrichment edges resolve against the grid and must never be filtered this way.
+
+        ``node_ids`` holds whatever each node envelope names itself by — a ref for a type that
+        has adopted assigned identity, an entity id for one that has not — and an edge endpoint
+        is compared on the same footing (``endpoint_keys``). A ref endpoint that names no node
+        of this batch is a hard GRIFT error (``unknown_ref``) rather than a dangling id, so
+        catching it here is the difference between dropping one edge and losing the batch.
         """
         kept: list[dict[str, Any]] = []
         dropped: list[str] = []
         for env in edges:
             e = env.get("edge") or {}
-            src, tgt = str(e.get("from_entity_id")), str(e.get("to_entity_id"))
+            src, tgt = endpoint_keys(env)
             if src in node_ids and tgt in node_ids:
                 kept.append(env)
             else:
@@ -1512,25 +1542,56 @@ class GithubCollector(CollectorBase):
         return kept, dropped
 
     @staticmethod
+    def _assigned_id(result: Any, value: Any) -> UUID | None:
+        """The entity id core assigned to a batch-local ref, read off the import result.
+
+        The only supported way a collector learns what a ref became (`tap_grid/grift/refs.py`:
+        "the ref -> id map is returned on the import result, which is where a collector learns
+        what it was given"). The map is reported per IMPORTED batch, so a rejected or skipped
+        batch yields None rather than a plausible-looking id.
+
+        Takes the ref by VALUE rather than by type: a ref that has been through `str()` on its
+        way into a per-run record (`_note_listing` stores its subject as text) is still the same
+        key in the map. A value that is already an id passes straight through, and anything that
+        is neither is None — three states, never two.
+        """
+        key = str(value)
+        for batch in getattr(result, "imported_batches", None) or []:
+            assigned = (getattr(batch, "resolved_refs", None) or {}).get(key)
+            if assigned:
+                return UUID(str(assigned))
+        if isinstance(value, Ref):
+            return None
+        try:
+            return UUID(key)
+        except (ValueError, AttributeError, TypeError):
+            return None
+
+    @staticmethod
     def _collapse_by_entity_id(
         envelopes: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], int]:
-        """Return the envelopes with duplicate ``entity.entity_id`` collapsed, and the count removed.
+        """Return the envelopes with a duplicate identity collapsed, and the count removed.
+
+        The identity is the envelope's ``ref`` or its ``entity_id``, whichever it carries
+        (``envelope_key``). Collapsing by ref is not merely the analogue of collapsing by id —
+        it is load-bearing: a repeated ref is a hard GRIFT error (``duplicate_ref``) that
+        rejects the whole batch, so the same account or action seen from nineteen repositories
+        MUST arrive once.
 
         Order is preserved and the LAST occurrence wins, so the freshest observation of a shared
-        node survives. Envelopes without an entity id pass through untouched rather than being
-        silently dropped — an id-less envelope is a different bug and GRIFT should be the one to
+        node survives. Envelopes that name themselves neither way pass through untouched rather
+        than being silently dropped — that is a different bug and GRIFT should be the one to
         say so.
         """
         seen: dict[str, int] = {}
         out: list[dict[str, Any]] = []
         removed = 0
         for env in envelopes:
-            eid = (env.get("entity") or {}).get("entity_id")
-            if eid is None:
+            key = envelope_key(env)
+            if key is None:
                 out.append(env)
                 continue
-            key = str(eid)
             if key in seen:
                 out[seen[key]] = env
                 removed += 1
@@ -1718,7 +1779,7 @@ class GithubCollector(CollectorBase):
     ) -> None:
         owner, _, repo = full_name.partition("/")
         repo_dims = {
-            "github.platform": "github.com",
+            "git.host": _PLATFORM_HOST,
             "github.owner": owner,
             "github.repo": repo,
         }
@@ -1819,7 +1880,7 @@ class GithubCollector(CollectorBase):
         git_repo_uuid = None
         if repository_github_id is not None:
             git_repo_uuid = git_repository_id(
-                repo_dims["github.platform"], str(repository_github_id)
+                repo_dims["git.host"], str(repository_github_id)
             )
             default_branch = repo_payload.get("default_branch", "") or ""
             nodes.append(
@@ -1827,9 +1888,9 @@ class GithubCollector(CollectorBase):
                     entity_id=git_repo_uuid,
                     entity_type="git_core__git_repository",
                     name=full_name,
-                    dimensions={"git.object": "repository"},
+                    dimensions={"git.host": repo_dims["git.host"]},
                     fields={
-                        "forge": repo_dims["github.platform"],
+                        "forge": repo_dims["git.host"],
                         "stable_id": str(repository_github_id),
                         "name": full_name,
                         "default_ref": (
@@ -2437,7 +2498,12 @@ class GithubCollector(CollectorBase):
             # has no neutral repository to hang refs off. Refs are config-layer data and are
             # simply not collected in that form — stated rather than silently empty.
             return {}
-        git_dims = {**repo_dims, "github.surface": "git"}
+        # `github.surface: git` is retired (github-core#168): it existed only to mark
+        # github's write to the neutral layer, and the neutral layer no longer carries
+        # github's vocabulary at all. What github OBSERVED about a commit is scoped like
+        # any other github record; what it MINTED on the neutral layer carries `git.host`.
+        git_dims = dict(repo_dims)
+        neutral_dims = {"git.host": repo_dims["git.host"]}
         refs, truncated = GithubGraphQLClient.refs(gql)
         uuid_by_ref: dict[str, Any] = {}
         for ref in refs:
@@ -2458,7 +2524,7 @@ class GithubCollector(CollectorBase):
                     entity_id=ref_uuid,
                     entity_type="git_core__git_ref",
                     name=ref["name"],
-                    dimensions=_GIT_REF_DIMENSIONS,
+                    dimensions=neutral_dims,
                     fields={
                         "ref": ref["ref"],
                         "ref_type": ref["ref_type"],
@@ -2477,7 +2543,7 @@ class GithubCollector(CollectorBase):
                     "DECLARES_REF__git_core",
                     git_repo_uuid,
                     ref_uuid,
-                    _GIT_RELATION_DIMENSIONS,
+                    neutral_dims,
                 )
             )
             self._emit_commit(
@@ -2488,6 +2554,7 @@ class GithubCollector(CollectorBase):
                 repo_uuid,
                 repository_github_id,
                 git_dims,
+                neutral_dims,
                 nodes,
                 edges,
             )
@@ -2514,6 +2581,7 @@ class GithubCollector(CollectorBase):
         repo_uuid: Any,
         repository_github_id: int | str,
         git_dims: dict[str, str],
+        neutral_dims: dict[str, str],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
@@ -2548,7 +2616,7 @@ class GithubCollector(CollectorBase):
                 entity_id=commit_uuid,
                 entity_type="git_core__git_commit",
                 name=oid[:12],
-                dimensions=_GIT_COMMIT_DIMENSIONS,
+                dimensions=neutral_dims,
                 fields={
                     "hash_algorithm": hash_algorithm,
                     "oid": oid,
@@ -2566,7 +2634,7 @@ class GithubCollector(CollectorBase):
                 "STORES_COMMIT__git_core",
                 git_repo_uuid,
                 commit_uuid,
-                _GIT_RELATION_DIMENSIONS,
+                neutral_dims,
             )
         )
         edges.append(
@@ -2574,12 +2642,12 @@ class GithubCollector(CollectorBase):
                 "RESOLVES_COMMIT__git_core",
                 ref_uuid,
                 commit_uuid,
-                _GIT_RELATION_DIMENSIONS,
+                neutral_dims,
             )
         )
 
         observation_uuid = commit_observation_id(
-            git_dims["github.platform"], repository_github_id, hash_algorithm, oid
+            git_dims["git.host"], repository_github_id, hash_algorithm, oid
         )
         nodes.append(
             node_envelope(
@@ -2588,6 +2656,7 @@ class GithubCollector(CollectorBase):
                 name=f"{full_name}@{oid[:12]}",
                 dimensions=git_dims,
                 fields={
+                    "host": git_dims["git.host"],
                     "full_name": full_name,
                     "repository_github_id": (
                         int(repository_github_id)
@@ -2881,7 +2950,7 @@ class GithubCollector(CollectorBase):
         # emit it last — an assertion the node has no business making. The repository association
         # is the PROTECTS edge, which IS repo-scoped.
         ruleset_dims = {
-            "github.platform": repo_dims["github.platform"],
+            "git.host": repo_dims["git.host"],
             "github.owner": owner,
             "github.surface": "rules",
         }
@@ -3377,7 +3446,7 @@ class GithubCollector(CollectorBase):
         (`github_actions_job`) keeps its own nodes; the two are deliberately not merged.
         """
         declared_dims = {
-            "github.platform": "github.com",
+            "git.host": _PLATFORM_HOST,
             "github.owner": full_name.partition("/")[0],
             "github.repo": full_name.partition("/")[2],
             "github.surface": "actions",
@@ -3709,7 +3778,8 @@ class GithubCollector(CollectorBase):
         status a listing was refused with: 401/403 is "not authorized", anything else "not
         determinable" — in both cases nothing was enumerated or admitted. `source_consistent`
         is always "unknown": GitHub promises no snapshot across pages (req-grid-reconcile-evidence-2).
-        The surfaces are recorded at submission, once the batch they were applied by has an id.
+        The surfaces are recorded just AFTER submission, once the batch they were applied by has
+        an id AND the subject's batch-local ref has been resolved to the id core assigned it.
         """
         reasons = dict(reasons or {})
         if refused is not None:
@@ -4918,7 +4988,6 @@ class GithubCollector(CollectorBase):
             self._emit_secret(
                 item,
                 scope="repository",
-                key=full_name,
                 owner_login=full_name.split("/")[0],
                 full_name=full_name,
                 environment_name="",
@@ -4953,7 +5022,6 @@ class GithubCollector(CollectorBase):
                 self._emit_secret(
                     item,
                     scope="environment",
-                    key=f"{full_name}/{env_name}",
                     owner_login=full_name.split("/")[0],
                     full_name=full_name,
                     environment_name=env_name,
@@ -5017,7 +5085,7 @@ class GithubCollector(CollectorBase):
         )
         account_uuid = account_id(owner)
         dims = {
-            "github.platform": "github.com",
+            "git.host": _PLATFORM_HOST,
             "github.owner": owner,
             "github.surface": "secrets",
             "github.observation": "declaration",
@@ -5035,7 +5103,6 @@ class GithubCollector(CollectorBase):
             self._emit_secret(
                 item,
                 scope="organization",
-                key=owner,
                 owner_login=owner,
                 full_name="",
                 environment_name="",
@@ -5162,7 +5229,6 @@ class GithubCollector(CollectorBase):
         item: dict[str, Any],
         *,
         scope: str,
-        key: str,
         owner_login: str,
         full_name: str,
         environment_name: str,
@@ -5182,7 +5248,7 @@ class GithubCollector(CollectorBase):
         name = str(item.get("name") or "")
         if not name:
             return
-        uuid_ = actions_secret_id(scope, key, name)
+        uuid_ = actions_secret_id(scope, owner_login, full_name, environment_name, name)
         out.setdefault(name.upper(), []).append(uuid_)
         nodes.append(
             node_envelope(
@@ -5195,7 +5261,9 @@ class GithubCollector(CollectorBase):
                     "owner_login": owner_login,
                     "full_name": full_name,
                     "environment_name": environment_name,
-                    "name": name,
+                    # Canonical spelling is the identity; what GitHub said rides beside it.
+                    "name": name.upper(),
+                    "name_reported": name,
                     # Organisation secrets carry a sharing policy; repository and environment
                     # secrets have none, and "" says so rather than implying a default.
                     "visibility": str(item.get("visibility") or ""),
@@ -5566,7 +5634,7 @@ class GithubCollector(CollectorBase):
         listing_client = pat_client or client
         account_uuid = account_id(owner)
         dims = {
-            "github.platform": "github.com",
+            "git.host": _PLATFORM_HOST,
             "github.owner": owner,
             "github.surface": "packages",
             "github.observation": "execution",
@@ -6114,10 +6182,10 @@ class GithubCollector(CollectorBase):
             target_id=job_uuid,
             dimensions={**_PLATFORM_DIMENSIONS, "github.observation": "execution"},
         )
-        batch_dims = {"github.platform": "github.com"}
+        batch_dims = {"git.host": _PLATFORM_HOST}
         if owner is not None:
             batch_dims["github.owner"] = owner
-        self.submit_grift(
+        result = self.submit_grift(
             assemble_batch(
                 batch_name=f"github_core collection scope: {owner or 'explicit repositories'}",
                 description=(
@@ -6129,7 +6197,13 @@ class GithubCollector(CollectorBase):
                 batch_dimensions=batch_dims,
             )
         )
-        self._scope_uuid = scope_uuid
+        # THE BATCH BOUNDARY (Issue# 162). The scope node rides its own batch and its ref dies
+        # with it; the main batch, submitted at the end of the run, names the scope as the
+        # source of `DERIVED_FROM_INSTALLATION`, and the reliability seam patches tier verdicts
+        # onto it through the service layer. Both need the id core ASSIGNED, which the import
+        # result is the one place to learn. A run whose batch did not import leaves this None,
+        # and `_append_scope_installation_edge` already declines to guess on None.
+        self._scope_uuid = self._assigned_id(result, scope_uuid)
         self.record_info(
             _SITE_COLLECTION_SCOPE,
             "COLLECTION_SCOPE_ESTABLISHED",
@@ -6137,7 +6211,7 @@ class GithubCollector(CollectorBase):
             f"selection {selection.get('kind')} "
             f"({'complete' if selection.get('complete') else 'incomplete'}); plan {plan}.",
             message_data={
-                "scope_id": str(scope_uuid),
+                "scope_id": str(self._scope_uuid or scope_uuid),
                 "installation_id": int(inst_id) if inst_id is not None else None,
                 "selection_kind": selection.get("kind"),
                 "complete": bool(selection.get("complete")),

@@ -61,4 +61,4 @@ Observed on the unified-systems-com grid on 2026-09-02 (pre-edge, from `configur
 
 - **Source:** `github_core__github_workflow` — the workflow whose completion fires the event.
 - **Target:** `github_core__github_workflow` — the workflow declaring `on: workflow_run`, whose `configuration.workflow_run` holds the block and whose `configuration.trigger_resolution` holds the unmatched names.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration`, plus the repository's `github.owner` / `github.repo` — both ends are in one repository by construction.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: declaration`, plus the repository's `github.owner` / `github.repo` — both ends are in one repository by construction.

@@ -50,5 +50,5 @@ Emitted from the analyses read (`repository:security_events:read`) and present o
 
 - **Source:** `github_core__code_scanning_analysis`
 - **Target:** `git_core__git_commit`
-- **Dimensions:** `github.platform`, `github.surface: security`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: security`, `github.observation: execution`.
 - **Properties:** none — the ref and the tool are on the analysis node; the commit's identity is the target.

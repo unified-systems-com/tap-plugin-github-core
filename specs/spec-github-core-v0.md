@@ -9,7 +9,7 @@
 - **v0 target:** `notgeorge/samsite` (configured via the secret's `repos` array).
 - **Repo shape:** In-tree under `plugins/github_core/` for v0. No standalone git repo or submodule; may be split later if external consumers appear.
 - **Default dimensions** (see `req-github-core-dimensions`):
-  - `github.platform = "github.com"` on all plugin-owned nodes and edges
+  - `git.host = "github.com"` on all plugin-owned nodes and edges, and on every neutral `git_core` node this plugin mints
   - `github.owner` + `github.repo` on repo-scoped objects (set by the collector per envelope)
   - `github.surface = "actions"` on Actions-related objects
   - `github.observation` on every plugin-owned node and edge: `"execution"` on runs and
@@ -268,17 +268,53 @@ Natural-key inputs:
 | `github_actions_run` | `owner/repo` + run id |
 | `github_actions_job` | `owner/repo` + job id |
 | `github_runner` | `owner/repo` + runner id for durable registered runners |
-| `github_ruleset` | ruleset `databaseId` **alone** — deliberately not scoped by repo or org |
+| `github_ruleset` | owner login + GitHub's ruleset id — **not** repo-scoped |
 | `github_app` | app slug (`dependabot`) — singleton across repos |
 | `workflow_job` | `owner/repo` + workflow id + the job's YAML key |
-| `git_ref` | `owner/repo` + the FULL ref path (`refs/heads/main`) |
-| `github_ruleset` | owner login + GitHub's ruleset id — **not** repo-scoped |
+| `git_ref` | `owner/repo` + the FULL ref path (`refs/heads/main`) — git_core's type, minted there |
 | `github_environment` | `owner/repo` + environment name |
 | `actions_cache` | `owner/repo` + cache id |
+| `actions_artifact` | `owner/repo` + GitHub's artifact id |
+| `actions_secret` | scope + owner login + `owner/repo` + environment name + secret name |
 | `app_installation` | GitHub's installation id (unique platform-wide) |
 | `collection_scope` | the `collection_job` entity id — one scope per run |
+| `pull_request` | the BASE `owner/repo` + the PR number |
+| `github_custom_property` | owner login + the property name as reported |
+| `status_check` | owner login + the context string (case-sensitive) |
+| `rule_suite` | GitHub's suite id (unique platform-wide) |
+| `code_scanning_alert` | `owner/repo` + GitHub's alert number |
+| `code_scanning_analysis` | `owner/repo` + GitHub's analysis id |
+| `github_release` | `owner/repo` + GitHub's release id — **not** the tag name |
+| `github_package` | owner login + package type + package name |
+| `github_package_version` | owner login + package type + package name + GitHub's version id |
+| `github_action` | the `uses:` path with the ref stripped — platform-global |
+| `commit_observation` | the repository's numeric id + hash algorithm + the commit sha |
 
-Entity IDs are deterministic UUIDv5 values over the model type and natural key.
+The `github_ruleset` row previously appeared TWICE in this table, once saying "ruleset
+`databaseId` **alone**" and once saying "owner login + GitHub's ruleset id". The code has
+always been owner-scoped (`identity.py::ruleset_id(owner, ruleset_id_int)`), so the
+owner-scoped row is the true one and the `databaseId`-alone row has been removed
+(Issue# 162). The Ruleset Collection section below still narrates the verification that the
+bare id WOULD have keyed correctly; the owner prefix is belt-and-braces, not a correction.
+
+**Entity ids are ASSIGNED, not derived** (`req-grid-entity-natural-key`). Each model declares
+its key above as a `NATURAL_KEY` tuple of FIELD names; the collector names each node with a
+batch-local `ref` (`<entity_type>:<natural key>`) and the GRIFT importer resolves it —
+`find_existing` on the declared fields under a transaction-scoped advisory lock, a fresh
+UUIDv7 on a miss.
+
+**Three types are HELD BACK** — declared, but still addressed by an explicit derived UUIDv5, so
+nothing resolves against their declaration and it stays free to change. A natural key is a
+one-way door only once a node's id has been assigned under it.
+
+| Type | Why | Ruling |
+| --- | --- | --- |
+| `compliance_core__compliance_finding` | Another plugin's type; it declares no `NATURAL_KEY`, so a ref to it is refused outright. | Flips when compliance_core adopts. |
+| `commit_observation` | Its recipe keys on the platform HOST; the model has no `host` field, so the declared key is narrower. Inert while the host is the constant `github.com`; a GHES tenant sharing the grid could collide on repository id. | Issue# 164 |
+| `actions_secret` | Its key case-folds the name (GitHub secret names are not case-sensitive); the declared search filters the stored name, which is the name GitHub returned, so the two disagree. Under a ref a second canonical spelling would mint a second node behind an unchanged edge. | Issue# 165 |
+
+Every `git_core__*` and `identity_core__*` node this collector emits likewise keeps the id its
+own plugin's identity module derives.
 
 #### Configuration Field Shape
 
@@ -322,10 +358,10 @@ must not conflate the two.
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
 | req-github-core-models-1 | V0 Models Declared | Implemented | The plugin declares the seven v0 model types listed above. | The original six landed via 0001_initial; `github_platform` via 0002. `oidc_issuer` (originally 0003) was extracted to `identity_core` and dropped here in 0004. |
-| req-github-core-models-8 | Platform Singleton Synthesized | Implemented | `github_platform` is a synthesized singleton (one per run, deterministic id keyed on the host), not fetched from any API; re-runs and hand-written GRIFT nodes with the same host upsert cleanly onto it. | Collector emits it before the per-repo walk; mirrors `aws_core`'s `aws_account_singleton` pattern. |
+| req-github-core-models-8 | Platform Singleton Synthesized | Implemented | `github_platform` is a synthesized singleton (one per run, keyed on the host), not fetched from any API; re-runs and hand-written GRIFT nodes with the same host upsert cleanly onto it. | Collector emits it before the per-repo walk; mirrors `aws_core`'s `aws_account_singleton` pattern. |
 | req-github-core-models-9 | OIDC Issuer Synthesized (via identity_core) | Implemented | The collector still synthesizes the GitHub Actions issuer node, but the type and vocabulary live in `identity_core` (`identity_core__oidc_issuer`); github mints it through `identity_core.issuer.oidc_issuer_node_envelope`. Any observer (samsite, AWS enrichment) converges on the same node by canonical-URL id regardless of run order. | Extracted 2026-07-08; see spec-identity-core-v0.md (req-identity-core-migration). |
 | req-github-core-models-3 | Job Steps Blobbed | Implemented | Workflow job steps remain structured data in `github_actions_job.configuration` in v0. | Future visualization target. |
-| req-github-core-models-4 | Deterministic Identity | Implemented | Every model uses deterministic UUIDv5 identity based on the natural keys above. | `collectors/github_collector/identity.py` mints UUIDv5 from `(entity_type, natural_key)` under a fixed namespace. |
+| req-github-core-models-4 | Assigned Identity, Declared Search | Implemented | Every model declares `NATURAL_KEY` over the fields named in the table above, and the collector emits a batch-local `ref` rather than a minted id, so `Entity.id` is assigned by core (`req-grid-entity-natural-key`). | Was "Deterministic Identity": every model minted a UUIDv5 from `(entity_type, natural_key)`. Adopted 2026-09-20 (Issue# 162 - tap-plugin-github-core); github_core is core's first adopter. `identity.py` now returns `Ref` strings; edge ids stay UUIDv5 AND keep their exact pre-adoption values (the importer finds an edge only by the supplied id, so a shifted edge id would double every existing grid's edges on first re-collect — `_endpoint_token` re-derives what each ref used to be). Edge identity under assigned nodes is Issue# 690 - tap. Three types keep derived ids and do not emit refs: `compliance_core__compliance_finding` (another plugin's type, undeclared), `commit_observation` (Issue# 164) and `actions_secret` (Issue# 165). |
 | req-github-core-models-7 | Raw Workflow YAML Retained | Implemented | `github_workflow.configuration.raw_yaml` stores the full workflow YAML body fetched at collection time. | Parser stores raw bytes; collector base64-decodes the Contents-API `content` field and writes it. |
 
 ### Ruleset Collection
@@ -357,9 +393,10 @@ work.
 
 #### Identity
 
-The natural key is GitHub's ruleset `databaseId` **alone**, deliberately not scoped by
-repository or organization. This is unfixable once ids are minted, so it was verified rather
-than assumed (2026-08-27):
+The natural key is owner login + GitHub's ruleset `databaseId`, deliberately not scoped by
+REPOSITORY. The verification below (2026-08-27) established that the bare `databaseId` would
+also have keyed correctly — the owner prefix is belt-and-braces, kept because a natural key
+cannot be changed once nodes exist:
 
 - **Organization- and repository-sourced rulesets share one sequence.** Sorted, the six
   observed ids interleave by source — an org ruleset, then three repo rulesets, then two more
@@ -688,7 +725,7 @@ absent key lands as `unobservable`, and a body whose `committedDate` was pruned 
 | req-github-core-commits-2 | Signature In Three States | Implemented | The observation stores GitHub's `state`, kind, validity and signer; `signature: null` stores `unsigned` with `signature_valid: null`; a `signature` key pruned for a field error stores `unobservable`; a ref whose commit slice is absent emits no commit, no observation and no edge. | Never false for unsigned or unobservable. |
 | req-github-core-commits-3 | Identity As Observed | Implemented | `author_login` / `committer_login` on the observation are set only when GitHub resolved the email to an account; the raw name and email live on the neutral commit. | |
 | req-github-core-commits-4 | No Extra Request Or Permission | Implemented | Both sources ride the config-layer refs query; the manifest declares `repository:contents:read`, already in the union, and the conformance extract carries the traversed `Commit`, `GitActor` and `GitSignature` fields. | |
-| req-github-core-commits-5 | Nothing Observed On The Neutral Commit | Implemented | The neutral commit envelope carries only intrinsic fields and `{"git.object": "commit"}`; no login, verdict or `github.*` dimension. | `tests/test_commits.py`. |
+| req-github-core-commits-5 | Nothing Observed On The Neutral Commit | Implemented | The neutral commit envelope carries only intrinsic fields and `{"git.host": <host>}` — git_core's own key, the same one this plugin's records carry; no login, verdict or `github.*` dimension. | `tests/test_commits.py`. |
 
 ### Status Checks
 ----
@@ -985,7 +1022,7 @@ and "Tags".
 
 Identity is the NEUTRAL repository's id plus the full ref path, minted by git_core (github-core#76/#78): the
 ref is `git_core__git_ref`, declared by the neutral `git_core__git_repository` this record `HOSTS_REPOSITORY`
-(`DECLARES_REF__git_core`), and it carries only `{"git.object": "ref"}` — no `owner/repo`, no `github.*`. A branch
+(`DECLARES_REF__git_core`), and it carries only `{"git.host": <host>}` — no `owner/repo`, no `github.*`. A branch
 and a tag may share a short name, so the path is the key.
 
 **Tag-movement detection is not implemented and does not need to be.** `head_sha` is a field on a
@@ -1551,11 +1588,10 @@ GitHub-specific dimensions:
 
 | Key | Example | Applies To |
 | --- | --- | --- |
-| `github.platform` | `github.com` | All GitHub nodes and edges |
+| `git.host` | `github.com` | All GitHub nodes and edges, **and** every neutral `git_core` node and edge this plugin mints |
 | `github.owner` | `notgeorge` | Repo-scoped nodes and edges |
 | `github.repo` | `samsite` | Repo-scoped nodes and edges |
 | `github.surface` | `actions` | Actions workflows, runs, jobs, runners, caches |
-| `github.surface` | `git` | Refs |
 | `github.surface` | `rules` | Rulesets and the edges that apply them |
 | `github.surface` | `deployments` | Environments |
 | `github.surface` | `apps` | Apps and app installations |
@@ -1564,8 +1600,29 @@ GitHub-specific dimensions:
 | `github.ref_type` | `branch` \| `tag` | Refs. One type carries both, so the partition that matters is a dimension rather than a type boundary. |
 
 Static model defaults should include only dimensions that are true for all
-instances, such as `github.platform = "github.com"`. The collector supplies
+instances, such as `git.host = "github.com"`. The collector supplies
 repo-specific dimensions in GRIFT envelopes.
+
+**`github.owner` and `github.repo` are deliberately NOT model defaults, on any type.**
+`DEFAULT_DIMENSIONS` is a class-level constant applied verbatim at creation, so a
+locator there could only name ONE owner and ONE repository for every node of that type.
+That declaration would be present on every node and true of almost none — the exact
+shape of a presence check passing over a false fact, and worse than the absent stamp it
+replaces, because nobody re-checks a value that is written down. The locator is per-node
+data and is stamped by whatever mints the node; the collector does so in
+`_collect_repo` (`req-github-core-dimensions-2`). A second mint path owes the same
+stamp, and the remedy if one ever forgets is to derive the locator from the node's own
+containment rather than to hardcode a default that cannot be right.
+
+**`git.host` is git_core's key, written here on purpose.** github_core depends on
+git_core and therefore legitimately writes git_core's vocabulary, so this plugin's own
+27 types carry `git.host` exactly as the neutral nodes do — one key, one meaning, both
+layers, so "every node on `ghe.acme.com`" is a single filter rather than a union of two
+spellings. It replaced `github.platform`, which held a HOST under a key named for the
+vendor and could never have been the neutral layer's spelling (github-core#168,
+git-core-tap#11). The neutral rows carry `git.host` and nothing else: `git.object` is
+gone (it duplicated the entity type) and so is `github.surface: git`, whose only purpose
+was marking github's write to a layer that no longer carries github's vocabulary.
 
 **`github.observation` is the DCOM layer axis, and both of its values are stated
 positively.** An observation is either a record of what the pipeline *is configured
@@ -1587,7 +1644,7 @@ than an invisible member of the config layer.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-dimensions-1 | GitHub Platform Dimension | Implemented | All plugin-owned nodes and edges carry `github.platform = "github.com"`. | Set in `DEFAULT_DIMENSIONS` on every model and `default_dimensions` on every edge. |
+| req-github-core-dimensions-1 | Forge Host Dimension | Implemented | All plugin-owned nodes and edges carry `git.host = "github.com"`, and so does every neutral `git_core` node and edge this plugin mints; no node or edge carries `git.object`, and no node carries `github.surface: git`. | Set in `DEFAULT_DIMENSIONS` on every model and `default_dimensions` on every edge; passed on the neutral envelopes by the collector, derived from `_PLATFORM_HOST`. A search on one host returns both layers in one filter — `tests/test_commits.py::TestOneHostIsOneFilter`. |
 | req-github-core-dimensions-2 | Repo Scope Dimensions | Implemented | Collector-created repo-scoped objects carry `github.owner` and `github.repo`. | Set on every node/edge envelope in `GithubCollector._collect_repo`. |
 | req-github-core-dimensions-3 | Actions Surface Dimension | Implemented | Actions-related objects carry `github.surface = "actions"`. | Set on workflow/run/job/runner model defaults and Actions edge defaults. |
 | req-github-core-dimensions-4 | Execution Observation Dimension | Implemented | Run and job observations carry `github.observation = "execution"`. | Set on run/job model defaults. |

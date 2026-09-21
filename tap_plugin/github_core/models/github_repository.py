@@ -34,11 +34,13 @@ class GithubRepository(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_repository"
+    # `owner/repo` — the spec's natural key and what every GitHub surface names a repository by.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name",)
     ENTITY_NAME: ClassVar[str] = "GitHub Repository"
     ENTITY_DESCRIPTION: ClassVar[str] = "A repository hosted on GitHub."
     ENTITY_ICON: ClassVar[str] = "github-repository"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.observation": "declaration",
     }
     # Inner level of the GitHub nesting palette — deeper accent blue; the white

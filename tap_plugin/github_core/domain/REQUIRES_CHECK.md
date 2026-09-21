@@ -55,4 +55,4 @@ Derived from the REST ruleset detail at **`repository:administration:read`** (th
 
 - **Source:** `github_core__github_ruleset` — the gate.
 - **Target:** `github_core__status_check` — the required context.
-- **Dimensions:** `github.platform`, `github.surface: rules`, `github.observation: declaration`, plus `github.owner` from the ruleset's own dimensions; no `github.repo`, because an organization requirement spans repositories.
+- **Dimensions:** `git.host`, `github.surface: rules`, `github.observation: declaration`, plus `github.owner` from the ruleset's own dimensions; no `github.repo`, because an organization requirement spans repositories.

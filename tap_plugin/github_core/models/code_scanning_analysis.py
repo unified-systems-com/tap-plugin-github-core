@@ -25,6 +25,8 @@ class CodeScanningAnalysis(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__code_scanning_analysis"
+    # Repository + GitHub's analysis id (one SARIF upload).
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "analysis_id")
     ENTITY_NAME: ClassVar[str] = "Code Scanning Analysis"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "One code scanning upload: the tool and version, the commit and ref it analysed, "
@@ -34,7 +36,7 @@ class CodeScanningAnalysis(BaseModel):
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         # A scanner RAN: an execution in the same category as a workflow run.
         "github.observation": "execution",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "security",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

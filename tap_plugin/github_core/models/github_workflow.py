@@ -27,11 +27,13 @@ class GithubWorkflow(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_workflow"
+    # Repository + GitHub's workflow id, never the path: a renamed file keeps the same workflow.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "workflow_id")
     ENTITY_NAME: ClassVar[str] = "GitHub Workflow"
     ENTITY_DESCRIPTION: ClassVar[str] = "A GitHub Actions workflow definition."
     ENTITY_ICON: ClassVar[str] = "github-workflow"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "actions",
         "github.observation": "declaration",
     }

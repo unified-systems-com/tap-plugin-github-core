@@ -51,6 +51,8 @@ from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_node
 
+from .envelopes import edge_to
+
 
 def _create(type_slug: str, payload: dict):
     result = create_node(type_slug, payload)
@@ -69,13 +71,17 @@ class TestIdentity:
         """Pinned to literals, not compared against themselves.
 
         A natural key cannot be changed once nodes exist, so what needs guarding is the
-        DERIVATION — its namespace and its input string. `f(x) == f(x)` cannot fail for a
-        pure function and would stay green through a change that silently re-keyed every
-        node on every existing grid.
+        DERIVATION — its input string. `f(x) == f(x)` cannot fail for a pure function and
+        would stay green through a change that silently re-keyed every node on every existing
+        grid.
+
+        github_core's own types are pinned to the batch-local REF since Issue# 162: their ids
+        are assigned by core and the ref is the whole of what identifies the source object.
+        git_core has not adopted, so its ids are still derived and still pinned as UUIDs.
         """
         assert (
             str(workflow_job_id("o/r", 1, "build"))
-            == "54d41673-76fd-519d-9c9e-f60c310a0b49"
+            == "github_core__workflow_job:o/r#1#build"
         )
         # Refs are git_core's since github-core#76: repository identity + full path, minted there —
         # pinned here too, because this collector's emitted ids depend on that derivation.
@@ -83,7 +89,7 @@ class TestIdentity:
             str(git_ref_id(git_repository_id("github.com", "1"), "refs/heads/main"))
             == "d23f94cb-47b2-54f0-ab39-b335586fd80d"
         )
-        assert str(ruleset_id("o", 7)) == "c4a175e4-20e4-563f-a41e-15c24d4f35f1"
+        assert str(ruleset_id("o", 7)) == "github_core__github_ruleset:o#7"
 
     def test_a_branch_and_a_tag_of_the_same_name_are_different_nodes(self) -> None:
         """The reason identity keys on the full ref path rather than the short name."""
@@ -106,7 +112,8 @@ class TestIdentity:
         fixture org: 3 organization rulesets x 19 repositories = 57 attachments).
         """
         assert (
-            str(ruleset_id("acme", 20613528)) == "392446ce-239d-5222-a877-372fe1b5e06b"
+            str(ruleset_id("acme", 20613528))
+            == "github_core__github_ruleset:acme#20613528"
         )
         assert ruleset_id.__code__.co_argcount == 2, (
             "ruleset_id takes (owner, ruleset_id) and nothing else — a third parameter would "
@@ -1472,7 +1479,7 @@ class TestPerRepoWalk:
         same to two of nine referenced names. `GITHUB_TOKEN` is absent from every listing by
         design and must not appear as unresolved.
         """
-        org_secret = actions_secret_id("organization", "acme", "SHARED_API_KEY")
+        org_secret = actions_secret_id("organization", "acme", "", "", "SHARED_API_KEY")
         nodes, edges, _client, _warns = _walk_one_repo(monkeypatch, org_secrets={"SHARED_API_KEY": [org_secret]})
 
         workflow = next(n["node"] for n in nodes if n["entity"]["entity_type"] == "github_core__github_workflow")
@@ -1485,7 +1492,7 @@ class TestPerRepoWalk:
         # Exactly one edge, to the organisation secret — never to the unresolved name, which has
         # no node and must not acquire one on the evidence that somebody typed it.
         targets = [
-            str(e["edge"]["to_entity_id"]) for e in edges if e["edge"]["edge_type"] == "REFERENCES_SECRET__github_core"
+            str(edge_to(e)) for e in edges if e["edge"]["edge_type"] == "REFERENCES_SECRET__github_core"
         ]
         assert targets == [str(org_secret)]
 

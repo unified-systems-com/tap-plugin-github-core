@@ -26,6 +26,9 @@ class PullRequest(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__pull_request"
+    # The BASE repository plus the PR number — GitHub's own identity within a repository.
+    # `github_id` is carried as a field for continuity across a transfer, not as the key.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "number")
     ENTITY_NAME: ClassVar[str] = "Pull Request"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A proposal to merge one ref into another: its state, author, head and base, review decision, "
@@ -34,7 +37,7 @@ class PullRequest(BaseModel):
     ENTITY_ICON: ClassVar[str] = "pull-request"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "execution",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "pulls",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

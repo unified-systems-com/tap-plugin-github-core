@@ -21,6 +21,8 @@ from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
 from tap_grid.services import create_edge, create_node
 
+from .envelopes import edge_from
+
 
 def _create(type_slug: str, payload: dict):
     result = create_node(type_slug, payload)
@@ -37,7 +39,7 @@ def _collector() -> GithubCollector:
     return c
 
 
-_DIMS = {"github.platform": "github.com", "github.owner": "acme", "github.surface": "rules"}
+_DIMS = {"git.host": "github.com", "github.owner": "acme", "github.surface": "rules"}
 
 
 def _rule(contexts: list[dict[str, Any]], *, strict: bool = False, on_create: bool = False) -> dict[str, Any]:
@@ -55,7 +57,7 @@ def _job(c: GithubCollector, repo: str, wf_id: int, key: str, name: str | None =
     wf = workflow_id(repo, wf_id)
     c._walk_state()["job_names"].append(
         {"owner": repo.partition("/")[0], "repo": repo, "wf_uuid": wf, "job_key": key, "job_name": name or key,
-         "dims": {"github.platform": "github.com", "github.owner": repo.partition("/")[0],
+         "dims": {"git.host": "github.com", "github.owner": repo.partition("/")[0],
                   "github.repo": repo.partition("/")[2], "github.surface": "actions"}}
     )
     return wf
@@ -93,7 +95,7 @@ class TestRequirements:
         assert nodes[0]["node"] == {"owner_login": "acme", "context": "gate", "name": "gate", "configuration": {}, "tags": {}}
         assert "github.repo" not in nodes[0]["entity"]["dimensions"]
         req = [e for e in edges if e["edge"]["edge_type"] == "REQUIRES_CHECK__github_core"]
-        assert len(req) == 1 and req[0]["edge"]["from_entity_id"] == str(rs)
+        assert len(req) == 1 and edge_from(req[0]) == str(rs)
         assert req[0]["edge"]["properties"] == {"integration_id": 15368, "strict": True, "do_not_enforce_on_create": False}
 
     def test_two_rulesets_requiring_one_context_fan_in(self) -> None:
@@ -132,9 +134,9 @@ class TestProducers:
         _job(c, "other/c", 3, "gate")  # another owner: not this requirement's scope
         _, edges = _emit(c)
         produces = [e for e in edges if e["edge"]["edge_type"] == "PRODUCES_CHECK__github_core"]
-        assert {e["edge"]["from_entity_id"] for e in produces} == {str(wf_a), str(wf_b)}
+        assert {edge_from(e) for e in produces} == {str(wf_a), str(wf_b)}
         assert all(e["edge"]["properties"]["confidence"] == "exact" for e in produces)
-        assert next(e for e in produces if e["edge"]["from_entity_id"] == str(wf_a))["edge"]["properties"]["job_key"] == "tap"
+        assert next(e for e in produces if edge_from(e) == str(wf_a))["edge"]["properties"]["job_key"] == "tap"
         assert produces[0]["entity"]["dimensions"]["github.repo"] in {"a", "b"}
 
     def test_a_matrix_template_is_reported_as_inference(self) -> None:
@@ -168,7 +170,7 @@ class TestProducers:
         nodes, edges = _emit(c)
         assert len(nodes) == 1
         assert sum(1 for e in edges if e["edge"]["edge_type"] == "PRODUCES_CHECK__github_core") == 1
-        by_ruleset = {e["edge"]["from_entity_id"]: e["edge"]["properties"]["integration_id"]
+        by_ruleset = {edge_from(e): e["edge"]["properties"]["integration_id"]
                       for e in edges if e["edge"]["edge_type"] == "REQUIRES_CHECK__github_core"}
         assert by_ruleset == {str(ruleset_id("acme", 1)): 12345, str(ruleset_id("acme", 2)): 15368}
 
@@ -183,7 +185,7 @@ class TestProducers:
         assert len(nodes) == 1
         dims = nodes[0]["entity"]["dimensions"]
         assert "github.repo" not in dims
-        assert dims == {"github.observation": "declaration", "github.platform": "github.com",
+        assert dims == {"github.observation": "declaration", "git.host": "github.com",
                         "github.surface": "rules", "github.owner": "acme"}
         assert sum(1 for e in edges if e["edge"]["edge_type"] == "REQUIRES_CHECK__github_core") == 2
 

@@ -40,6 +40,8 @@ from tap_plugin.github_core.collectors.github_collector.identity import (
 
 from tap_grid.registry import get_model_class
 
+from .envelopes import edge_from, edge_to, envelope_key
+
 _FIXTURES = Path(__file__).parent / "fixtures"
 _ALERTS = json.loads((_FIXTURES / "code_scanning_alerts.json").read_text())
 _ANALYSES = json.loads((_FIXTURES / "code_scanning_analyses.json").read_text())
@@ -49,7 +51,7 @@ _LEDGER = json.loads((_COLLECTOR / "github_app_permissions.json").read_text())
 
 _REPO = "unified-systems-com/tap"
 _DIMS = {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.owner": "unified-systems-com",
     "github.repo": "tap",
     "github.surface": "security",
@@ -164,7 +166,7 @@ class TestAlertShape:
         _, nodes, _, _, _ = _collect(_FakeClient())
         alerts = _by_number(nodes, _ALERT_TYPE)
         assert set(alerts) == {a["number"] for a in _ALL_ALERTS}
-        assert alerts[164]["entity"]["entity_id"] == str(code_scanning_alert_id(_REPO, 164))
+        assert envelope_key(alerts[164]) == str(code_scanning_alert_id(_REPO, 164))
         assert alerts[164]["entity"]["dimensions"] == _DIMS
 
     @pytest.mark.spec("req-github-core-code-scanning-1")
@@ -217,8 +219,8 @@ class TestAlertShape:
     def test_ids_are_stable_across_two_emits(self) -> None:
         _, first, first_edges, _, _ = _collect(_FakeClient())
         _, second, second_edges, _, _ = _collect(_FakeClient())
-        assert [n["entity"]["entity_id"] for n in first] == [n["entity"]["entity_id"] for n in second]
-        assert [e["entity"]["entity_id"] for e in first_edges] == [e["entity"]["entity_id"] for e in second_edges]
+        assert [envelope_key(n) for n in first] == [envelope_key(n) for n in second]
+        assert [envelope_key(e) for e in first_edges] == [envelope_key(e) for e in second_edges]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -234,7 +236,7 @@ class TestAnalysisShape:
         assert set(analyses) == {a["id"] for a in _ANALYSES["analyses"]}
         captured = _ANALYSES["analyses"][1]  # CodeQL, /language:python
         node = analyses[captured["id"]]
-        assert node["entity"]["entity_id"] == str(code_scanning_analysis_id(_REPO, captured["id"]))
+        assert envelope_key(node) == str(code_scanning_analysis_id(_REPO, captured["id"]))
         assert node["node"]["tool_name"] == "CodeQL"
         assert node["node"]["tool_version"] == captured["tool"]["version"]
         assert node["node"]["category"] == "/language:python"
@@ -359,7 +361,7 @@ class TestFindingPerAlert:
         _, nodes, _, _, _ = _collect(_FakeClient())
         findings = _of_type(nodes, _FINDING_TYPE)
         assert len(findings) == len(_ALL_ALERTS)
-        ids = {f["entity"]["entity_id"] for f in findings}
+        ids = {envelope_key(f) for f in findings}
         assert ids == {str(code_scanning_finding_id(_REPO, a["number"])) for a in _ALL_ALERTS}
         # The natural key is documented in the helper's docstring; hold it to the letter, so a
         # Dependabot finding (`#dependabot#`) can never collide with a code-scanning one.
@@ -371,7 +373,7 @@ class TestFindingPerAlert:
     def test_the_finding_carries_only_the_substrates_fields(self) -> None:
         _, nodes, _, _, _ = _collect(_FakeClient())
         finding = next(
-            f for f in _of_type(nodes, _FINDING_TYPE) if f["entity"]["entity_id"] == str(code_scanning_finding_id(_REPO, 164))
+            f for f in _of_type(nodes, _FINDING_TYPE) if envelope_key(f) == str(code_scanning_finding_id(_REPO, 164))
         )
         assert set(finding["node"]) == {"name", "summary", "description", "status"}
         assert finding["node"]["name"] == "SonarCloud pythonsecurity:S6549"
@@ -385,12 +387,12 @@ class TestFindingPerAlert:
     def test_dismissed_and_fixed_are_both_resolved_and_the_true_state_lives_on_the_detail(self) -> None:
         _, nodes, edges, _, _ = _collect(_FakeClient())
         detail_by_finding = {
-            e["edge"]["to_entity_id"]: e["edge"]["from_entity_id"] for e in _edges_of(edges, "DETAILS_FINDING__github_core")
+            edge_to(e): edge_from(e) for e in _edges_of(edges, "DETAILS_FINDING__github_core")
         }
-        alerts = {n["entity"]["entity_id"]: n["node"] for n in _of_type(nodes, _ALERT_TYPE)}
+        alerts = {envelope_key(n): n["node"] for n in _of_type(nodes, _ALERT_TYPE)}
         statuses: dict[str, set[str]] = {}
         for finding in _of_type(nodes, _FINDING_TYPE):
-            detail = alerts[detail_by_finding[finding["entity"]["entity_id"]]]
+            detail = alerts[detail_by_finding[envelope_key(finding)]]
             statuses.setdefault(detail["state"], set()).add(finding["node"]["status"])
         assert statuses == {"open": {"open"}, "dismissed": {"resolved"}, "fixed": {"resolved"}}
 
@@ -417,9 +419,9 @@ class TestHasComplianceFinding:
     @pytest.mark.spec("req-github-core-code-scanning-5")
     def test_the_repository_has_every_finding(self) -> None:
         _, nodes, edges, _, _ = _collect(_FakeClient())
-        from_repo = [e for e in _edges_of(edges, _HAS_FINDING) if e["edge"]["from_entity_id"] == str(repository_id(_REPO))]
-        assert {e["edge"]["to_entity_id"] for e in from_repo} == {
-            f["entity"]["entity_id"] for f in _of_type(nodes, _FINDING_TYPE)
+        from_repo = [e for e in _edges_of(edges, _HAS_FINDING) if edge_from(e) == str(repository_id(_REPO))]
+        assert {edge_to(e) for e in from_repo} == {
+            envelope_key(f) for f in _of_type(nodes, _FINDING_TYPE)
         }
         assert from_repo[0]["entity"]["dimensions"] == _DIMS
 
@@ -436,9 +438,9 @@ class TestHasComplianceFinding:
             },
         )
         from_workflows = {
-            e["edge"]["from_entity_id"]: e["edge"]["to_entity_id"]
+            edge_from(e): edge_to(e)
             for e in _edges_of(edges, _HAS_FINDING)
-            if e["edge"]["from_entity_id"] != str(repository_id(_REPO))
+            if edge_from(e) != str(repository_id(_REPO))
         }
         assert from_workflows == {
             str(wf_product_lines): str(code_scanning_finding_id(_REPO, 101)),
@@ -464,9 +466,9 @@ class TestDetailsFinding:
         assert len(details) == len(_of_type(nodes, _FINDING_TYPE))
         for alert in _ALL_ALERTS:
             number = alert["number"]
-            matching = [e for e in details if e["edge"]["from_entity_id"] == str(code_scanning_alert_id(_REPO, number))]
+            matching = [e for e in details if edge_from(e) == str(code_scanning_alert_id(_REPO, number))]
             assert len(matching) == 1, f"alert #{number} details {len(matching)} findings"
-            assert matching[0]["edge"]["to_entity_id"] == str(code_scanning_finding_id(_REPO, number))
+            assert edge_to(matching[0]) == str(code_scanning_finding_id(_REPO, number))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -479,10 +481,10 @@ class TestAnalysisEdges:
     def test_every_analysis_analyzes_the_repository(self) -> None:
         _, nodes, edges, _, _ = _collect(_FakeClient())
         analyzes = _edges_of(edges, "ANALYZES_REPOSITORY__github_core")
-        assert {e["edge"]["from_entity_id"] for e in analyzes} == {
-            n["entity"]["entity_id"] for n in _of_type(nodes, _ANALYSIS_TYPE)
+        assert {edge_from(e) for e in analyzes} == {
+            envelope_key(n) for n in _of_type(nodes, _ANALYSIS_TYPE)
         }
-        assert {e["edge"]["to_entity_id"] for e in analyzes} == {str(repository_id(_REPO))}
+        assert {edge_to(e) for e in analyzes} == {str(repository_id(_REPO))}
 
     @pytest.mark.spec("req-github-core-code-scanning-7")
     def test_the_commit_edge_exists_only_for_a_commit_collected_this_run(self) -> None:
@@ -497,8 +499,8 @@ class TestAnalysisEdges:
         on_commit = _edges_of(edges, "ANALYZES_COMMIT__github_core")
         expected = {str(code_scanning_analysis_id(_REPO, a["id"])) for a in _ANALYSES["analyses"] if a["commit_sha"] == sha}
         assert len(expected) == 4
-        assert {e["edge"]["from_entity_id"] for e in on_commit} == expected
-        assert {e["edge"]["to_entity_id"] for e in on_commit} == {str(commit_uuid)}
+        assert {edge_from(e) for e in on_commit} == expected
+        assert {edge_to(e) for e in on_commit} == {str(commit_uuid)}
         assert not warns
 
     @pytest.mark.spec("req-github-core-code-scanning-7")

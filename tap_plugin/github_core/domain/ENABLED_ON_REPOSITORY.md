@@ -57,4 +57,4 @@ The OIDC issuer edge is emitted structurally during enrichment rather than fetch
 
 - **Sources:** `github_core__github_app`, `identity_core__oidc_issuer` — a union, because both reach a repository through the same "enabled here" relationship and splitting them would split one question.
 - **Target:** `github_core__github_repository`.
-- **Dimensions:** `github.platform`, `github.surface: apps`, `github.observation: declaration`. An App being enabled is a standing configuration, not a record of the App doing anything — what it does with that access is unmodelled (see Boundaries).
+- **Dimensions:** `git.host`, `github.surface: apps`, `github.observation: declaration`. An App being enabled is a standing configuration, not a record of the App doing anything — what it does with that access is unmodelled (see Boundaries).

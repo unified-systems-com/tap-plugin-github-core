@@ -72,4 +72,4 @@ Observed on the unified-systems-com grid on 2026-09-02, from the pre-edge `actio
 
 - **Source:** `github_core__workflow_job` — the declared job whose step calls the action. The declaration, not the execution: the edge says what the file *hands over*, not what any run did.
 - **Target:** `github_core__github_action` — the shared, platform-global action node.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration`. The collector additionally stamps the *calling* repository's `github.owner` / `github.repo` on the edge — the usage is that repository's fact, even though the target node carries neither, because the target belongs to no one repository in scope.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: declaration`. The collector additionally stamps the *calling* repository's `github.owner` / `github.repo` on the edge — the usage is that repository's fact, even though the target node carries neither, because the target belongs to no one repository in scope.

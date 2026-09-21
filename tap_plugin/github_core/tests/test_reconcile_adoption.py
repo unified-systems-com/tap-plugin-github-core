@@ -23,85 +23,34 @@ import pytest
 from tap_plugin.github_core.collectors.github_collector import collector as collector_module
 from tap_plugin.github_core.collectors.github_collector.collector import GithubCollector
 from tap_plugin.github_core.collectors.github_collector.graphql_client import GithubGraphQLClient
-from tap_plugin.github_core.collectors.github_collector.identity import (
-    account_id,
-    repository_id,
-    workflow_id,
-)
-from tap_plugin.github_core.tests.fake_github import FakeGithub
+from tap_plugin.github_core.collectors.github_collector.identity import workflow_id
+from tap_plugin.github_core.models.github_account import GithubAccount
+from tap_plugin.github_core.models.github_repository import GithubRepository
+from tap_plugin.github_core.models.github_workflow import GithubWorkflow
 
 from tap.pytest_harness import isolated_registry
-from tap_cares.models import CollectionJobStatus, Collector
-from tap_cares.registry import collector_registry, reconcile_collector_nodes, register_collector
+from tap_cares.models import CollectionJobStatus
+from tap_cares.registry import collector_registry
 from tap_cares.services import LIFECYCLE_BATCH_SOURCE, run_collection
 from tap_grid.candidates import candidates_of
 from tap_grid.completeness import completeness_of
 from tap_grid.falsifiers import verdicts_of
 from tap_grid.models import Batch, Edge
 
-OWNER = "acme"
-REPO = "acme/app"
-WORKFLOW_YAML = "name: ci\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps: []\n"
+from .fake_estate import OWNER, REPO, Secret, config_repo, fake_rest, register
 
 
-class _Secret:
-    kind = "github_pat"
-    # Not token-shaped on purpose: a `ghp_` prefix plus 36 characters is what every secret scanner
-    # keys on, and the collector only reads the prefix to name the kind.
-    data: dict[str, Any] = {"token": "fixture-not-a-credential", "owner": OWNER}
+def _assigned(model: Any, **natural_key: Any) -> str:
+    """The id core ASSIGNED the row this natural key names, as the surface's subject cites it.
 
-
-def _config_repo() -> dict[str, Any]:
-    """One repository as the GraphQL config layer shapes it: a workflow file, an environment."""
-    return {
-        "nameWithOwner": REPO,
-        "name": "app",
-        "databaseId": 10,
-        "isArchived": False,
-        "isFork": False,
-        "visibility": "PUBLIC",
-        "url": f"https://github.com/{REPO}",
-        "defaultBranchRef": {"name": "main", "target": {"oid": "a" * 40}},
-        "rulesets": {"nodes": []},
-        "environments": {"nodes": [{"databaseId": 1, "name": "production", "protectionRules": {"nodes": []}}]},
-        "branchRefs": {"totalCount": 0, "nodes": []},
-        "tagRefs": {"totalCount": 0, "nodes": []},
-        "releases": {"totalCount": 0, "nodes": []},
-        "object": {
-            "entries": [
-                {
-                    "name": "ci.yml",
-                    "path": ".github/workflows/ci.yml",
-                    "object": {"byteSize": len(WORKFLOW_YAML), "isTruncated": False, "text": WORKFLOW_YAML},
-                }
-            ]
-        },
-    }
-
-
-def _fake_rest() -> FakeGithub:
-    fake = FakeGithub()
-    fake.answer(
-        f"/users/{OWNER}", {"login": OWNER, "id": 1, "type": "Organization", "html_url": f"https://github.com/{OWNER}"}
-    )
-    fake.answer(
-        f"/repos/{REPO}/actions/workflows",
-        {"workflows": [{"id": 100, "path": ".github/workflows/ci.yml", "name": "ci", "state": "active"}]},
-    )
-    fake.answer(f"/repos/{REPO}/actions/runs", {"workflow_runs": []})
-    fake.answer(f"/repos/{REPO}/actions/runners", {"runners": []})
-    fake.answer(f"/repos/{REPO}/environments/production", {"id": 1, "name": "production"})
-    return fake
-
-
-def _register() -> Collector:
-    register_collector(
-        key="github_core", scope="github_core", cls=GithubCollector, name="GitHub Core Collector", description="fixture"
-    )
-    reconcile_collector_nodes()
-    collector = Collector.objects.get(collector_registry="github_core:github_core")
-    assert isinstance(collector, Collector)
-    return collector
+    Since github_core adopted assigned identity (Issue# 162) a surface's subject is no longer a
+    value a test can derive: the collector sends a batch-local ref, core resolves it through the
+    model's ``NATURAL_KEY``, and the id it hands back is what the completeness statement carries.
+    Looking it up through the declared key is the honest read — and it is a second assertion for
+    free, because a lookup on the declared key finding exactly one row is the same search the
+    importer ran.
+    """
+    return str(model.objects.get(**natural_key).entity_id)
 
 
 def _lifecycle_batch(job: Any) -> Batch:
@@ -124,13 +73,13 @@ class TestOneRunAgainstTheFakeGithub:
 
     @staticmethod
     def _run_and_assert(monkeypatch: pytest.MonkeyPatch) -> None:
-        fake = _fake_rest()
-        monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: _Secret())
+        fake = fake_rest()
+        monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: Secret())
         monkeypatch.setattr(collector_module, "GithubClient", lambda **kw: fake)
-        monkeypatch.setattr(GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([_config_repo()], []))
+        monkeypatch.setattr(GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([config_repo()], []))
         monkeypatch.setattr(GithubGraphQLClient, "fetch_pull_request_layer", lambda self, login: ({}, []))
 
-        job = run_collection(_register())
+        job = run_collection(register(GithubCollector))
         job.refresh_from_db()
         assert job.status == CollectionJobStatus.SUCCESSFUL.value, job.summary
 
@@ -144,10 +93,14 @@ class TestOneRunAgainstTheFakeGithub:
             "repository.environments",
             "workflow.jobs",
         }
-        repos = by_relation[("account.repositories", str(account_id(OWNER)))]
-        workflows = by_relation[("repository.workflows", str(repository_id(REPO)))]
-        environments = by_relation[("repository.environments", str(repository_id(REPO)))]
-        jobs = by_relation[("workflow.jobs", str(workflow_id(REPO, 100)))]
+        repos = by_relation[("account.repositories", _assigned(GithubAccount, login=OWNER))]
+        workflows = by_relation[("repository.workflows", _assigned(GithubRepository, full_name=REPO))]
+        environments = by_relation[
+            ("repository.environments", _assigned(GithubRepository, full_name=REPO))
+        ]
+        jobs = by_relation[
+            ("workflow.jobs", _assigned(GithubWorkflow, full_name=REPO, workflow_id=100))
+        ]
         assert repos["edge_type"] == "OWNS_REPO__github_core" and repos["count_observed"] == 1
         assert workflows["edge_type"] == "DEFINES_WORKFLOW__github_core" and workflows["count_observed"] == 1
         assert environments["edge_type"] == "DECLARES_ENVIRONMENT__github_core" and environments["count_observed"] == 1
@@ -194,29 +147,29 @@ class TestAFailedRepositoryDoesNotLeaveAnAdmittedSurface:
 
     @staticmethod
     def _run_and_assert(monkeypatch: pytest.MonkeyPatch) -> None:
-        fake = _fake_rest()
+        fake = fake_rest()
         broken = "acme/broken"
         fake.answer(
             f"/repos/{broken}/actions/workflows",
             {"workflows": [{"id": 200, "path": ".github/workflows/ci.yml", "name": "ci", "state": "active"}]},
         )
         fake.refuse(f"/repos/{broken}/actions/runs", 502)  # after the workflows listing, before the runs
-        second = {**_config_repo(), "nameWithOwner": broken, "name": "broken", "databaseId": 11}
-        monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: _Secret())
+        second = {**config_repo(), "nameWithOwner": broken, "name": "broken", "databaseId": 11}
+        monkeypatch.setattr(collector_module, "resolve_github_secret", lambda *a, **k: Secret())
         monkeypatch.setattr(collector_module, "GithubClient", lambda **kw: fake)
         monkeypatch.setattr(
-            GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([_config_repo(), second], [])
+            GithubGraphQLClient, "fetch_config_layer", lambda self, login: ([config_repo(), second], [])
         )
         monkeypatch.setattr(GithubGraphQLClient, "fetch_pull_request_layer", lambda self, login: ({}, []))
 
-        job = run_collection(_register())
+        job = run_collection(register(GithubCollector))
         job.refresh_from_db()
         assert job.status == CollectionJobStatus.SUCCESSFUL.value, job.summary
         statement = completeness_of(_lifecycle_batch(job))
         assert statement is not None
         by_key = {(s["relation"], s["subject"]): s for s in statement["surfaces"]}
-        healthy = by_key[("repository.workflows", str(repository_id(REPO)))]
-        failed = by_key[("repository.workflows", str(repository_id(broken)))]
+        healthy = by_key[("repository.workflows", _assigned(GithubRepository, full_name=REPO))]
+        failed = by_key[("repository.workflows", _assigned(GithubRepository, full_name=broken))]
         assert healthy["admitted"] is True and healthy["reconcilable"] is True
         assert failed["enumeration_complete"] is True, "the listing itself was read to the end"
         assert failed["admitted"] is False and failed["reconcilable"] is False
@@ -224,14 +177,13 @@ class TestAFailedRepositoryDoesNotLeaveAnAdmittedSurface:
         for relation in ("repository.environments", "workflow.jobs"):
             broken_surfaces = [s for k, s in by_key.items() if k[0] == relation and s["admitted"] is False]
             assert broken_surfaces, f"{relation}: the failed repository's surface is withdrawn too"
-        account = by_key[("account.repositories", str(account_id(OWNER)))]
+        account = by_key[("account.repositories", _assigned(GithubAccount, login=OWNER))]
         assert account["admitted"] is False and account["reasons"]["admitted"].startswith("collection_partial")
         record = candidates_of(_lifecycle_batch(job))
         assert record is not None
         skipped = {e["subject"]: e["reason"] for e in record["surfaces"] if e["outcome"] == "skipped"}
-        assert (
-            str(repository_id(broken)) in skipped and "surface_not_reconcilable" in skipped[str(repository_id(broken))]
-        )
+        broken_id = _assigned(GithubRepository, full_name=broken)
+        assert broken_id in skipped and "surface_not_reconcilable" in skipped[broken_id]
 
 
 class TestListingContract:

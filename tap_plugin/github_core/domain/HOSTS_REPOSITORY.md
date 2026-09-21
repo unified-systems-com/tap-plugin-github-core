@@ -43,5 +43,5 @@ Emitted by the collector from the same config-layer read that produced its endpo
 
 - **Source:** `github_core__github_repository`
 - **Target:** `git_core__git_repository`
-- **Dimensions:** `github.platform`, `github.surface: git`, `github.observation: declaration`.
+- **Dimensions:** `git.host`, `github.observation: declaration`.
 - **Properties:** none.

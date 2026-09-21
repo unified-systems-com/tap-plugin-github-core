@@ -27,13 +27,15 @@ class GithubApp(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_app"
+    # The app slug. One app node is shared across every repo that enables it.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("slug",)
     ENTITY_NAME: ClassVar[str] = "GitHub App"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A GitHub App or first-party platform app (e.g. Dependabot) enabled on a repository."
     )
     ENTITY_ICON: ClassVar[str] = "github-app"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "apps",
         "github.observation": "declaration",
     }

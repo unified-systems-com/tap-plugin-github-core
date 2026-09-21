@@ -50,6 +50,7 @@ Every field is what the CommitSlice fragment on the config-layer refs query retu
 
 ## Fields
 
+- `host` — the forge this observation was read from (`github.com`, or a GHES tenant's host). A constituting property: GitHub's repository ids are unique per HOST, not across hosts, so two tenants sharing one grid could collide on repository id alone. Every row carries `github.com` today; the field earns its keep the day a second host does not (Issue# 164).
 - `full_name` — `owner/repo` of the repository the observation was made in, for the reader; the key uses the stable id.
 - `repository_github_id` — GitHub's numeric repository id, the identity half that survives a rename. Nullable only because the grid's create contract wants every field declared.
 - `hash_algorithm` — `sha1` today; the algorithm half of the commit identity this observation is about.

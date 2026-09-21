@@ -44,5 +44,5 @@ Emitted by the collector from the config-layer read that produced the pull reque
 
 - **Source:** `github_core__github_account` or `github_core__github_app`
 - **Target:** `github_core__pull_request`
-- **Dimensions:** `github.platform`, `github.surface: pulls`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: pulls`, `github.observation: execution`.
 - **Properties:** `author_association` — GitHub's association of the author with the base repository when the pull request was read; settles inside-versus-outside the trust boundary.

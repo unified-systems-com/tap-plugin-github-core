@@ -46,5 +46,5 @@ Populated from the GraphQL config layer's `rulesets` connection at `repository:a
 
 - **Source:** `github_core__github_ruleset` — the ruleset.
 - **Target:** ``github_core__github_repository` — the repository in the ruleset's scope.`
-- **Dimensions:** `github.platform`, `github.surface: rules`, `github.observation: declaration`.
+- **Dimensions:** `git.host`, `github.surface: rules`, `github.observation: declaration`.
 - **Properties:** none — the patterns live verbatim on the ruleset node (`conditions`).

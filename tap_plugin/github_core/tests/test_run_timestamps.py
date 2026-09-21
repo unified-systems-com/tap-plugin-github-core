@@ -26,7 +26,7 @@ from tap_plugin.github_core.collectors.github_collector.collector import (
 )
 
 _REPO = "unified-systems-com/tap"
-_DIMS = {"github.platform": "github.com", "github.surface": "actions", "github.observation": "execution"}
+_DIMS = {"git.host": "github.com", "github.surface": "actions", "github.observation": "execution"}
 
 
 def _run(**overrides: Any) -> dict[str, Any]:

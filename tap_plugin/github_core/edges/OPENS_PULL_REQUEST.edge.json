@@ -10,7 +10,7 @@
     "github_core__pull_request"
   ],
   "default_dimensions": {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.surface": "pulls",
     "github.observation": "execution"
   },

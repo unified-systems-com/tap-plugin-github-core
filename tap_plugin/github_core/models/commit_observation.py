@@ -24,6 +24,16 @@ class CommitObservation(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__commit_observation"
+    # The repository's STABLE numeric id (never `owner/repo`, which renames) plus the commit
+    # identity. The platform HOST is part of the key and is a field on this model: GitHub's
+    # repository ids are unique per HOST, not globally, so a GHES tenant sharing this grid could
+    # collide with github.com on repository id alone. Ruled by George 2026-09-20 (Issue# 164):
+    # the host joins the key as a field rather than being read off the node's dimensions,
+    # because the generated search deliberately ignores dimensions — dimension values vary by
+    # collection path, so a dimension filter would fail to find a row's own previous write
+    # (req-grid-entity-natural-key-10). Today every row carries `github.com`; the field earns
+    # its keep the day a second host does not.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("host", "repository_github_id", "hash_algorithm", "sha")
     ENTITY_NAME: ClassVar[str] = "Commit Observation"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "GitHub's view of a commit in one repository — the accounts it resolved the author and committer "
@@ -32,8 +42,7 @@ class CommitObservation(BaseModel):
     ENTITY_ICON: ClassVar[str] = "git-commit"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
-        "github.surface": "git",
+        "git.host": "github.com",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {
         "tap_viz": {
@@ -48,6 +57,7 @@ class CommitObservation(BaseModel):
     SIGNATURE_UNSIGNED = "unsigned"
 
     FIELD_CRUD_SCHEMA: ClassVar[dict[str, Any]] = {
+        "host": {"type": "string", "minLength": 1},
         "full_name": {"type": "string", "minLength": 1},
         "repository_github_id": {"type": ["integer", "null"]},
         "hash_algorithm": {"type": "string", "enum": ["sha1", "sha256"]},
@@ -63,6 +73,10 @@ class CommitObservation(BaseModel):
         "tags": {"type": "object"},
     }
     FIELD_VALIDATION_SCHEMA: ClassVar[dict[str, Any]] = {
+        "host": {
+            "validation": "jsonschema",
+            "schema": {"type": "string", "minLength": 1},
+        },
         "full_name": {
             "validation": "jsonschema",
             "schema": {"type": "string", "minLength": 1},
@@ -96,6 +110,9 @@ class CommitObservation(BaseModel):
 
     # The repository this observation was made in — the network the verdict is persisted for —
     # by name for the reader and by GitHub's stable id for the identity.
+    #: The forge host this observation was read from ("github.com", or a GHES tenant's host).
+    #: A constituting property: repository ids are unique per host, never across hosts.
+    host = models.CharField(max_length=255, blank=True, default="", db_index=True)
     full_name = models.CharField(max_length=255, blank=True, default="", db_index=True)
     repository_github_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     hash_algorithm = models.CharField(max_length=16, blank=True, default="sha1")

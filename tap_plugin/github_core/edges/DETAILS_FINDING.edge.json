@@ -9,7 +9,7 @@
     "compliance_core__compliance_finding"
   ],
   "default_dimensions": {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.surface": "security",
     "github.observation": "execution"
   }

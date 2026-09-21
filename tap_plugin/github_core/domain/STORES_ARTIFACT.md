@@ -46,4 +46,4 @@ Emitted for every artifact the listing returned (`repository:actions:read`). On 
 
 - **Source:** `github_core__github_repository` — the repository holding the artifact.
 - **Target:** `github_core__actions_artifact` — the artifact.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration` — containment sourced on a declared object, following `STORES_CACHE`.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: declaration` — containment sourced on a declared object, following `STORES_CACHE`.

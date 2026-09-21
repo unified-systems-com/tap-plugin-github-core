@@ -50,4 +50,4 @@ The important observability caveat belongs to the target, not the edge: `actions
 
 - **Source:** `github_core__github_repository`.
 - **Target:** `github_core__github_workflow`.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration`. The observation value marks both ends of this edge as the declared side of CI — see [`github.observation`](dimensions/github.observation.md) for why that distinction is load-bearing.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: declaration`. The observation value marks both ends of this edge as the declared side of CI — see [`github.observation`](dimensions/github.observation.md) for why that distinction is load-bearing.

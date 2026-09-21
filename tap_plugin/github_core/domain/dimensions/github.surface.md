@@ -24,7 +24,7 @@ The key is `github.surface`, in the `github.` namespace this plugin owns; effect
 
 ## Boundaries
 
-- **Not the tenant.** Which GitHub instance is [`github.platform`](github.platform.md).
+- **Not the tenant.** Which GitHub instance is [`git.host`](git.host.md).
 - **Not declared-versus-executed.** That is [`github.observation`](github.observation.md), and the two are orthogonal: `actions` covers both a workflow definition and a run.
 - **Not carried by everything.** The containment spine deliberately omits it. A platform, an account, a repository and the `HOSTS_ACCOUNT` / `OWNS_REPO` edges are not facts about any one surface, so stamping them would assert a scope they do not have.
 - **Not a permission record.** The surface *implies* the permission that reads it, and this article names those implications, but the dimension does not encode a credential, a grant, or whether the read succeeded.

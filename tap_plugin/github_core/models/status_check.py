@@ -30,6 +30,8 @@ class StatusCheck(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__status_check"
+    # Owner + the context string, kept exactly as written — check names are case-sensitive.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("owner_login", "context")
     ENTITY_NAME: ClassVar[str] = "Status Check"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A check context a ruleset requires — the name a gate waits for, and the name a workflow "
@@ -39,7 +41,7 @@ class StatusCheck(BaseModel):
     # Owner-scoped, no repo: an organization requirement spans repositories.
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "rules",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

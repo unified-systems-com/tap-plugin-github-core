@@ -26,6 +26,8 @@ class GithubEnvironment(BaseModel):
     """
 
     ENTITY_TYPE: ClassVar[str] = "github_core__github_environment"
+    # Repository + environment name.
+    NATURAL_KEY: ClassVar[tuple[str, ...]] = ("full_name", "name")
     ENTITY_NAME: ClassVar[str] = "GitHub Environment"
     ENTITY_DESCRIPTION: ClassVar[str] = (
         "A named deployment environment and the protection rules standing in front of it."
@@ -33,7 +35,7 @@ class GithubEnvironment(BaseModel):
     ENTITY_ICON: ClassVar[str] = "github-environment"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "deployments",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

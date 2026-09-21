@@ -44,4 +44,4 @@ From the versions listing (`organization:packages:read`), reached only through a
 
 - **Source:** `github_core__github_package` — the package.
 - **Target:** `github_core__github_package_version` — one of its versions.
-- **Dimensions:** `github.platform`, `github.surface: packages`, `github.observation: execution` — the layer follows the source, which is an execution.
+- **Dimensions:** `git.host`, `github.surface: packages`, `github.observation: execution` — the layer follows the source, which is an execution.
