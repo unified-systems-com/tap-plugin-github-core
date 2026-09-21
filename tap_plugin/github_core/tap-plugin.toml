@@ -1,5 +1,5 @@
 manifest_version = "0"
-plugin_version = "0.11.0"
+plugin_version = "0.12.0"
 # 0.2.0: the first core release carrying the reconciliation primitives this plugin adopts
 # (tap#574 completeness, tap#596 candidates, tap#644 falsifiers + the manifest [falsifiers] table,
 # tap#652 the reconcile verb; github-core#151). 0.1.6, the release before it, refuses the
