@@ -29,9 +29,9 @@
         "source": {
           "type": "git",
           "url": "https://github.com/unified-systems-com/tap-plugin-compliance-core",
-          "rev": "v0.3.0"
+          "rev": "v0.4.0"
         },
-        "note": "Declared in depends_on. Pinned at v0.2.2, the release current on 2026-09-09. Public repo, no credential (req-tap-plugin-arch-source-secret-5)."
+        "note": "Declared in depends_on. Pinned at v0.4.0, the first release carrying compliance_core's NATURAL_KEY declarations \u2014 the finding ref resolves against them, so an earlier rev boots to identity_undeclared. Public repo, no credential (req-tap-plugin-arch-source-secret-5)."
       },
       {
         "slug": "github_core",
