@@ -9,8 +9,7 @@
     "github_core__github_repository"
   ],
   "default_dimensions": {
-    "github.platform": "github.com",
-    "github.surface": "git",
+    "git.host": "github.com",
     "github.observation": "declaration"
   }
 }

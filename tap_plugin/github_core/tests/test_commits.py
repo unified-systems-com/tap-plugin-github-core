@@ -23,7 +23,8 @@ from tap_plugin.github_core.collectors.github_collector.identity import (
 
 from tap_grid.models import Entity
 from tap_grid.registry import get_model_class
-from tap_grid.services import create_edge, create_node
+from tap_grid.service_types import WriteOperation
+from tap_grid.services import create_edge, create_node, write_batch
 
 from .envelopes import edge_from, edge_to, envelope_key
 
@@ -274,7 +275,7 @@ class TestEmission:
         nodes: list[dict] = []
         edges: list[dict] = []
         dims = {
-            "github.platform": "github.com",
+            "git.host": "github.com",
             "github.owner": "acme",
             "github.repo": "widget",
         }
@@ -320,13 +321,13 @@ class TestEmission:
             n for n in nodes if n["entity"]["entity_type"] == "git_core__git_ref"
         )
         assert (
-            ref["entity"]["dimensions"] == {"git.object": "ref"}
+            ref["entity"]["dimensions"] == {"git.host": "github.com"}
             and "full_name" not in ref["node"]
         )
         commit = next(
             n for n in nodes if n["entity"]["entity_type"] == "git_core__git_commit"
         )
-        assert commit["entity"]["dimensions"] == {"git.object": "commit"}
+        assert commit["entity"]["dimensions"] == {"git.host": "github.com"}
         assert set(commit["node"]) == {
             "hash_algorithm",
             "oid",
@@ -373,10 +374,10 @@ class TestEmission:
             signed["node"]["author_login"] == "notgeorge"
             and signed["node"]["signature_state"] == "valid"
         )
-        assert (
-            signed["entity"]["dimensions"]["github.repo"] == "widget"
-            and signed["entity"]["dimensions"]["github.surface"] == "git"
-        )
+        assert signed["entity"]["dimensions"]["github.repo"] == "widget"
+        # `github.surface: git` is retired (github-core#168): it marked github's write to
+        # the neutral layer, and the neutral layer no longer carries github's vocabulary.
+        assert "github.surface" not in signed["entity"]["dimensions"]
         observes = next(
             e
             for e in edges
@@ -423,7 +424,7 @@ class TestEmission:
             repository_id("acme/widget"),
             None,
             None,
-            {"github.platform": "github.com"},
+            {"git.host": "github.com"},
             nodes,
             edges,
         )
@@ -471,3 +472,90 @@ class TestModelAndEdge:
             edge.from_entity_id == obs.entity_id
             and edge.to_entity_id == commit.entity_id
         )
+
+
+@pytest.mark.django_db
+@pytest.mark.spec("req-github-core-dimensions-1")
+class TestOneHostIsOneFilter:
+    """One key, one meaning, both layers (github-core#168, git-core-tap#11).
+
+    github_core mints two kinds of row: its own forge records and the neutral `git_core`
+    substrate. Before this ruling those carried different tenancy spellings — `github.platform`
+    on one side, nothing but `git.object` on the other — so "every node on this instance" was a
+    union of two filters, and the neutral half could not answer it at all.
+
+    The property under test is the one that ruling bought: ONE dimension filter, `git.host`,
+    returns both layers. It is asserted on the dimensions the COLLECTOR actually stamps rather
+    than on hand-written ones, so a collector that stopped stamping would fail here.
+    """
+
+    @staticmethod
+    def _emitted() -> tuple[list[dict], list[dict]]:
+        return TestEmission._emit(TestEmission._collector())
+
+    def test_every_envelope_the_collector_mints_carries_the_host(self) -> None:
+        """Both layers, every node and every edge, one key — and none of the retired ones."""
+        nodes, edges = self._emitted()
+        assert nodes and edges
+        assert {n["entity"]["entity_type"].split("__")[0] for n in nodes} == {
+            "git_core",
+            "github_core",
+        }, "this fixture must mint BOTH layers or it proves nothing about either"
+        for envelope in [*nodes, *edges]:
+            what = envelope["entity"]["entity_type"], envelope["entity"].get("name")
+            dimensions = envelope["entity"]["dimensions"]
+            assert dimensions.get("git.host") == "github.com", what
+            assert "github.platform" not in dimensions, what
+            assert "git.object" not in dimensions, what
+            assert dimensions.get("github.surface") != "git", what
+
+    def test_the_neutral_rows_carry_the_host_and_none_of_githubs_vocabulary(self) -> None:
+        """The host travels to the substrate; owner, repo and surface deliberately do not."""
+        nodes, _edges = self._emitted()
+        neutral = [
+            n for n in nodes if n["entity"]["entity_type"].startswith("git_core__")
+        ]
+        assert neutral
+        for envelope in neutral:
+            assert envelope["entity"]["dimensions"] == {"git.host": "github.com"}
+
+    def test_one_dimension_filter_returns_both_layers(self) -> None:
+        """The done-test: a search for every node on one instance, in a single filter.
+
+        Both rows are landed carrying exactly what the collector stamps on them — the forge
+        record from its model default, the neutral commit from the envelope the collector built.
+        """
+        nodes, _edges = self._emitted()
+        neutral_dimensions = next(
+            n["entity"]["dimensions"]
+            for n in nodes
+            if n["entity"]["entity_type"] == "git_core__git_commit"
+        )
+        observation = _create(
+            "github_core__commit_observation",
+            {"host": "github.com", "full_name": "acme/widget", "sha": "e" * 40},
+        )
+        landed = write_batch(
+            [
+                WriteOperation(
+                    verb="create_node",
+                    type_slug="git_core__git_commit",
+                    payload={"hash_algorithm": "sha1", "oid": "e" * 40},
+                    dimensions=dict(neutral_dimensions),
+                )
+            ]
+        )
+        assert landed.success, landed.errors
+
+        on_this_host = Entity.objects.filter(
+            dimensions__contains={"git.host": "github.com"}
+        )
+        types = set(on_this_host.values_list("entity_type", flat=True))
+        assert {"github_core__commit_observation", "git_core__git_commit"} <= types, (
+            "one filter must return both layers; got " + repr(sorted(types))
+        )
+        assert observation.entity_id in set(on_this_host.values_list("id", flat=True))
+        # And the retired spelling answers nothing — the union that made this two filters is gone.
+        assert not Entity.objects.filter(
+            dimensions__has_key="github.platform"
+        ).exists()

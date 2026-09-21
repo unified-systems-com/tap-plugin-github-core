@@ -39,7 +39,7 @@ from .envelopes import edge_from, edge_to, envelope_key
 _FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "outputs.json").read_text())
 _REPO = "unified-systems-com/tap"
 _OWNER = "unified-systems-com"
-_DIMS = {"github.platform": "github.com", "github.owner": _OWNER, "github.repo": "tap"}
+_DIMS = {"git.host": "github.com", "github.owner": _OWNER, "github.repo": "tap"}
 
 
 class _FakeClient:

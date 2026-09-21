@@ -42,8 +42,7 @@ class CommitObservation(BaseModel):
     ENTITY_ICON: ClassVar[str] = "git-commit"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
-        "github.surface": "git",
+        "git.host": "github.com",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {
         "tap_viz": {

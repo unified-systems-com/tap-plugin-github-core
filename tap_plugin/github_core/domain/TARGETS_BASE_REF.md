@@ -44,5 +44,5 @@ Emitted from the config-layer read; present when the base ref landed in the same
 
 - **Source:** `github_core__pull_request`
 - **Target:** `git_core__git_ref`
-- **Dimensions:** `github.platform`, `github.surface: pulls`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: pulls`, `github.observation: execution`.
 - **Properties:** `ref_name` — the base branch name as the pull request names it, without the `refs/heads/` prefix.

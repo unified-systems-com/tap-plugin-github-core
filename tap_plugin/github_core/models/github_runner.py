@@ -27,7 +27,7 @@ class GithubRunner(BaseModel):
     )
     ENTITY_ICON: ClassVar[str] = "github-runner"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "actions",
         "github.observation": "declaration",
     }

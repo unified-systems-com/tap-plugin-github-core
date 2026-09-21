@@ -14,7 +14,7 @@ It is deliberately the thinnest node in the plugin. It exists to be pointed at.
 
 - Give the inventory a single root, so "which GitHub is this?" is a graph question rather than a convention.
 - Separate two tenants that share an account name.
-- Carry the `github.platform` dimension value that every node and edge in this plugin stamps.
+- Carry the `git.host` dimension value that every node and edge in this plugin stamps.
 
 ## Identity
 

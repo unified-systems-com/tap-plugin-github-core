@@ -31,7 +31,7 @@ from .envelopes import edge_from, edge_to
 _OWNER = "acme"
 _REPO = "acme/widget"
 _DIMS = {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.owner": _OWNER,
     "github.repo": "widget",
 }

@@ -128,7 +128,7 @@ def assemble_batch(
             "entity_id": str(uuid7()),
             "entity_type": "batch",
             "name": batch_name,
-            "dimensions": batch_dimensions or {"github.platform": "github.com"},
+            "dimensions": batch_dimensions or {"git.host": "github.com"},
         },
         "batch_node": {
             "source": "github_core",

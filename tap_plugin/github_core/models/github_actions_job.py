@@ -28,7 +28,7 @@ class GithubActionsJob(BaseModel):
     ENTITY_DESCRIPTION: ClassVar[str] = "One job within a GitHub Actions workflow run."
     ENTITY_ICON: ClassVar[str] = "github-actions-job"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "actions",
         "github.observation": "execution",
     }

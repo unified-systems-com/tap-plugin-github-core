@@ -35,7 +35,7 @@ class GithubEnvironment(BaseModel):
     ENTITY_ICON: ClassVar[str] = "github-environment"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "deployments",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

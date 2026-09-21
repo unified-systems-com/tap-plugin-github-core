@@ -44,7 +44,7 @@ class ActionsArtifact(BaseModel):
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         # Something that HAPPENED: an execution-side object, like the run that produced it.
         "github.observation": "execution",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "actions",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

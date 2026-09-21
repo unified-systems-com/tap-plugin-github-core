@@ -31,7 +31,7 @@ class GithubPackage(BaseModel):
     )
     ENTITY_ICON: ClassVar[str] = "github-package"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "packages",
         # A package exists because something was PUBLISHED to it; nobody declares one.
         "github.observation": "execution",

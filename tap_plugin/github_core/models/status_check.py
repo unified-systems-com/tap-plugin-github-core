@@ -41,7 +41,7 @@ class StatusCheck(BaseModel):
     # Owner-scoped, no repo: an organization requirement spans repositories.
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "rules",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

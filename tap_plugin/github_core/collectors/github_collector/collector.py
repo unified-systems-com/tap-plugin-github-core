@@ -517,14 +517,16 @@ _REF_TYPE_BY_RULESET_TARGET = {"branch": "branch", "tag": "tag"}
 # The platform instance every collected account/repo/workflow hangs under.
 # v0 is github.com only; a GHES host would key on its own hostname.
 _PLATFORM_HOST = "github.com"
-_PLATFORM_DIMENSIONS = {"github.platform": "github.com"}
+_PLATFORM_DIMENSIONS = {"git.host": _PLATFORM_HOST}
 
 # The neutral git_core rows carry only git_core's own partition key (spec-git_core-v0.md
-# req-git-core-dimensions): the forge is a fact about the OBSERVER and lives on the hosting
-# record and the commit observation, never on the substrate.
-_GIT_REF_DIMENSIONS = {"git.object": "ref"}
-_GIT_COMMIT_DIMENSIONS = {"git.object": "commit"}
-_GIT_RELATION_DIMENSIONS = {"git.object": "relation"}
+# req-git-core-dimensions): `git.host`, the forge instance identity already rests on. The
+# forge's own VOCABULARY — owner, repo, surface — is a fact about the OBSERVER and lives on
+# the hosting record and the commit observation, never on the substrate. github_core writes
+# `git.host` because it depends on git_core and so legitimately writes git_core's vocabulary;
+# the same key, the same meaning, on both layers, so "every node on this host" is one filter
+# rather than a union of two spellings (github-core#168, git-core-tap#11). The value is
+# DERIVED from the host the record hangs off, never authored a second time.
 
 # GitHub Actions' OIDC issuer URL — the identity convergence node github enables
 # on every repo. The node itself (id, canonical host, provider, display name) is
@@ -1296,7 +1298,7 @@ class GithubCollector(CollectorBase):
             )
 
         scope_label = owner if owner is not None else ", ".join(repos)
-        batch_dims = {"github.platform": "github.com"}
+        batch_dims = {"git.host": _PLATFORM_HOST}
         if owner is not None:
             batch_dims["github.owner"] = owner
         # The scope's join onto the installation it was derived from lands here, beside the
@@ -1379,7 +1381,7 @@ class GithubCollector(CollectorBase):
             )
 
         # --- enrichment phase (link resolution against landed nodes) ---
-        enrichment_dims = {"github.platform": "github.com"}
+        enrichment_dims = {"git.host": _PLATFORM_HOST}
         enrichment = resolve_links(
             link_manifest=link_manifest,
             repos=repos,
@@ -1777,7 +1779,7 @@ class GithubCollector(CollectorBase):
     ) -> None:
         owner, _, repo = full_name.partition("/")
         repo_dims = {
-            "github.platform": "github.com",
+            "git.host": _PLATFORM_HOST,
             "github.owner": owner,
             "github.repo": repo,
         }
@@ -1878,7 +1880,7 @@ class GithubCollector(CollectorBase):
         git_repo_uuid = None
         if repository_github_id is not None:
             git_repo_uuid = git_repository_id(
-                repo_dims["github.platform"], str(repository_github_id)
+                repo_dims["git.host"], str(repository_github_id)
             )
             default_branch = repo_payload.get("default_branch", "") or ""
             nodes.append(
@@ -1886,9 +1888,9 @@ class GithubCollector(CollectorBase):
                     entity_id=git_repo_uuid,
                     entity_type="git_core__git_repository",
                     name=full_name,
-                    dimensions={"git.object": "repository"},
+                    dimensions={"git.host": repo_dims["git.host"]},
                     fields={
-                        "forge": repo_dims["github.platform"],
+                        "forge": repo_dims["git.host"],
                         "stable_id": str(repository_github_id),
                         "name": full_name,
                         "default_ref": (
@@ -2496,7 +2498,12 @@ class GithubCollector(CollectorBase):
             # has no neutral repository to hang refs off. Refs are config-layer data and are
             # simply not collected in that form — stated rather than silently empty.
             return {}
-        git_dims = {**repo_dims, "github.surface": "git"}
+        # `github.surface: git` is retired (github-core#168): it existed only to mark
+        # github's write to the neutral layer, and the neutral layer no longer carries
+        # github's vocabulary at all. What github OBSERVED about a commit is scoped like
+        # any other github record; what it MINTED on the neutral layer carries `git.host`.
+        git_dims = dict(repo_dims)
+        neutral_dims = {"git.host": repo_dims["git.host"]}
         refs, truncated = GithubGraphQLClient.refs(gql)
         uuid_by_ref: dict[str, Any] = {}
         for ref in refs:
@@ -2517,7 +2524,7 @@ class GithubCollector(CollectorBase):
                     entity_id=ref_uuid,
                     entity_type="git_core__git_ref",
                     name=ref["name"],
-                    dimensions=_GIT_REF_DIMENSIONS,
+                    dimensions=neutral_dims,
                     fields={
                         "ref": ref["ref"],
                         "ref_type": ref["ref_type"],
@@ -2536,7 +2543,7 @@ class GithubCollector(CollectorBase):
                     "DECLARES_REF__git_core",
                     git_repo_uuid,
                     ref_uuid,
-                    _GIT_RELATION_DIMENSIONS,
+                    neutral_dims,
                 )
             )
             self._emit_commit(
@@ -2547,6 +2554,7 @@ class GithubCollector(CollectorBase):
                 repo_uuid,
                 repository_github_id,
                 git_dims,
+                neutral_dims,
                 nodes,
                 edges,
             )
@@ -2573,6 +2581,7 @@ class GithubCollector(CollectorBase):
         repo_uuid: Any,
         repository_github_id: int | str,
         git_dims: dict[str, str],
+        neutral_dims: dict[str, str],
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> None:
@@ -2607,7 +2616,7 @@ class GithubCollector(CollectorBase):
                 entity_id=commit_uuid,
                 entity_type="git_core__git_commit",
                 name=oid[:12],
-                dimensions=_GIT_COMMIT_DIMENSIONS,
+                dimensions=neutral_dims,
                 fields={
                     "hash_algorithm": hash_algorithm,
                     "oid": oid,
@@ -2625,7 +2634,7 @@ class GithubCollector(CollectorBase):
                 "STORES_COMMIT__git_core",
                 git_repo_uuid,
                 commit_uuid,
-                _GIT_RELATION_DIMENSIONS,
+                neutral_dims,
             )
         )
         edges.append(
@@ -2633,12 +2642,12 @@ class GithubCollector(CollectorBase):
                 "RESOLVES_COMMIT__git_core",
                 ref_uuid,
                 commit_uuid,
-                _GIT_RELATION_DIMENSIONS,
+                neutral_dims,
             )
         )
 
         observation_uuid = commit_observation_id(
-            git_dims["github.platform"], repository_github_id, hash_algorithm, oid
+            git_dims["git.host"], repository_github_id, hash_algorithm, oid
         )
         nodes.append(
             node_envelope(
@@ -2647,7 +2656,7 @@ class GithubCollector(CollectorBase):
                 name=f"{full_name}@{oid[:12]}",
                 dimensions=git_dims,
                 fields={
-                    "host": git_dims["github.platform"],
+                    "host": git_dims["git.host"],
                     "full_name": full_name,
                     "repository_github_id": (
                         int(repository_github_id)
@@ -2941,7 +2950,7 @@ class GithubCollector(CollectorBase):
         # emit it last — an assertion the node has no business making. The repository association
         # is the PROTECTS edge, which IS repo-scoped.
         ruleset_dims = {
-            "github.platform": repo_dims["github.platform"],
+            "git.host": repo_dims["git.host"],
             "github.owner": owner,
             "github.surface": "rules",
         }
@@ -3437,7 +3446,7 @@ class GithubCollector(CollectorBase):
         (`github_actions_job`) keeps its own nodes; the two are deliberately not merged.
         """
         declared_dims = {
-            "github.platform": "github.com",
+            "git.host": _PLATFORM_HOST,
             "github.owner": full_name.partition("/")[0],
             "github.repo": full_name.partition("/")[2],
             "github.surface": "actions",
@@ -5076,7 +5085,7 @@ class GithubCollector(CollectorBase):
         )
         account_uuid = account_id(owner)
         dims = {
-            "github.platform": "github.com",
+            "git.host": _PLATFORM_HOST,
             "github.owner": owner,
             "github.surface": "secrets",
             "github.observation": "declaration",
@@ -5625,7 +5634,7 @@ class GithubCollector(CollectorBase):
         listing_client = pat_client or client
         account_uuid = account_id(owner)
         dims = {
-            "github.platform": "github.com",
+            "git.host": _PLATFORM_HOST,
             "github.owner": owner,
             "github.surface": "packages",
             "github.observation": "execution",
@@ -6173,7 +6182,7 @@ class GithubCollector(CollectorBase):
             target_id=job_uuid,
             dimensions={**_PLATFORM_DIMENSIONS, "github.observation": "execution"},
         )
-        batch_dims = {"github.platform": "github.com"}
+        batch_dims = {"git.host": _PLATFORM_HOST}
         if owner is not None:
             batch_dims["github.owner"] = owner
         result = self.submit_grift(

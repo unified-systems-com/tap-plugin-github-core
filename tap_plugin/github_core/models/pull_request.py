@@ -37,7 +37,7 @@ class PullRequest(BaseModel):
     ENTITY_ICON: ClassVar[str] = "pull-request"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "execution",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "pulls",
     }
     DEFAULT_DISPLAY: ClassVar[dict[str, Any]] = {

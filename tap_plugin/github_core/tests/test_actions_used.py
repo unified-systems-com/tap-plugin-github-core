@@ -179,7 +179,7 @@ def _emit(c: GithubCollector, refs: list[dict]) -> tuple[list[dict], list[dict]]
     nodes: list[dict] = []
     edges: list[dict] = []
     dims = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.owner": "acme",
         "github.repo": "app",
         "github.surface": "actions",

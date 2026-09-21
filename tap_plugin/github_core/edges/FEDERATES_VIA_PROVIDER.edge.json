@@ -9,7 +9,7 @@
     "aws_core__aws_iam_oidc_provider"
   ],
   "default_dimensions": {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.observation": "declaration"
   },
   "property_schema": {

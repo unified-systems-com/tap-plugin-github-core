@@ -47,5 +47,5 @@ Resolved by the collector from the ruleset's include/exclude conditions against 
 
 - **Source:** `github_core__github_ruleset` — the ruleset.
 - **Target:** ``git_core__git_ref` — the observed ref a pattern selected.`
-- **Dimensions:** `github.platform`, `github.surface: rules`, `github.observation: declaration`.
+- **Dimensions:** `git.host`, `github.surface: rules`, `github.observation: declaration`.
 - **Properties:** `ref_pattern` — the condition token or fnmatch pattern that selected the target (`~DEFAULT_BRANCH`, `refs/heads/release/*`), preserved as written.

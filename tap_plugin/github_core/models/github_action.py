@@ -46,7 +46,7 @@ class GithubAction(BaseModel):
     # action ran, which the workflow file cannot say.
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
         "github.observation": "declaration",
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "actions",
     }
     # Third-party code, drawn apart from the repository's own declaration cards: a hexagon in

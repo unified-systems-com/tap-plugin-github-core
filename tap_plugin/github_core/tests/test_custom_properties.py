@@ -72,7 +72,7 @@ def _repo_envelope(full_name: str) -> dict[str, Any]:
         entity_id=repository_id(full_name),
         entity_type="github_core__github_repository",
         name=full_name,
-        dimensions={"github.platform": "github.com"},
+        dimensions={"git.host": "github.com"},
         fields={"full_name": full_name, "custom_properties": {}, "custom_properties_observability": ""},
     )
 

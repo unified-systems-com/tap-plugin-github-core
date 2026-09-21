@@ -40,7 +40,7 @@ class GithubRepository(BaseModel):
     ENTITY_DESCRIPTION: ClassVar[str] = "A repository hosted on GitHub."
     ENTITY_ICON: ClassVar[str] = "github-repository"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.observation": "declaration",
     }
     # Inner level of the GitHub nesting palette — deeper accent blue; the white

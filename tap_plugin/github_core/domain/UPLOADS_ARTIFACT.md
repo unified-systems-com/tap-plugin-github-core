@@ -54,4 +54,4 @@ Observed 2026-09-02 with a classic `repo`-scoped token; not yet observed with th
 
 - **Source:** `github_core__github_actions_run` — the run named by the artifact's `workflow_run.id`.
 - **Target:** `github_core__actions_artifact`.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: execution`, plus the repository's `github.owner` / `github.repo` — both ends belong to one repository.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: execution`, plus the repository's `github.owner` / `github.repo` — both ends belong to one repository.

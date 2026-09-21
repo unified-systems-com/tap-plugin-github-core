@@ -9,7 +9,7 @@
     "github_core__github_package_version"
   ],
   "default_dimensions": {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.surface": "packages",
     "github.observation": "execution"
   },

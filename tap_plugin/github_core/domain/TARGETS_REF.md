@@ -45,5 +45,5 @@ Resolved against the refs emitted from the same config-layer response (`refs/tag
 
 - **Source:** `github_core__github_release` — the release.
 - **Target:** `github_core__git_ref` — the tag ref it was cut on.
-- **Dimensions:** `github.platform`, `github.surface: releases`, `github.observation: execution` — the layer follows the source, which is an execution.
+- **Dimensions:** `git.host`, `github.surface: releases`, `github.observation: execution` — the layer follows the source, which is an execution.
 - **Properties:** `tag_name` (the tag as the release names it, without `refs/tags/`).

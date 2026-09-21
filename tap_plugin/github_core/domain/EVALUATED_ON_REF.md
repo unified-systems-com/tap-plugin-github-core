@@ -51,5 +51,5 @@ Populated from the rule-suite listing's `ref` at **`repository:administration:re
 
 - **Source:** `github_core__rule_suite` — the evaluated push.
 - **Target:** `github_core__git_ref` — the ref it targeted.
-- **Dimensions:** `github.platform`, `github.surface: rules`, `github.observation: execution`.
+- **Dimensions:** `git.host`, `github.surface: rules`, `github.observation: execution`.
 - **Properties:** `before_sha` (ref tip before the push; all zeroes for a creation), `after_sha` (tip after).

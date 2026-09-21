@@ -120,7 +120,7 @@ def _workflow(c: GithubCollector, repo: str, wf_id: int, path: str, name: str, p
     env = node_envelope(entity_id=uuid, entity_type="github_core__github_workflow", name=name, dimensions={},
                         fields={"configuration": parsed})
     c._walk_state()["collected_repos"].add(repo)
-    c._register_workflow(repo, path, name, uuid, env, parsed, {"github.platform": "github.com"})
+    c._register_workflow(repo, path, name, uuid, env, parsed, {"git.host": "github.com"})
     return uuid, env
 
 
@@ -130,7 +130,7 @@ def _job_call(c: GithubCollector, repo: str, wf_id: int, key: str, uses: str, *,
                         fields={"configuration": {}})
     c._walk_state()["pending_calls"].append(
         {"envelope": env, "job_uuid": uuid, "caller": repo, "call": split_workflow_call(uses),
-         "secrets_inherit": inherit, "dims": {"github.platform": "github.com"}}
+         "secrets_inherit": inherit, "dims": {"git.host": "github.com"}}
     )
     return uuid, env
 

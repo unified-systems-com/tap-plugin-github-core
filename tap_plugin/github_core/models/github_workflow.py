@@ -33,7 +33,7 @@ class GithubWorkflow(BaseModel):
     ENTITY_DESCRIPTION: ClassVar[str] = "A GitHub Actions workflow definition."
     ENTITY_ICON: ClassVar[str] = "github-workflow"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "actions",
         "github.observation": "declaration",
     }

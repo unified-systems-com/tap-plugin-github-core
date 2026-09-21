@@ -9,7 +9,7 @@
 - **v0 target:** `notgeorge/samsite` (configured via the secret's `repos` array).
 - **Repo shape:** In-tree under `plugins/github_core/` for v0. No standalone git repo or submodule; may be split later if external consumers appear.
 - **Default dimensions** (see `req-github-core-dimensions`):
-  - `github.platform = "github.com"` on all plugin-owned nodes and edges
+  - `git.host = "github.com"` on all plugin-owned nodes and edges, and on every neutral `git_core` node this plugin mints
   - `github.owner` + `github.repo` on repo-scoped objects (set by the collector per envelope)
   - `github.surface = "actions"` on Actions-related objects
   - `github.observation` on every plugin-owned node and edge: `"execution"` on runs and
@@ -725,7 +725,7 @@ absent key lands as `unobservable`, and a body whose `committedDate` was pruned 
 | req-github-core-commits-2 | Signature In Three States | Implemented | The observation stores GitHub's `state`, kind, validity and signer; `signature: null` stores `unsigned` with `signature_valid: null`; a `signature` key pruned for a field error stores `unobservable`; a ref whose commit slice is absent emits no commit, no observation and no edge. | Never false for unsigned or unobservable. |
 | req-github-core-commits-3 | Identity As Observed | Implemented | `author_login` / `committer_login` on the observation are set only when GitHub resolved the email to an account; the raw name and email live on the neutral commit. | |
 | req-github-core-commits-4 | No Extra Request Or Permission | Implemented | Both sources ride the config-layer refs query; the manifest declares `repository:contents:read`, already in the union, and the conformance extract carries the traversed `Commit`, `GitActor` and `GitSignature` fields. | |
-| req-github-core-commits-5 | Nothing Observed On The Neutral Commit | Implemented | The neutral commit envelope carries only intrinsic fields and `{"git.object": "commit"}`; no login, verdict or `github.*` dimension. | `tests/test_commits.py`. |
+| req-github-core-commits-5 | Nothing Observed On The Neutral Commit | Implemented | The neutral commit envelope carries only intrinsic fields and `{"git.host": <host>}` — git_core's own key, the same one this plugin's records carry; no login, verdict or `github.*` dimension. | `tests/test_commits.py`. |
 
 ### Status Checks
 ----
@@ -1022,7 +1022,7 @@ and "Tags".
 
 Identity is the NEUTRAL repository's id plus the full ref path, minted by git_core (github-core#76/#78): the
 ref is `git_core__git_ref`, declared by the neutral `git_core__git_repository` this record `HOSTS_REPOSITORY`
-(`DECLARES_REF__git_core`), and it carries only `{"git.object": "ref"}` — no `owner/repo`, no `github.*`. A branch
+(`DECLARES_REF__git_core`), and it carries only `{"git.host": <host>}` — no `owner/repo`, no `github.*`. A branch
 and a tag may share a short name, so the path is the key.
 
 **Tag-movement detection is not implemented and does not need to be.** `head_sha` is a field on a
@@ -1588,11 +1588,10 @@ GitHub-specific dimensions:
 
 | Key | Example | Applies To |
 | --- | --- | --- |
-| `github.platform` | `github.com` | All GitHub nodes and edges |
+| `git.host` | `github.com` | All GitHub nodes and edges, **and** every neutral `git_core` node and edge this plugin mints |
 | `github.owner` | `notgeorge` | Repo-scoped nodes and edges |
 | `github.repo` | `samsite` | Repo-scoped nodes and edges |
 | `github.surface` | `actions` | Actions workflows, runs, jobs, runners, caches |
-| `github.surface` | `git` | Refs |
 | `github.surface` | `rules` | Rulesets and the edges that apply them |
 | `github.surface` | `deployments` | Environments |
 | `github.surface` | `apps` | Apps and app installations |
@@ -1601,8 +1600,29 @@ GitHub-specific dimensions:
 | `github.ref_type` | `branch` \| `tag` | Refs. One type carries both, so the partition that matters is a dimension rather than a type boundary. |
 
 Static model defaults should include only dimensions that are true for all
-instances, such as `github.platform = "github.com"`. The collector supplies
+instances, such as `git.host = "github.com"`. The collector supplies
 repo-specific dimensions in GRIFT envelopes.
+
+**`github.owner` and `github.repo` are deliberately NOT model defaults, on any type.**
+`DEFAULT_DIMENSIONS` is a class-level constant applied verbatim at creation, so a
+locator there could only name ONE owner and ONE repository for every node of that type.
+That declaration would be present on every node and true of almost none — the exact
+shape of a presence check passing over a false fact, and worse than the absent stamp it
+replaces, because nobody re-checks a value that is written down. The locator is per-node
+data and is stamped by whatever mints the node; the collector does so in
+`_collect_repo` (`req-github-core-dimensions-2`). A second mint path owes the same
+stamp, and the remedy if one ever forgets is to derive the locator from the node's own
+containment rather than to hardcode a default that cannot be right.
+
+**`git.host` is git_core's key, written here on purpose.** github_core depends on
+git_core and therefore legitimately writes git_core's vocabulary, so this plugin's own
+27 types carry `git.host` exactly as the neutral nodes do — one key, one meaning, both
+layers, so "every node on `ghe.acme.com`" is a single filter rather than a union of two
+spellings. It replaced `github.platform`, which held a HOST under a key named for the
+vendor and could never have been the neutral layer's spelling (github-core#168,
+git-core-tap#11). The neutral rows carry `git.host` and nothing else: `git.object` is
+gone (it duplicated the entity type) and so is `github.surface: git`, whose only purpose
+was marking github's write to a layer that no longer carries github's vocabulary.
 
 **`github.observation` is the DCOM layer axis, and both of its values are stated
 positively.** An observation is either a record of what the pipeline *is configured
@@ -1624,7 +1644,7 @@ than an invisible member of the config layer.
 
 | ACID | Title | Status | Description | Notes |
 | --- | --- | :---: | --- | --- |
-| req-github-core-dimensions-1 | GitHub Platform Dimension | Implemented | All plugin-owned nodes and edges carry `github.platform = "github.com"`. | Set in `DEFAULT_DIMENSIONS` on every model and `default_dimensions` on every edge. |
+| req-github-core-dimensions-1 | Forge Host Dimension | Implemented | All plugin-owned nodes and edges carry `git.host = "github.com"`, and so does every neutral `git_core` node and edge this plugin mints; no node or edge carries `git.object`, and no node carries `github.surface: git`. | Set in `DEFAULT_DIMENSIONS` on every model and `default_dimensions` on every edge; passed on the neutral envelopes by the collector, derived from `_PLATFORM_HOST`. A search on one host returns both layers in one filter — `tests/test_commits.py::TestOneHostIsOneFilter`. |
 | req-github-core-dimensions-2 | Repo Scope Dimensions | Implemented | Collector-created repo-scoped objects carry `github.owner` and `github.repo`. | Set on every node/edge envelope in `GithubCollector._collect_repo`. |
 | req-github-core-dimensions-3 | Actions Surface Dimension | Implemented | Actions-related objects carry `github.surface = "actions"`. | Set on workflow/run/job/runner model defaults and Actions edge defaults. |
 | req-github-core-dimensions-4 | Execution Observation Dimension | Implemented | Run and job observations carry `github.observation = "execution"`. | Set on run/job model defaults. |

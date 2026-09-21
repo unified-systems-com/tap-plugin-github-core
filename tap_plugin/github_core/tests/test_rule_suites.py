@@ -69,7 +69,7 @@ def _collect(client: _FakeClient, ref_uuids: dict[str, Any] | None = None):
     collector.record_warn = lambda *a, **k: warns.append((a, k))  # type: ignore[method-assign]
     collector.record_info = lambda *a, **k: infos.append((a, k))  # type: ignore[method-assign]
     collector._collect_rule_suites(
-        client, "unified-systems-com/tap", {"github.platform": "github.com"},
+        client, "unified-systems-com/tap", {"git.host": "github.com"},
         ref_uuids or {}, nodes, edges,
     )
     return nodes, edges, warns, infos

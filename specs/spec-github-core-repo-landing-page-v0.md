@@ -37,7 +37,7 @@ that do not advance the plot do not appear on the v0 page — see
 - **Page variable:** `repository_entity_id` (URL-backed; the resolved
   `github_repository` node's `entity_id` UUID)
 - **Canonical deep link:** `/github_core/repo?repository_entity_id=<entity_id>`
-- **Page dimensions:** `github.platform = "github.com"` always; per-repo
+- **Page dimensions:** `git.host = "github.com"` always; per-repo
   scoping comes from the resolved repository node's `github.owner` and
   `github.repo` dimensions, not page-level
 

@@ -5,7 +5,7 @@
   "sources": ["github_core__github_actions_run"],
   "targets": ["github_core__github_workflow"],
   "default_dimensions": {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.surface": "actions",
     "github.observation": "execution"
   }

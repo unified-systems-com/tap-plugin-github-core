@@ -33,7 +33,7 @@ class GithubRelease(BaseModel):
     )
     ENTITY_ICON: ClassVar[str] = "github-release"
     DEFAULT_DIMENSIONS: ClassVar[dict[str, str]] = {
-        "github.platform": "github.com",
+        "git.host": "github.com",
         "github.surface": "releases",
         "github.observation": "execution",
     }

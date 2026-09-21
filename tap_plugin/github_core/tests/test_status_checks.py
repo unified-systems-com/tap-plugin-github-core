@@ -39,7 +39,7 @@ def _collector() -> GithubCollector:
     return c
 
 
-_DIMS = {"github.platform": "github.com", "github.owner": "acme", "github.surface": "rules"}
+_DIMS = {"git.host": "github.com", "github.owner": "acme", "github.surface": "rules"}
 
 
 def _rule(contexts: list[dict[str, Any]], *, strict: bool = False, on_create: bool = False) -> dict[str, Any]:
@@ -57,7 +57,7 @@ def _job(c: GithubCollector, repo: str, wf_id: int, key: str, name: str | None =
     wf = workflow_id(repo, wf_id)
     c._walk_state()["job_names"].append(
         {"owner": repo.partition("/")[0], "repo": repo, "wf_uuid": wf, "job_key": key, "job_name": name or key,
-         "dims": {"github.platform": "github.com", "github.owner": repo.partition("/")[0],
+         "dims": {"git.host": "github.com", "github.owner": repo.partition("/")[0],
                   "github.repo": repo.partition("/")[2], "github.surface": "actions"}}
     )
     return wf
@@ -185,7 +185,7 @@ class TestProducers:
         assert len(nodes) == 1
         dims = nodes[0]["entity"]["dimensions"]
         assert "github.repo" not in dims
-        assert dims == {"github.observation": "declaration", "github.platform": "github.com",
+        assert dims == {"github.observation": "declaration", "git.host": "github.com",
                         "github.surface": "rules", "github.owner": "acme"}
         assert sum(1 for e in edges if e["edge"]["edge_type"] == "REQUIRES_CHECK__github_core") == 2
 

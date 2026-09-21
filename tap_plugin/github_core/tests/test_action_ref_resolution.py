@@ -72,7 +72,7 @@ def _uses_edges(c: GithubCollector, client: Any, yaml_text: str) -> dict[str, di
             "o/r",
             workflow_job_id("o/r", 1, job["id"]),
             job.get("action_refs") or [],
-            {"github.platform": "github.com", "github.owner": "o", "github.repo": "r"},
+            {"git.host": "github.com", "github.owner": "o", "github.repo": "r"},
             nodes,
             edges,
             client=client,

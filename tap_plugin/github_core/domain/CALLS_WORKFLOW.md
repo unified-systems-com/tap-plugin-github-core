@@ -63,4 +63,4 @@ Observed on the unified-systems-com grid on 2026-09-02 (pre-edge, from `workflow
 
 - **Source:** `github_core__workflow_job` — the calling job, whose `uses` field holds the string and whose `configuration.call_resolution` holds the three-state verdict.
 - **Target:** `github_core__github_workflow` — the reusable workflow, on the grid, in the same or another repository in scope.
-- **Dimensions:** `github.platform`, `github.surface: actions`, `github.observation: declaration`, plus the *calling* repository's `github.owner` / `github.repo` from the job's own dimensions — the call is that repository's fact even when the callee belongs to another.
+- **Dimensions:** `git.host`, `github.surface: actions`, `github.observation: declaration`, plus the *calling* repository's `github.owner` / `github.repo` from the job's own dimensions — the call is that repository's fact even when the callee belongs to another.

@@ -9,7 +9,7 @@
     "github_core__github_release"
   ],
   "default_dimensions": {
-    "github.platform": "github.com",
+    "git.host": "github.com",
     "github.surface": "releases",
     "github.observation": "declaration"
   }
