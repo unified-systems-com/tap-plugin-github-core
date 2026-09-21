@@ -21,7 +21,7 @@ The ruling of 2026-09-09 (operator, session double-tap-git-serious; github-core#
 
 Natural key: **`<owner/repo>#<number>`** — the repository plus GitHub's alert number. Entity id is `uuid5(ns, "github_core__code_scanning_alert:<owner/repo>#<number>")` under `GITHUB_CORE_NAMESPACE` (`collectors/github_collector/identity.py`).
 
-The number is GitHub's own identity for an alert within a repository: it is in the URL, it is what a dismissal names, and it is stable across the alert's whole lifecycle (an alert that closes as `fixed` and reappears is a new number). It is NOT the rule: the same rule fires at many locations and each is its own alert. The paired `compliance_finding` is keyed **`<owner/repo>#code_scanning#<number>`** under the same namespace, so the generic node's identity carries the source segment and a Dependabot or secret-scanning finding on the same repository can never collide with it.
+The number is GitHub's own identity for an alert within a repository: it is in the URL, it is what a dismissal names, and it is stable across the alert's whole lifecycle (an alert that closes as `fixed` and reappears is a new number). It is NOT the rule: the same rule fires at many locations and each is its own alert. The paired `compliance_finding` is found again by the key **compliance_core** declares on its own model — `source` = `github_core`, `source_key` = **`<owner/repo>#code_scanning#<number>`** — which this collector writes and core assigns an id against (Issue# 8 - tap-plugin-compliance-core). The source segment is still what keeps a Dependabot or secret-scanning finding on the same repository from colliding with it.
 
 ## Boundaries
 

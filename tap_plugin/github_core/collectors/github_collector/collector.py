@@ -55,6 +55,7 @@ from .batch import (
 from .enrichment import resolve_links
 from .graphql_client import _ENVIRONMENT_PAGE_SIZE, GithubGraphQLClient, GithubGraphQLError
 from .identity import (
+    COMPLIANCE_FINDING_SOURCE,
     Ref,
     account_id,
     actions_artifact_id,
@@ -64,6 +65,7 @@ from .identity import (
     code_scanning_alert_id,
     code_scanning_analysis_id,
     code_scanning_finding_id,
+    code_scanning_finding_source_key,
     collection_scope_id,
     commit_observation_id,
     custom_property_id,
@@ -4900,6 +4902,15 @@ class GithubCollector(CollectorBase):
         `dismissed` and `fixed` are both `resolved` — the substrate does not distinguish "went
         away" from "was waved through", and the true state lives on the detail node one edge
         away. The model has no `configuration`/`tags`, so none are emitted.
+
+        `source` and `source_key` are the finding's IDENTITY, and they are the reason this
+        projection is not optional (Issue# 8 - tap-plugin-compliance-core). compliance_core
+        declares `NATURAL_KEY = ("source", "source_key")` on the model it owns, so those two
+        values are what the importer's generated search filters when it resolves this node's
+        ref. A projection that omitted them would not fail: the search would find a hole,
+        answer "not found", and core would assign a FRESH id — one duplicate finding per alert
+        per run, quietly. Both come from `identity.py`, which composes the key once so the
+        value written here and the value the ref carries cannot drift apart.
         """
         name = f"{detail['tool_name']} {detail['rule_id']}".strip() or f"code scanning alert #{detail['number']}"
         summary = detail["rule_description"] or detail["rule_name"]
@@ -4908,6 +4919,8 @@ class GithubCollector(CollectorBase):
         if location["path"]:
             parts.append(f"{location['path']}:{location['start_line']}")
         return {
+            "source": COMPLIANCE_FINDING_SOURCE,
+            "source_key": code_scanning_finding_source_key(detail["full_name"], detail["number"]),
             "name": name[:255],
             "summary": summary[:500],
             "description": "\n\n".join(parts).strip(),
