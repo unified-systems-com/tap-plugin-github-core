@@ -10,6 +10,13 @@ happened and decides.
 
 Design sources: GitHub's rate-limit and GraphQL guidance; Octokit's retry / throttling split; AWS
 SDK standard retry mode (full jitter, retry budget); one-layer retry (SRE practice).
+
+**The per-attempt wall-clock ceiling (`_under_ceiling`) is `tap_cares.collectors.run_with_ceiling`,
+not a local mechanism.** This module surveyed the daemon-thread-join pattern independently
+(2026-09-21), then a fleet-wide prior-art pass (Celery/Dramatiq/RQ/pebble/huey) confirmed it as the
+correct idiom for any thread-pool worker and lifted it to `tap_cares` so every collector gets it
+(`unified-systems-com/tap#750`). What stays here is GitHub-specific: the retry budget, backoff
+policy and failure taxonomy below — none of that generalizes the way the ceiling itself did.
 """
 
 from __future__ import annotations
@@ -20,7 +27,6 @@ import logging
 import random
 import re
 import socket
-import threading
 import time
 import urllib.error
 from collections.abc import Callable, Mapping
@@ -28,6 +34,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
+
+from tap_cares.collectors import CeilingExceeded as _CallCeilingExceeded
+from tap_cares.collectors import run_with_ceiling
 
 from .gather import FailureClass, Gather, RateLimitSnapshot
 
@@ -545,38 +554,22 @@ class MalformedBody(Exception):
         self.size = size
 
 
-class _CallCeilingExceeded(TimeoutError):
-    """The whole attempt — connect, request and read — outlived its ceiling."""
+# `_CallCeilingExceeded` is `tap_cares.collectors.CeilingExceeded` under this module's own name
+# (imported above) — every `isinstance(exc, _CallCeilingExceeded)` check below keeps working
+# unchanged; this is not a new type, just the name this module has always called it.
 
 
 def _under_ceiling(transport: Transport, params: dict[str, Any], ceiling: float) -> tuple[int, Mapping[str, str], bytes]:
     """Run one attempt with an aggregate deadline (req-github-core-reliability-budget).
 
-    Socket timeouts bound inactivity, not the whole request: a trickling body can outlive the
-    run. The attempt runs on a **daemon** thread and is abandoned when the ceiling passes. A
-    stuck attempt cannot be killed from outside (there is no cancelling a blocked socket read in
-    CPython), so the guarantees are exactly these: the CALLER regains control at the ceiling; the
-    abandoned attempt mutates nothing (the transport contract); and, being a daemon, it never
-    pins process exit. A ceiling of zero or less means the deadline has already passed.
+    Delegates to `tap_cares.collectors.run_with_ceiling` (req-tap-cares-collector-call-ceiling):
+    the attempt runs on a **daemon** thread named ``github-call`` and is abandoned, not killed, if
+    it outlives ``ceiling`` — the guarantees are exactly the caller regains control at the ceiling,
+    the abandoned attempt mutates nothing the caller still owns (the transport contract), and being
+    a daemon it never pins process exit. A ceiling of zero or less means the deadline has already
+    passed.
     """
-    if ceiling <= 0:
-        raise _CallCeilingExceeded("deadline passed before the attempt")
-    box: dict[str, Any] = {}
-
-    def _run() -> None:
-        try:
-            box["result"] = transport(params)
-        except BaseException as exc:  # noqa: BLE001 — re-raised on the caller's thread
-            box["error"] = exc
-
-    worker = threading.Thread(target=_run, name="github-call", daemon=True)
-    worker.start()
-    worker.join(timeout=ceiling)
-    if worker.is_alive():
-        raise _CallCeilingExceeded(f"call ceiling {ceiling:.0f}s exceeded")
-    if "error" in box:
-        raise box["error"]
-    return box["result"]
+    return run_with_ceiling(lambda: transport(params), ceiling, name="github-call")
 
 
 def _degrade(gather: Gather, recorder: Recorder, ctx: CallContext, reason: str) -> Gather:
