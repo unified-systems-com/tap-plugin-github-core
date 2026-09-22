@@ -1,11 +1,14 @@
 manifest_version = "0"
 plugin_version = "0.12.1"
+# 0.2.1 (2026-09-22): the first core release carrying tap_cares.collectors.run_with_ceiling
+# (unified-systems-com/tap#753, unified-systems-com/tap#750) — this PR's own _under_ceiling
+# de-duplicates onto it, so the floor names the release that actually has the symbol.
 # 0.2.0: the first core release carrying the reconciliation primitives this plugin adopts
 # (tap#574 completeness, tap#596 candidates, tap#644 falsifiers + the manifest [falsifiers] table,
 # tap#652 the reconcile verb; github-core#151). 0.1.6, the release before it, refuses the
 # [falsifiers] key at manifest parse; 0.1.7 was never cut — the natural-key change bumped the
 # minor, so the floor names the release that exists.
-requires_tap = ">=0.2.0"
+requires_tap = ">=0.2.1"
 slug = "github_core"
 name = "TAP GitHub Core"
 description = "GitHub Actions models — the pipeline as declared (workflows, jobs, rulesets, environments) and as run (runs, jobs, runners, caches) — and what it produces (releases, artifacts, packages)."
