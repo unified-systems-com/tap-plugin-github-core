@@ -61,7 +61,7 @@ def _lifecycle_batch(job: Any) -> Batch:
     return batch
 
 
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db(transaction=True, databases=["default", "search_readonly"])
 class TestOneRunAgainstTheFakeGithub:
     @pytest.mark.spec("req-grid-reconcile-evidence-1")
     @pytest.mark.spec("req-grid-reconcile-candidates-1")
@@ -134,7 +134,7 @@ class TestOneRunAgainstTheFakeGithub:
         assert verdicts["applied"]["authority"] == "off" and verdicts["applied"]["applied"] == 0
 
 
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db(transaction=True, databases=["default", "search_readonly"])
 class TestAFailedRepositoryDoesNotLeaveAnAdmittedSurface:
     """Codex on PR# 154: a repository that lists its workflows and then fails part-way must not
     leave a complete, admitted `repository.workflows` surface behind for candidates to be

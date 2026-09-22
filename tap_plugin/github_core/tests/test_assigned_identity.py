@@ -103,7 +103,7 @@ def _former_uuid5(entity_type: str, natural_key: str) -> UUID:
     return uuid5(GITHUB_CORE_NAMESPACE, f"{entity_type}:{natural_key}")
 
 
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db(transaction=True, databases=["default", "search_readonly"])
 @pytest.mark.spec("req-grid-entity-natural-key-9")
 class TestTwoRunsOverOneSource:
     def test_the_same_source_object_keeps_the_same_assigned_id_across_runs(
